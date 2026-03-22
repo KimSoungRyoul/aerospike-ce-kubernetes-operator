@@ -199,6 +199,29 @@ Operation이 `InProgress` 상태에서 멈출 경우, Operation Status 카드의
 
 Aerospike 연결이 끊어진 경우 Overview 및 Browser 페이지에서 스켈레톤 로딩 대신 연결 해제 상태 화면이 표시됩니다. `WifiOff` 아이콘과 함께 재연결을 안내하는 메시지가 나타납니다.
 
+### Split-Brain Detection
+
+Overview 페이지에서 클러스터의 split-brain 상태를 자동으로 감지합니다. `status.aerospikeClusterSize`와 `status.size`가 불일치하면 경고 배지와 함께 상세 정보를 표시합니다:
+
+- **Cluster Size Mismatch** — Aerospike가 보고하는 클러스터 크기와 Kubernetes Pod 수의 차이
+- **노드별 클러스터 정보** — 각 노드가 보고하는 `cluster_key`와 `cluster_size`를 비교하여 분리된 파티션을 식별
+- **자동 감지** — 페이지 로드 시 및 자동 새로고침 중에 지속적으로 모니터링
+
+### Pod Volume Status Indicators
+
+Pod 테이블에서 각 Pod의 볼륨 상태를 시각적으로 확인할 수 있습니다:
+
+- **Dirty Volumes** — `status.pods[].dirtyVolumes`에 값이 있으면 경고 아이콘과 함께 초기화가 필요한 볼륨 이름을 표시합니다.
+- **Initialized Volumes** — `status.pods[].initializedVolumes`에 기록된 초기화 완료 볼륨 목록을 표시합니다.
+
+### Clone Cluster
+
+클러스터 상세 페이지의 작업 메뉴에서 **Clone** 을 선택하여 기존 클러스터의 설정을 복제한 새 클러스터를 생성할 수 있습니다. 복제 시 클러스터 이름과 네임스페이스를 변경하며, 나머지 설정(이미지, 크기, Aerospike 설정, 스토리지, 모니터링 등)은 원본 클러스터에서 가져옵니다.
+
+:::warning
+복제된 클러스터는 원본 클러스터의 데이터를 포함하지 않습니다. 설정만 복제되며, 데이터는 새로 초기화됩니다.
+:::
+
 ### Events Timeline
 
 클러스터 상세 페이지의 **Events** 탭에서 Kubernetes 이벤트를 확인합니다. 각 이벤트에는 타입, 이유, 메시지, 발생 횟수, 그리고 상대적 시간(예: "2m ago")이 표시됩니다. Transitional Phase에서는 자동으로 새로고침됩니다.
@@ -264,6 +287,8 @@ Reconciliation 실패가 발생하면 **Reconciliation Health** 카드가 나타
 - **Storage Class** — 사용된 Kubernetes StorageClass
 - **Access Modes** — ReadWriteOnce, ReadWriteMany 등
 - **Volume Name** — 바인딩된 PersistentVolume 이름
+- **Pod Binding** — 각 PVC가 마운트된 Pod를 표시하여 PVC-Pod 매핑을 시각적으로 확인
+- **Orphan Detection** — 실행 중인 Pod에 마운트되지 않은 PVC를 자동으로 감지하여 경고 표시
 - **PVC 삭제** — 고아 PVC(활성 Pod와 연결되지 않은 PVC)를 PVC 상태 목록에서 직접 삭제할 수 있습니다. 스케일다운이나 Pod 삭제 실패 후 남은 스토리지 리소스를 정리하는 데 유용합니다. 삭제 전 확인 다이얼로그가 표시됩니다.
 
 ### Export / Import

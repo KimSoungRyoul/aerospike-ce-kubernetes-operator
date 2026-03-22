@@ -696,6 +696,29 @@ storage:
               volume.kubernetes.io/storage-provisioner: "ebs.csi.aws.com"
 ```
 
+### PVC 관리
+
+오퍼레이터는 각 파드의 스토리지 볼륨에 대해 PersistentVolumeClaim을 생성합니다. 클러스터 매니저 UI를 통해 PVC 상태를 모니터링할 수 있으며, 다음 정보를 표시합니다:
+
+- **PVC 바인딩 상태** -- Bound, Pending, Released, Failed
+- **파드 바인딩** -- 각 PVC가 현재 바인딩된 파드
+- **고아 PVC** -- PersistentVolume에 바인딩되어 있지만 실행 중인 파드에 마운트되지 않은 PVC (스케일 다운 또는 파드 재스케줄링 후 발생 가능)
+- **용량 및 StorageClass** -- 프로비저닝된 스토리지 크기와 사용된 StorageClass
+
+kubectl로도 PVC 상태를 확인할 수 있습니다:
+
+```bash
+# 클러스터의 모든 PVC 조회
+kubectl -n aerospike get pvc -l app=aerospike-ce-3node
+
+# 고아 PVC 확인 (매칭되는 파드가 없는 PVC)
+kubectl -n aerospike get pvc -l app=aerospike-ce-3node -o custom-columns=NAME:.metadata.name,STATUS:.status.phase,POD:.metadata.annotations.acko\\.io/pod-name
+```
+
+:::note
+`cascadeDelete: true`인 PVC는 CR 삭제 시 또는 스케일 다운 후 자동으로 정리됩니다. 자세한 내용은 [Cascade Delete](#cascade-delete) 섹션을 참조하세요.
+:::
+
 ### 볼륨 마운트 옵션
 
 Aerospike 및 사이드카 컨테이너의 고급 마운트 옵션:
