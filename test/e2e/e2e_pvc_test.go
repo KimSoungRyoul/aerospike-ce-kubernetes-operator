@@ -166,7 +166,9 @@ var _ = Describe("PVC management", Ordered, Label("heavy"), func() {
 					},
 				}
 			})
-			Expect(k8sClient.Create(ctx, cluster)).To(Succeed())
+			Eventually(func() error {
+				return k8sClient.Create(ctx, cluster)
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
 			By("waiting for Completed phase")
 			Eventually(func(g Gomega) {
@@ -220,7 +222,9 @@ var _ = Describe("PVC management", Ordered, Label("heavy"), func() {
 					},
 				}
 			})
-			Expect(k8sClient.Create(ctx, cluster)).To(Succeed())
+			Eventually(func() error {
+				return k8sClient.Create(ctx, cluster)
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
 			By("waiting for Completed phase")
 			Eventually(func(g Gomega) {

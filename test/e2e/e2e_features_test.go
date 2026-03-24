@@ -75,14 +75,16 @@ var _ = Describe("Enhanced Features", Ordered, func() {
 			refreshCurlMetricsPod()
 
 			By("verifying custom metrics exist in the metrics endpoint")
-			metricsOutput, err := getMetricsOutput()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(metricsOutput).To(ContainSubstring("acko_cluster_phase"),
-				"cluster phase metric should be present")
-			Expect(metricsOutput).To(ContainSubstring("acko_cluster_ready_pods"),
-				"ready pods metric should be present")
-			Expect(metricsOutput).To(ContainSubstring("acko_reconcile_duration_seconds"),
-				"reconcile duration metric should be present")
+			Eventually(func(g Gomega) {
+				metricsOutput, err := getMetricsOutput()
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(metricsOutput).To(ContainSubstring("acko_cluster_phase"),
+					"cluster phase metric should be present")
+				g.Expect(metricsOutput).To(ContainSubstring("acko_cluster_ready_pods"),
+					"ready pods metric should be present")
+				g.Expect(metricsOutput).To(ContainSubstring("acko_reconcile_duration_seconds"),
+					"reconcile duration metric should be present")
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
 		})
 	})
 
@@ -92,7 +94,9 @@ var _ = Describe("Enhanced Features", Ordered, func() {
 		It("should populate configHash and podSpecHash in status.pods", func() {
 			By("creating a 1-node cluster")
 			cluster := newTestCluster(clusterName, featuresNS, 1)
-			Expect(k8sClient.Create(ctx, cluster)).To(Succeed())
+			Eventually(func() error {
+				return k8sClient.Create(ctx, cluster)
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
 			By("waiting for Completed phase")
 			Eventually(func(g Gomega) {

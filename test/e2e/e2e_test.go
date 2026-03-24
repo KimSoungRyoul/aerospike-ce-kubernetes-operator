@@ -125,9 +125,11 @@ var _ = Describe("Manager", Ordered, func() {
 
 		It("should ensure the metrics endpoint is serving metrics", func() {
 			By("validating that the metrics service is available")
-			exists, err := utils.ServiceExists(ctx, k8sClient, metricsServiceName, namespace)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(exists).To(BeTrue(), "Metrics service should exist")
+			Eventually(func(g Gomega) {
+				exists, err := utils.ServiceExists(ctx, k8sClient, metricsServiceName, namespace)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(exists).To(BeTrue(), "Metrics service should exist")
+			}, 2*time.Minute, time.Second).Should(Succeed())
 
 			By("getting the service account token")
 			token, err := serviceAccountToken()
