@@ -132,8 +132,9 @@ func IsCertManagerCRDsInstalled() bool {
 }
 
 // LoadImageToKindClusterWithName loads a local container image to the kind cluster.
-// When using Podman (detected via CONTAINER_TOOL=podman), it uses podman save + kind load image-archive
-// because kind load docker-image has compatibility issues with Podman on macOS.
+// When using Podman (detected via CONTAINER_TOOL=podman or KIND_PROVIDER=podman),
+// it uses podman save + kind load image-archive because kind load docker-image
+// has compatibility issues with Podman on macOS.
 func LoadImageToKindClusterWithName(name string) error {
 	cluster := defaultKindCluster
 	if v, ok := os.LookupEnv("KIND_CLUSTER"); ok {
@@ -144,18 +145,25 @@ func LoadImageToKindClusterWithName(name string) error {
 		kindBinary = v
 	}
 
+	usePodman := os.Getenv("CONTAINER_TOOL") == "podman" || os.Getenv("KIND_PROVIDER") == "podman"
+
 	// When using Podman, kind load docker-image may fail to find images.
 	// Use podman save + kind load image-archive as a workaround.
-	if os.Getenv("CONTAINER_TOOL") == "podman" {
-		archivePath := fmt.Sprintf("/tmp/kind-image-%d.tar", os.Getpid())
+	if usePodman {
+		f, err := os.CreateTemp("", "kind-image-*.tar")
+		if err != nil {
+			return fmt.Errorf("creating temp archive: %w", err)
+		}
+		archivePath := f.Name()
+		_ = f.Close()
 		defer func() { _ = os.Remove(archivePath) }()
 
-		cmd := exec.Command("podman", "save", name, "-o", archivePath)
+		cmd := exec.Command("podman", "save", "--format", "docker-archive", name, "-o", archivePath)
 		if _, err := Run(cmd); err != nil {
 			return fmt.Errorf("podman save: %w", err)
 		}
 		cmd = exec.Command(kindBinary, "load", "image-archive", archivePath, "--name", cluster)
-		_, err := Run(cmd)
+		_, err = Run(cmd)
 		return err
 	}
 

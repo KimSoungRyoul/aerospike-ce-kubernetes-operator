@@ -129,14 +129,16 @@ var _ = Describe("PVC management", Ordered, Label("heavy"), func() {
 		})
 
 		It("should report correct status with storage", func() {
-			cluster, err := utils.GetCluster(ctx, k8sClient, clusterName, pvcNS)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(cluster.Status.Size).To(Equal(int32(2)))
-			Expect(cluster.Status.Pods).To(HaveLen(2))
+			Eventually(func(g Gomega) {
+				cluster, err := utils.GetCluster(ctx, k8sClient, clusterName, pvcNS)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(cluster.Status.Size).To(Equal(int32(2)))
+				g.Expect(cluster.Status.Pods).To(HaveLen(2))
 
-			for _, ps := range cluster.Status.Pods {
-				Expect(ps.IsRunningAndReady).To(BeTrue())
-			}
+				for _, ps := range cluster.Status.Pods {
+					g.Expect(ps.IsRunningAndReady).To(BeTrue())
+				}
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
 		})
 	})
 
@@ -164,7 +166,9 @@ var _ = Describe("PVC management", Ordered, Label("heavy"), func() {
 					},
 				}
 			})
-			Expect(k8sClient.Create(ctx, cluster)).To(Succeed())
+			Eventually(func() error {
+				return k8sClient.Create(ctx, cluster)
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
 			By("waiting for Completed phase")
 			Eventually(func(g Gomega) {
@@ -218,7 +222,9 @@ var _ = Describe("PVC management", Ordered, Label("heavy"), func() {
 					},
 				}
 			})
-			Expect(k8sClient.Create(ctx, cluster)).To(Succeed())
+			Eventually(func() error {
+				return k8sClient.Create(ctx, cluster)
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
 			By("waiting for Completed phase")
 			Eventually(func(g Gomega) {

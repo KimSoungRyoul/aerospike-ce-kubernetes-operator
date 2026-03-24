@@ -96,7 +96,9 @@ var _ = Describe("Cluster templates", Ordered, Label("heavy"), func() {
 					Name: templateName,
 				}
 			})
-			Expect(k8sClient.Create(ctx, cluster)).To(Succeed())
+			Eventually(func() error {
+				return k8sClient.Create(ctx, cluster)
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
 			By("waiting for Completed phase")
 			Eventually(func(g Gomega) {
@@ -153,7 +155,9 @@ var _ = Describe("Cluster templates", Ordered, Label("heavy"), func() {
 					},
 				},
 			}
-			Expect(k8sClient.Create(ctx, template)).To(Succeed())
+			Eventually(func() error {
+				return k8sClient.Create(ctx, template)
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
 			By("creating a cluster with templateRef")
 			cluster := newTestCluster(clusterName, templateTestNS, 1, func(c *ackov1alpha1.AerospikeCluster) {
@@ -161,7 +165,9 @@ var _ = Describe("Cluster templates", Ordered, Label("heavy"), func() {
 					Name: templateName,
 				}
 			})
-			Expect(k8sClient.Create(ctx, cluster)).To(Succeed())
+			Eventually(func() error {
+				return k8sClient.Create(ctx, cluster)
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
 			By("waiting for Completed phase")
 			Eventually(func(g Gomega) {
@@ -170,18 +176,16 @@ var _ = Describe("Cluster templates", Ordered, Label("heavy"), func() {
 				g.Expect(c.Status.Phase).To(Equal(ackov1alpha1.AerospikePhaseCompleted))
 			}, defaultTimeout, 2*time.Second).Should(Succeed())
 
-			By("verifying snapshot is initially synced")
+			By("verifying snapshot is initially synced and recording resourceVersion")
+			var oldResourceVersion string
 			Eventually(func(g Gomega) {
 				c, err := utils.GetCluster(ctx, k8sClient, clusterName, templateTestNS)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(c.Status.TemplateSnapshot).NotTo(BeNil())
 				g.Expect(c.Status.TemplateSnapshot.Synced).To(BeTrue())
+				oldResourceVersion = c.Status.TemplateSnapshot.ResourceVersion
 			}, defaultTimeout, 2*time.Second).Should(Succeed())
-
-			By("recording the template snapshot resourceVersion")
-			c, err := utils.GetCluster(ctx, k8sClient, clusterName, templateTestNS)
-			Expect(err).NotTo(HaveOccurred())
-			oldResourceVersion := c.Status.TemplateSnapshot.ResourceVersion
+			Expect(oldResourceVersion).NotTo(BeEmpty(), "oldResourceVersion should have been captured")
 
 			By("modifying the template to trigger drift")
 			Expect(utils.PatchTemplate(ctx, k8sClient, templateName,
@@ -197,10 +201,13 @@ var _ = Describe("Cluster templates", Ordered, Label("heavy"), func() {
 			}, defaultTimeout, 2*time.Second).Should(Succeed())
 
 			By("verifying the snapshot still references the old resourceVersion")
-			c, err = utils.GetCluster(ctx, k8sClient, clusterName, templateTestNS)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(c.Status.TemplateSnapshot.ResourceVersion).To(Equal(oldResourceVersion),
-				"snapshot resourceVersion should not change until resync")
+			Eventually(func(g Gomega) {
+				c, err := utils.GetCluster(ctx, k8sClient, clusterName, templateTestNS)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(c.Status.TemplateSnapshot).NotTo(BeNil())
+				g.Expect(c.Status.TemplateSnapshot.ResourceVersion).To(Equal(oldResourceVersion),
+					"snapshot resourceVersion should not change until resync")
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
 		})
 	})
 })

@@ -75,14 +75,16 @@ var _ = Describe("Enhanced Features", Ordered, func() {
 			refreshCurlMetricsPod()
 
 			By("verifying custom metrics exist in the metrics endpoint")
-			metricsOutput, err := getMetricsOutput()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(metricsOutput).To(ContainSubstring("acko_cluster_phase"),
-				"cluster phase metric should be present")
-			Expect(metricsOutput).To(ContainSubstring("acko_cluster_ready_pods"),
-				"ready pods metric should be present")
-			Expect(metricsOutput).To(ContainSubstring("acko_reconcile_duration_seconds"),
-				"reconcile duration metric should be present")
+			Eventually(func(g Gomega) {
+				metricsOutput, err := getMetricsOutput()
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(metricsOutput).To(ContainSubstring("acko_cluster_phase"),
+					"cluster phase metric should be present")
+				g.Expect(metricsOutput).To(ContainSubstring("acko_cluster_ready_pods"),
+					"ready pods metric should be present")
+				g.Expect(metricsOutput).To(ContainSubstring("acko_reconcile_duration_seconds"),
+					"reconcile duration metric should be present")
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
 		})
 	})
 
@@ -92,7 +94,9 @@ var _ = Describe("Enhanced Features", Ordered, func() {
 		It("should populate configHash and podSpecHash in status.pods", func() {
 			By("creating a 1-node cluster")
 			cluster := newTestCluster(clusterName, featuresNS, 1)
-			Expect(k8sClient.Create(ctx, cluster)).To(Succeed())
+			Eventually(func() error {
+				return k8sClient.Create(ctx, cluster)
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
 			By("waiting for Completed phase")
 			Eventually(func(g Gomega) {
@@ -118,22 +122,24 @@ var _ = Describe("Enhanced Features", Ordered, func() {
 		})
 
 		It("should have matching config hash between pod annotation and status", func() {
-			podList, err := utils.ListClusterPods(ctx, k8sClient, clusterName, featuresNS)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(podList.Items).NotTo(BeEmpty())
+			Eventually(func(g Gomega) {
+				podList, err := utils.ListClusterPods(ctx, k8sClient, clusterName, featuresNS)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(podList.Items).NotTo(BeEmpty())
 
-			cluster, err := utils.GetCluster(ctx, k8sClient, clusterName, featuresNS)
-			Expect(err).NotTo(HaveOccurred())
+				cluster, err := utils.GetCluster(ctx, k8sClient, clusterName, featuresNS)
+				g.Expect(err).NotTo(HaveOccurred())
 
-			for _, pod := range podList.Items {
-				annotationHash := pod.Annotations["acko.io/config-hash"]
-				Expect(annotationHash).NotTo(BeEmpty())
+				for _, pod := range podList.Items {
+					annotationHash := pod.Annotations["acko.io/config-hash"]
+					g.Expect(annotationHash).NotTo(BeEmpty())
 
-				if ps, ok := cluster.Status.Pods[pod.Name]; ok {
-					Expect(ps.ConfigHash).To(Equal(annotationHash),
-						"status configHash should match pod annotation for %s", pod.Name)
+					if ps, ok := cluster.Status.Pods[pod.Name]; ok {
+						g.Expect(ps.ConfigHash).To(Equal(annotationHash),
+							"status configHash should match pod annotation for %s", pod.Name)
+					}
 				}
-			}
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
 		})
 	})
 
@@ -143,7 +149,9 @@ var _ = Describe("Enhanced Features", Ordered, func() {
 		It("should update pods when config changes", func() {
 			By("creating a 2-node cluster")
 			cluster := newTestCluster(clusterName, featuresNS, 2)
-			Expect(k8sClient.Create(ctx, cluster)).To(Succeed())
+			Eventually(func() error {
+				return k8sClient.Create(ctx, cluster)
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
 			By("waiting for Completed phase")
 			Eventually(func(g Gomega) {
@@ -159,13 +167,19 @@ var _ = Describe("Enhanced Features", Ordered, func() {
 			}, multiNodeTimeout, 2*time.Second).Should(Succeed())
 
 			By("recording current configHash values")
-			c, err := utils.GetCluster(ctx, k8sClient, clusterName, featuresNS)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(c.Status.Pods).To(HaveLen(2))
-			oldHashes := map[string]string{}
-			for name, ps := range c.Status.Pods {
-				oldHashes[name] = ps.ConfigHash
-			}
+			var oldHashes map[string]string
+			Eventually(func(g Gomega) {
+				c, err := utils.GetCluster(ctx, k8sClient, clusterName, featuresNS)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(c.Status.Pods).To(HaveLen(2))
+				m := map[string]string{}
+				for name, ps := range c.Status.Pods {
+					g.Expect(ps.ConfigHash).NotTo(BeEmpty(),
+						"configHash should be populated for pod %s", name)
+					m[name] = ps.ConfigHash
+				}
+				oldHashes = m
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
 
 			By("patching proto-fd-max from 15000 to 20000")
 			patch := `{"spec":{"aerospikeConfig":{"service":{"proto-fd-max":20000}}}}`
@@ -193,7 +207,9 @@ var _ = Describe("Enhanced Features", Ordered, func() {
 		It("should scale up from 1 to 2 nodes", func() {
 			By("creating a 1-node cluster")
 			cluster := newTestCluster(clusterName, featuresNS, 1)
-			Expect(k8sClient.Create(ctx, cluster)).To(Succeed())
+			Eventually(func() error {
+				return k8sClient.Create(ctx, cluster)
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
 			By("waiting for Completed phase with 1 pod")
 			Eventually(func(g Gomega) {
@@ -267,7 +283,9 @@ var _ = Describe("Enhanced Features", Ordered, func() {
 				batchSize := int32(2)
 				c.Spec.RollingUpdateBatchSize = &batchSize
 			})
-			Expect(k8sClient.Create(ctx, cluster)).To(Succeed())
+			Eventually(func() error {
+				return k8sClient.Create(ctx, cluster)
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
 			By("waiting for Completed phase")
 			Eventually(func(g Gomega) {
@@ -307,7 +325,9 @@ var _ = Describe("Enhanced Features", Ordered, func() {
 		It("should not reconcile config changes while paused", func() {
 			By("creating a 1-node cluster")
 			cluster := newTestCluster(clusterName, featuresNS, 1)
-			Expect(k8sClient.Create(ctx, cluster)).To(Succeed())
+			Eventually(func() error {
+				return k8sClient.Create(ctx, cluster)
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
 			By("waiting for Completed phase")
 			Eventually(func(g Gomega) {
@@ -317,15 +337,26 @@ var _ = Describe("Enhanced Features", Ordered, func() {
 			}, defaultTimeout, 2*time.Second).Should(Succeed())
 
 			By("recording current configHash")
-			c, err := utils.GetCluster(ctx, k8sClient, clusterName, featuresNS)
-			Expect(err).NotTo(HaveOccurred())
 			var oldHash string
-			for _, ps := range c.Status.Pods {
-				oldHash = ps.ConfigHash
-			}
+			Eventually(func(g Gomega) {
+				c, err := utils.GetCluster(ctx, k8sClient, clusterName, featuresNS)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(c.Status.Pods).To(HaveLen(1), "expected exactly 1 pod for 1-node cluster")
+				for _, ps := range c.Status.Pods {
+					g.Expect(ps.ConfigHash).NotTo(BeEmpty(), "configHash should be populated")
+					oldHash = ps.ConfigHash
+				}
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
 
 			By("pausing the cluster")
 			Expect(utils.PatchCluster(ctx, k8sClient, clusterName, featuresNS, []byte(`{"spec":{"paused":true}}`))).To(Succeed())
+
+			By("waiting for controller to acknowledge pause")
+			Eventually(func(g Gomega) {
+				c, err := utils.GetCluster(ctx, k8sClient, clusterName, featuresNS)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(c.Status.Phase).To(Equal(ackov1alpha1.AerospikePhasePaused))
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
 
 			By("changing config while paused")
 			patch := `{"spec":{"aerospikeConfig":{"service":{"proto-fd-max":25000}}}}`
@@ -369,7 +400,9 @@ var _ = Describe("Enhanced Features", Ordered, func() {
 		It("should create PDB by default and delete when disabled", func() {
 			By("creating a 2-node cluster")
 			cluster := newTestCluster(clusterName, featuresNS, 2)
-			Expect(k8sClient.Create(ctx, cluster)).To(Succeed())
+			Eventually(func() error {
+				return k8sClient.Create(ctx, cluster)
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
 			By("waiting for Completed phase")
 			Eventually(func(g Gomega) {
