@@ -149,7 +149,9 @@ var _ = Describe("Enhanced Features", Ordered, func() {
 		It("should update pods when config changes", func() {
 			By("creating a 2-node cluster")
 			cluster := newTestCluster(clusterName, featuresNS, 2)
-			Expect(k8sClient.Create(ctx, cluster)).To(Succeed())
+			Eventually(func() error {
+				return k8sClient.Create(ctx, cluster)
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
 			By("waiting for Completed phase")
 			Eventually(func(g Gomega) {
@@ -165,16 +167,18 @@ var _ = Describe("Enhanced Features", Ordered, func() {
 			}, multiNodeTimeout, 2*time.Second).Should(Succeed())
 
 			By("recording current configHash values")
-			oldHashes := map[string]string{}
+			var oldHashes map[string]string
 			Eventually(func(g Gomega) {
 				c, err := utils.GetCluster(ctx, k8sClient, clusterName, featuresNS)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(c.Status.Pods).To(HaveLen(2))
+				m := map[string]string{}
 				for name, ps := range c.Status.Pods {
 					g.Expect(ps.ConfigHash).NotTo(BeEmpty(),
 						"configHash should be populated for pod %s", name)
-					oldHashes[name] = ps.ConfigHash
+					m[name] = ps.ConfigHash
 				}
+				oldHashes = m
 			}, defaultTimeout, 2*time.Second).Should(Succeed())
 
 			By("patching proto-fd-max from 15000 to 20000")
@@ -203,7 +207,9 @@ var _ = Describe("Enhanced Features", Ordered, func() {
 		It("should scale up from 1 to 2 nodes", func() {
 			By("creating a 1-node cluster")
 			cluster := newTestCluster(clusterName, featuresNS, 1)
-			Expect(k8sClient.Create(ctx, cluster)).To(Succeed())
+			Eventually(func() error {
+				return k8sClient.Create(ctx, cluster)
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
 			By("waiting for Completed phase with 1 pod")
 			Eventually(func(g Gomega) {
@@ -277,7 +283,9 @@ var _ = Describe("Enhanced Features", Ordered, func() {
 				batchSize := int32(2)
 				c.Spec.RollingUpdateBatchSize = &batchSize
 			})
-			Expect(k8sClient.Create(ctx, cluster)).To(Succeed())
+			Eventually(func() error {
+				return k8sClient.Create(ctx, cluster)
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
 			By("waiting for Completed phase")
 			Eventually(func(g Gomega) {
@@ -317,7 +325,9 @@ var _ = Describe("Enhanced Features", Ordered, func() {
 		It("should not reconcile config changes while paused", func() {
 			By("creating a 1-node cluster")
 			cluster := newTestCluster(clusterName, featuresNS, 1)
-			Expect(k8sClient.Create(ctx, cluster)).To(Succeed())
+			Eventually(func() error {
+				return k8sClient.Create(ctx, cluster)
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
 			By("waiting for Completed phase")
 			Eventually(func(g Gomega) {
@@ -383,7 +393,9 @@ var _ = Describe("Enhanced Features", Ordered, func() {
 		It("should create PDB by default and delete when disabled", func() {
 			By("creating a 2-node cluster")
 			cluster := newTestCluster(clusterName, featuresNS, 2)
-			Expect(k8sClient.Create(ctx, cluster)).To(Succeed())
+			Eventually(func() error {
+				return k8sClient.Create(ctx, cluster)
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
 			By("waiting for Completed phase")
 			Eventually(func(g Gomega) {
