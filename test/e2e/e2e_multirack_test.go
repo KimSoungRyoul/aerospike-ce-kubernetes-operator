@@ -121,16 +121,18 @@ var _ = Describe("Multi-rack cluster", Ordered, Label("heavy"), func() {
 		})
 
 		It("should report correct status for multi-rack cluster", func() {
-			cluster, err := utils.GetCluster(ctx, k8sClient, clusterName, multirackNS)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(cluster.Status.Size).To(Equal(int32(4)))
-			Expect(cluster.Status.Pods).To(HaveLen(4))
+			Eventually(func(g Gomega) {
+				cluster, err := utils.GetCluster(ctx, k8sClient, clusterName, multirackNS)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(cluster.Status.Size).To(Equal(int32(4)))
+				g.Expect(cluster.Status.Pods).To(HaveLen(4))
 
-			for _, ps := range cluster.Status.Pods {
-				Expect(ps.IsRunningAndReady).To(BeTrue())
-				Expect(ps.Image).To(Equal("aerospike:ce-8.1.1.1"))
-				Expect(ps.Rack).To(BeElementOf(1, 2))
-			}
+				for _, ps := range cluster.Status.Pods {
+					g.Expect(ps.IsRunningAndReady).To(BeTrue())
+					g.Expect(ps.Image).To(Equal("aerospike:ce-8.1.1.1"))
+					g.Expect(ps.Rack).To(BeElementOf(1, 2))
+				}
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
 		})
 	})
 
