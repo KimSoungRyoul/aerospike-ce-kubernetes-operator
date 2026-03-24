@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -263,12 +264,17 @@ var _ = Describe("AerospikeCluster Samples", Ordered, func() {
 			samplePath := filepath.Join(projectDir, "config", "samples", "aerospike-cluster-acl.yaml")
 
 			By("creating required Kubernetes Secrets for ACL users")
-			cmd := exec.Command("kubectl", "-n", aerospikeNS, "create", "secret", "generic",
-				"aerospike-admin-secret", "--from-literal=password=admin123")
-			_, _ = utils.Run(cmd)
-			cmd = exec.Command("kubectl", "-n", aerospikeNS, "create", "secret", "generic",
-				"aerospike-reader-secret", "--from-literal=password=reader123")
-			_, _ = utils.Run(cmd)
+			for _, secret := range []struct{ name, password string }{
+				{"aerospike-admin-secret", "admin123"},
+				{"aerospike-reader-secret", "reader123"},
+			} {
+				cmd := exec.Command("kubectl", "-n", aerospikeNS, "create", "secret", "generic",
+					secret.name, fmt.Sprintf("--from-literal=password=%s", secret.password))
+				_, err := utils.Run(cmd)
+				if err != nil && !strings.Contains(err.Error(), "already exists") {
+					Expect(err).NotTo(HaveOccurred(), "failed to create secret %s", secret.name)
+				}
+			}
 
 			By("loading and creating the ACL sample CR")
 			cluster, err := loadClusterFromFile(samplePath)

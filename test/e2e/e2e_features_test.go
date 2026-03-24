@@ -159,13 +159,17 @@ var _ = Describe("Enhanced Features", Ordered, func() {
 			}, multiNodeTimeout, 2*time.Second).Should(Succeed())
 
 			By("recording current configHash values")
-			c, err := utils.GetCluster(ctx, k8sClient, clusterName, featuresNS)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(c.Status.Pods).To(HaveLen(2))
 			oldHashes := map[string]string{}
-			for name, ps := range c.Status.Pods {
-				oldHashes[name] = ps.ConfigHash
-			}
+			Eventually(func(g Gomega) {
+				c, err := utils.GetCluster(ctx, k8sClient, clusterName, featuresNS)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(c.Status.Pods).To(HaveLen(2))
+				for name, ps := range c.Status.Pods {
+					g.Expect(ps.ConfigHash).NotTo(BeEmpty(),
+						"configHash should be populated for pod %s", name)
+					oldHashes[name] = ps.ConfigHash
+				}
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
 
 			By("patching proto-fd-max from 15000 to 20000")
 			patch := `{"spec":{"aerospikeConfig":{"service":{"proto-fd-max":20000}}}}`
