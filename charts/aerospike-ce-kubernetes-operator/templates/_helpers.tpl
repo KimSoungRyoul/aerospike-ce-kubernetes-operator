@@ -67,7 +67,7 @@ Webhook service name.
 Metrics service name.
 */}}
 {{- define "aerospike-ce-kubernetes-operator.metricsServiceName" -}}
-{{- include "aerospike-ce-kubernetes-operator.fullname" . }}-metrics
+{{- include "aerospike-ce-kubernetes-operator.fullname" . }}-metrics-service
 {{- end }}
 
 {{/*
