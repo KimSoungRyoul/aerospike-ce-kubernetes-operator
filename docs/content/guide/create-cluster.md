@@ -21,7 +21,7 @@ The simplest cluster: a single-node in-memory deployment.
 apiVersion: acko.io/v1alpha1
 kind: AerospikeCluster
 metadata:
-  name: aerospike-ce-basic
+  name: aerospike-basic
   namespace: aerospike
 spec:
   size: 1
@@ -51,7 +51,7 @@ A production-like setup with resource limits and persistent storage.
 apiVersion: acko.io/v1alpha1
 kind: AerospikeCluster
 metadata:
-  name: aerospike-ce-3node
+  name: aerospike-3node
   namespace: aerospike
 spec:
   size: 3
@@ -89,7 +89,7 @@ spec:
 
   aerospikeConfig:
     service:
-      cluster-name: aerospike-ce-3node
+      cluster-name: aerospike-3node
       proto-fd-max: 15000
 
     network:
@@ -127,7 +127,7 @@ Spread pods across failure domains using rack-aware deployment.
 apiVersion: acko.io/v1alpha1
 kind: AerospikeCluster
 metadata:
-  name: aerospike-ce-multirack
+  name: aerospike-multirack
   namespace: aerospike
 spec:
   size: 6

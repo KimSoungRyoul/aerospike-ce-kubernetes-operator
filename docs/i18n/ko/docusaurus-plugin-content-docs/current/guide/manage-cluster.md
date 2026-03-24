@@ -12,7 +12,7 @@ title: 클러스터 관리
 `spec.size`를 변경하여 클러스터를 스케일 업/다운합니다.
 
 ```bash
-kubectl -n aerospike patch asc aerospike-ce-3node --type merge -p '{"spec":{"size":5}}'
+kubectl -n aerospike patch asc aerospike-3node --type merge -p '{"spec":{"size":5}}'
 ```
 
 오퍼레이터가 원하는 크기에 맞게 파드를 생성하거나 제거합니다. 멀티랙 배포의 경우, 파드가 랙 간에 균등하게 분배됩니다.
@@ -163,7 +163,7 @@ kubectl -n aerospike-operator logs -l control-plane=controller-manager | grep -i
 `enableDynamicConfigUpdate: true`로 설정 변경 후 파드별 상태를 확인합니다:
 
 ```bash
-kubectl -n aerospike get asc aerospike-ce-3node -o jsonpath='{.status.pods}' | jq '.[] | {name: .podName, dynamicConfig: .dynamicConfigStatus}'
+kubectl -n aerospike get asc aerospike-3node -o jsonpath='{.status.pods}' | jq '.[] | {name: .podName, dynamicConfig: .dynamicConfigStatus}'
 ```
 
 | 상태 | 의미 |
@@ -205,14 +205,14 @@ spec:
 파드별 게이트 조건을 확인합니다:
 
 ```bash
-kubectl -n aerospike get pod aerospike-ce-3node-0 \
+kubectl -n aerospike get pod aerospike-3node-0 \
   -o jsonpath='{.status.conditions}' | jq '.[] | select(.type=="acko.io/aerospike-ready")'
 ```
 
 오퍼레이터는 클러스터의 파드 상태에 게이트 상태를 반영합니다:
 
 ```bash
-kubectl -n aerospike get asc aerospike-ce-3node \
+kubectl -n aerospike get asc aerospike-3node \
   -o jsonpath='{.status.pods}' | jq 'to_entries[] | {pod: .key, gateOk: .value.readinessGateSatisfied}'
 ```
 
@@ -249,7 +249,7 @@ kubectl -n aerospike get events --field-selector reason=ReadinessGateBlocking
 
 ```bash
 # 클러스터 레벨 마이그레이션 상태
-kubectl -n aerospike get asc aerospike-ce-3node \
+kubectl -n aerospike get asc aerospike-3node \
   -o jsonpath='{.status.migrationStatus}' | jq .
 ```
 
@@ -265,7 +265,7 @@ kubectl -n aerospike get asc aerospike-ce-3node \
 **파드별 마이그레이션 레코드:**
 
 ```bash
-kubectl -n aerospike get asc aerospike-ce-3node \
+kubectl -n aerospike get asc aerospike-3node \
   -o jsonpath='{.status.pods}' | jq 'to_entries[] | {pod: .key, migrating: .value.migratingPartitions}'
 ```
 
@@ -273,11 +273,11 @@ kubectl -n aerospike get asc aerospike-ce-3node \
 
 ```bash
 # 마이그레이션 진행 중인지 확인 (true/false 반환)
-kubectl -n aerospike get asc aerospike-ce-3node \
+kubectl -n aerospike get asc aerospike-3node \
   -o jsonpath='InProgress={.status.migrationStatus.inProgress} Remaining={.status.migrationStatus.remainingPartitions}'
 
 # MigrationComplete 조건 직접 확인
-kubectl -n aerospike get asc aerospike-ce-3node \
+kubectl -n aerospike get asc aerospike-3node \
   -o jsonpath='{range .status.conditions[?(@.type=="MigrationComplete")]}{.status}{end}'
 ```
 
@@ -287,7 +287,7 @@ kubectl -n aerospike get asc aerospike-ce-3node \
 
 ```promql
 # 30분 이상 마이그레이션이 진행 중일 때 알림
-acko_cluster_migrating_partitions{namespace="aerospike", name="aerospike-ce-3node"} > 0
+acko_cluster_migrating_partitions{namespace="aerospike", name="aerospike-3node"} > 0
 
 # 마이그레이션 진행 속도 추적 (초당 마이그레이션된 파티션)
 deriv(acko_cluster_migrating_partitions[5m])
@@ -333,7 +333,7 @@ kubectl -n aerospike get asc
 `status.health` 필드는 "준비됨/전체" 형태의 빠른 요약을 제공합니다:
 
 ```bash
-kubectl -n aerospike get asc aerospike-ce-3node -o jsonpath='{.status.health}'
+kubectl -n aerospike get asc aerospike-3node -o jsonpath='{.status.health}'
 # 출력: 3/3
 ```
 
@@ -344,7 +344,7 @@ kubectl -n aerospike get asc aerospike-ce-3node -o jsonpath='{.status.health}'
 오퍼레이터는 클러스터 상태의 상세한 분석을 제공하는 6가지 조건 유형을 유지합니다:
 
 ```bash
-kubectl -n aerospike get asc aerospike-ce-3node -o jsonpath='{.status.conditions}' | jq .
+kubectl -n aerospike get asc aerospike-3node -o jsonpath='{.status.conditions}' | jq .
 ```
 
 | Condition | True인 경우 |
@@ -361,7 +361,7 @@ kubectl -n aerospike get asc aerospike-ce-3node -o jsonpath='{.status.conditions
 `Ready`, `ConfigApplied`, `MigrationComplete`, `ACLSynced`(ACL 설정된 경우)가 모두 `True`이면 완전히 정상입니다:
 
 ```bash
-kubectl -n aerospike get asc aerospike-ce-3node \
+kubectl -n aerospike get asc aerospike-3node \
   -o jsonpath='{range .status.conditions[*]}{.type}={.status}{"\n"}{end}'
 ```
 
@@ -384,7 +384,7 @@ ReconciliationPaused=False
 - 파드 시작 (Aerospike가 아직 mesh에 참여하지 않음)
 
 ```bash
-kubectl -n aerospike get asc aerospike-ce-3node \
+kubectl -n aerospike get asc aerospike-3node \
   -o jsonpath='K8s pods: {.status.size}, Aerospike cluster-size: {.status.aerospikeClusterSize}'
 ```
 
@@ -427,10 +427,10 @@ AerospikeCluster의 ACL 설정에서 실제로 참조하는 Secret만 재조정�
 
 ```bash
 # 재조정 일시 중지
-kubectl -n aerospike patch asc aerospike-ce-3node --type merge -p '{"spec":{"paused":true}}'
+kubectl -n aerospike patch asc aerospike-3node --type merge -p '{"spec":{"paused":true}}'
 
 # 일시 중지 상태 확인
-kubectl -n aerospike get asc aerospike-ce-3node -o jsonpath='{.status.phase}'
+kubectl -n aerospike get asc aerospike-3node -o jsonpath='{.status.phase}'
 # 출력: Paused
 ```
 
@@ -438,7 +438,7 @@ kubectl -n aerospike get asc aerospike-ce-3node -o jsonpath='{.status.phase}'
 
 ```bash
 # 재조정 재개
-kubectl -n aerospike patch asc aerospike-ce-3node --type merge -p '{"spec":{"paused":null}}'
+kubectl -n aerospike patch asc aerospike-3node --type merge -p '{"spec":{"paused":null}}'
 ```
 
 :::warning
@@ -459,8 +459,8 @@ spec:
     - kind: WarmRestart
       id: "config-reload-v2"       # 고유 ID (1-20자)
       podList:                      # 선택사항: 비우면 전체 파드 대상
-        - aerospike-ce-3node-0
-        - aerospike-ce-3node-1
+        - aerospike-3node-0
+        - aerospike-3node-1
 ```
 
 ### PodRestart
@@ -473,13 +473,13 @@ spec:
     - kind: PodRestart
       id: "cold-restart-01"
       podList:
-        - aerospike-ce-3node-2
+        - aerospike-3node-2
 ```
 
 ### 오퍼레이션 상태 확인
 
 ```bash
-kubectl -n aerospike get asc aerospike-ce-3node -o jsonpath='{.status.operationStatus}' | jq .
+kubectl -n aerospike get asc aerospike-3node -o jsonpath='{.status.operationStatus}' | jq .
 ```
 
 상태에는 `phase` (`InProgress`, `Completed`, `Error`), `completedPods`, `failedPods`가 포함됩니다.
@@ -817,7 +817,7 @@ spec:
   scaleTargetRef:
     apiVersion: acko.io/v1alpha1
     kind: AerospikeCluster
-    name: aerospike-ce-3node
+    name: aerospike-3node
   minReplicas: 2
   maxReplicas: 8    # CE 최대값
   metrics:
@@ -975,13 +975,13 @@ kubectl -n aerospike get asc
 ### Conditions 확인
 
 ```bash
-kubectl -n aerospike get asc aerospike-ce-3node -o jsonpath='{.status.conditions}' | jq .
+kubectl -n aerospike get asc aerospike-3node -o jsonpath='{.status.conditions}' | jq .
 ```
 
 ### 파드 상태 확인
 
 ```bash
-kubectl -n aerospike get asc aerospike-ce-3node -o jsonpath='{.status.pods}' | jq .
+kubectl -n aerospike get asc aerospike-3node -o jsonpath='{.status.pods}' | jq .
 ```
 
 각 파드 상태에 포함된 정보:
@@ -1029,7 +1029,7 @@ kubectl -n aerospike-operator logs -l control-plane=controller-manager -f
 kubectl get events --field-selector reason=CircuitBreakerActive -n aerospike
 
 # 실패 횟수와 마지막 오류 확인
-kubectl -n aerospike get asc aerospike-ce-3node \
+kubectl -n aerospike get asc aerospike-3node \
   -o jsonpath='{.status.failedReconcileCount}{"\t"}{.status.lastReconcileError}'
 ```
 

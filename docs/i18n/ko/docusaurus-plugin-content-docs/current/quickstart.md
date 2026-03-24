@@ -107,7 +107,7 @@ kubectl apply -f - <<'EOF'
 apiVersion: acko.io/v1alpha1
 kind: AerospikeCluster
 metadata:
-  name: aerospike-ce-basic
+  name: aerospike-basic
   namespace: aerospike
 spec:
   size: 1
@@ -139,7 +139,7 @@ kubectl -n aerospike get pods
 
 ```
 NAME                 SIZE   PHASE       AGE
-aerospike-ce-basic   1      Completed   60s
+aerospike-basic   1      Completed   60s
 ```
 
 ## Step 6: Aerospike 접속
@@ -152,7 +152,7 @@ aerospike-ce-basic   1      Completed   60s
 ```bash
 kubectl -n aerospike run aql-client --rm -it --restart=Never \
   --image=aerospike/aerospike-tools:latest \
-  -- aql -h aerospike-ce-basic -p 3000
+  -- aql -h aerospike-basic -p 3000
 ```
 
 ```
@@ -180,7 +180,7 @@ aql> SELECT * FROM test.users
 ```bash
 kubectl -n aerospike run asinfo-client --rm -it --restart=Never \
   --image=aerospike/aerospike-tools:latest \
-  -- asinfo -h aerospike-ce-basic -p 3000 -v status
+  -- asinfo -h aerospike-basic -p 3000 -v status
 ```
 
 ```
@@ -191,7 +191,7 @@ ok
 # 네임스페이스 통계
 kubectl -n aerospike run asinfo-client --rm -it --restart=Never \
   --image=aerospike/aerospike-tools:latest \
-  -- asinfo -h aerospike-ce-basic -p 3000 -v "namespace/test"
+  -- asinfo -h aerospike-basic -p 3000 -v "namespace/test"
 ```
 
 </TabItem>

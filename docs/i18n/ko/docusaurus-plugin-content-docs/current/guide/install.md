@@ -549,14 +549,14 @@ kubectl create namespace aerospike --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply -f config/samples/acko_v1alpha1_aerospikecluster.yaml
 
 echo "Aerospike 파드 준비 대기 중..."
-kubectl -n aerospike wait --for=condition=Ready pod/aerospike-ce-basic-0-0 --timeout=120s
+kubectl -n aerospike wait --for=condition=Ready pod/aerospike-basic-0-0 --timeout=120s
 
 # =============================================================================
 # 6. 검증: Aerospike 파드에서 asinfo 실행
 # =============================================================================
 echo "=== Aerospike 클러스터 정보 ==="
-kubectl -n aerospike exec -it aerospike-ce-basic-0-0 -- asinfo -v status
-kubectl -n aerospike exec -it aerospike-ce-basic-0-0 -- asinfo -v build
+kubectl -n aerospike exec -it aerospike-basic-0-0 -- asinfo -v status
+kubectl -n aerospike exec -it aerospike-basic-0-0 -- asinfo -v build
 
 # =============================================================================
 # 7. Grafana port-forward (http://localhost:3000 에서 접속)

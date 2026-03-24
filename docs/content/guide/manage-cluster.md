@@ -12,7 +12,7 @@ This guide covers day-2 operations: scaling, updates, configuration changes, and
 Change `spec.size` to scale the cluster up or down.
 
 ```bash
-kubectl -n aerospike patch asc aerospike-ce-3node --type merge -p '{"spec":{"size":5}}'
+kubectl -n aerospike patch asc aerospike-3node --type merge -p '{"spec":{"size":5}}'
 ```
 
 The operator creates or removes pods to match the desired size. For multi-rack deployments, pods are distributed evenly across racks.
@@ -163,7 +163,7 @@ Before applying any dynamic changes, the operator validates all changes as a bat
 After a config change with `enableDynamicConfigUpdate: true`, check per-pod status:
 
 ```bash
-kubectl -n aerospike get asc aerospike-ce-3node -o jsonpath='{.status.pods}' | jq '.[] | {name: .podName, dynamicConfig: .dynamicConfigStatus}'
+kubectl -n aerospike get asc aerospike-3node -o jsonpath='{.status.pods}' | jq '.[] | {name: .podName, dynamicConfig: .dynamicConfigStatus}'
 ```
 
 | Status | Meaning |
@@ -210,14 +210,14 @@ behave exactly as before.
 Check the per-pod gate condition:
 
 ```bash
-kubectl -n aerospike get pod aerospike-ce-3node-0 \
+kubectl -n aerospike get pod aerospike-3node-0 \
   -o jsonpath='{.status.conditions}' | jq '.[] | select(.type=="acko.io/aerospike-ready")'
 ```
 
 The operator also reflects the gate status in the cluster's pod status:
 
 ```bash
-kubectl -n aerospike get asc aerospike-ce-3node \
+kubectl -n aerospike get asc aerospike-3node \
   -o jsonpath='{.status.pods}' | jq 'to_entries[] | {pod: .key, gateOk: .value.readinessGateSatisfied}'
 ```
 
@@ -252,10 +252,10 @@ Temporarily stop the operator from reconciling a cluster by setting `spec.paused
 
 ```bash
 # Pause reconciliation
-kubectl -n aerospike patch asc aerospike-ce-3node --type merge -p '{"spec":{"paused":true}}'
+kubectl -n aerospike patch asc aerospike-3node --type merge -p '{"spec":{"paused":true}}'
 
 # Verify paused state
-kubectl -n aerospike get asc aerospike-ce-3node -o jsonpath='{.status.phase}'
+kubectl -n aerospike get asc aerospike-3node -o jsonpath='{.status.phase}'
 # Output: Paused
 ```
 
@@ -263,7 +263,7 @@ To resume reconciliation, set `paused` to `false` or remove it entirely. The ope
 
 ```bash
 # Resume reconciliation
-kubectl -n aerospike patch asc aerospike-ce-3node --type merge -p '{"spec":{"paused":null}}'
+kubectl -n aerospike patch asc aerospike-3node --type merge -p '{"spec":{"paused":null}}'
 ```
 
 :::warning
@@ -302,7 +302,7 @@ The `status.phaseReason` field provides additional context (e.g., "Rolling resta
 The `status.health` field gives a quick "ready/total" summary:
 
 ```bash
-kubectl -n aerospike get asc aerospike-ce-3node -o jsonpath='{.status.health}'
+kubectl -n aerospike get asc aerospike-3node -o jsonpath='{.status.health}'
 # Output: 3/3
 ```
 
@@ -313,7 +313,7 @@ A value of `2/3` means 2 out of 3 pods are ready. This maps to the `HEALTH` colu
 The operator maintains six condition types that provide a detailed breakdown of cluster health:
 
 ```bash
-kubectl -n aerospike get asc aerospike-ce-3node -o jsonpath='{.status.conditions}' | jq .
+kubectl -n aerospike get asc aerospike-3node -o jsonpath='{.status.conditions}' | jq .
 ```
 
 | Condition | True When |
@@ -330,7 +330,7 @@ kubectl -n aerospike get asc aerospike-ce-3node -o jsonpath='{.status.conditions
 A cluster is fully healthy when `Ready`, `ConfigApplied`, `MigrationComplete`, and `ACLSynced` (if ACL is configured) are all `True`:
 
 ```bash
-kubectl -n aerospike get asc aerospike-ce-3node \
+kubectl -n aerospike get asc aerospike-3node \
   -o jsonpath='{range .status.conditions[*]}{.type}={.status}{"\n"}{end}'
 ```
 
@@ -353,7 +353,7 @@ The `status.aerospikeClusterSize` field reflects the cluster size as reported by
 - Pod startup (Aerospike has not yet joined the mesh)
 
 ```bash
-kubectl -n aerospike get asc aerospike-ce-3node \
+kubectl -n aerospike get asc aerospike-3node \
   -o jsonpath='K8s pods: {.status.size}, Aerospike cluster-size: {.status.aerospikeClusterSize}'
 ```
 
@@ -374,7 +374,7 @@ The operator tracks data migration progress in `status.migrationStatus`. On each
 
 ```bash
 # Cluster-level migration status
-kubectl -n aerospike get asc aerospike-ce-3node \
+kubectl -n aerospike get asc aerospike-3node \
   -o jsonpath='{.status.migrationStatus}' | jq .
 ```
 
@@ -390,7 +390,7 @@ Example output:
 **Per-pod migration records:**
 
 ```bash
-kubectl -n aerospike get asc aerospike-ce-3node \
+kubectl -n aerospike get asc aerospike-3node \
   -o jsonpath='{.status.pods}' | jq 'to_entries[] | {pod: .key, migrating: .value.migratingPartitions}'
 ```
 
@@ -398,11 +398,11 @@ kubectl -n aerospike get asc aerospike-ce-3node \
 
 ```bash
 # Check if migration is in progress (returns true/false)
-kubectl -n aerospike get asc aerospike-ce-3node \
+kubectl -n aerospike get asc aerospike-3node \
   -o jsonpath='InProgress={.status.migrationStatus.inProgress} Remaining={.status.migrationStatus.remainingPartitions}'
 
 # Check MigrationComplete condition directly
-kubectl -n aerospike get asc aerospike-ce-3node \
+kubectl -n aerospike get asc aerospike-3node \
   -o jsonpath='{range .status.conditions[?(@.type=="MigrationComplete")]}{.status}{end}'
 ```
 
@@ -412,7 +412,7 @@ The operator exposes `acko_cluster_migrating_partitions` as a Prometheus gauge m
 
 ```promql
 # Alert when migration has been running for more than 30 minutes
-acko_cluster_migrating_partitions{namespace="aerospike", name="aerospike-ce-3node"} > 0
+acko_cluster_migrating_partitions{namespace="aerospike", name="aerospike-3node"} > 0
 
 # Track migration progress rate (partitions migrated per second)
 deriv(acko_cluster_migrating_partitions[5m])
@@ -464,8 +464,8 @@ spec:
     - kind: WarmRestart
       id: "config-reload-v2"       # Unique ID (1-20 chars)
       podList:                      # Optional: empty = all pods
-        - aerospike-ce-3node-0
-        - aerospike-ce-3node-1
+        - aerospike-3node-0
+        - aerospike-3node-1
 ```
 
 ### PodRestart
@@ -478,13 +478,13 @@ spec:
     - kind: PodRestart
       id: "cold-restart-01"
       podList:
-        - aerospike-ce-3node-2
+        - aerospike-3node-2
 ```
 
 ### Checking Operation Status
 
 ```bash
-kubectl -n aerospike get asc aerospike-ce-3node -o jsonpath='{.status.operationStatus}' | jq .
+kubectl -n aerospike get asc aerospike-3node -o jsonpath='{.status.operationStatus}' | jq .
 ```
 
 The status includes `phase` (`InProgress`, `Completed`, `Error`), `completedPods`, and `failedPods`.
@@ -822,7 +822,7 @@ spec:
   scaleTargetRef:
     apiVersion: acko.io/v1alpha1
     kind: AerospikeCluster
-    name: aerospike-ce-3node
+    name: aerospike-3node
   minReplicas: 2
   maxReplicas: 8    # CE maximum
   metrics:
@@ -980,13 +980,13 @@ kubectl -n aerospike get asc
 ### Check Conditions
 
 ```bash
-kubectl -n aerospike get asc aerospike-ce-3node -o jsonpath='{.status.conditions}' | jq .
+kubectl -n aerospike get asc aerospike-3node -o jsonpath='{.status.conditions}' | jq .
 ```
 
 ### Check Pod Status
 
 ```bash
-kubectl -n aerospike get asc aerospike-ce-3node -o jsonpath='{.status.pods}' | jq .
+kubectl -n aerospike get asc aerospike-3node -o jsonpath='{.status.pods}' | jq .
 ```
 
 Each pod status includes:
@@ -1034,7 +1034,7 @@ While the circuit breaker is active, a `CircuitBreakerActive` warning event is e
 kubectl get events --field-selector reason=CircuitBreakerActive -n aerospike
 
 # Check the failure count and last error
-kubectl -n aerospike get asc aerospike-ce-3node \
+kubectl -n aerospike get asc aerospike-3node \
   -o jsonpath='{.status.failedReconcileCount}{"\t"}{.status.lastReconcileError}'
 ```
 
