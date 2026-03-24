@@ -138,7 +138,7 @@ kubectl -n aerospike get pods
 Expected output:
 
 ```
-NAME                 RACKSIZE   HEALTH   PHASE       AGE
+NAME              RACKSIZE   HEALTH   PHASE       AGE
 aerospike-basic   1          1/1      Completed   60s
 ```
 

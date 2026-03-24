@@ -138,7 +138,7 @@ kubectl -n aerospike get pods
 예상 출력:
 
 ```
-NAME                 SIZE   PHASE       AGE
+NAME              SIZE   PHASE       AGE
 aerospike-basic   1      Completed   60s
 ```
 
