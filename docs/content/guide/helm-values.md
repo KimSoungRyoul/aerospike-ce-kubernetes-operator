@@ -157,6 +157,24 @@ The Aerospike Cluster Manager is a full-stack web dashboard deployed alongside t
 | `ui.serviceAccount.annotations` | object | `{}` | Annotations for the UI service account. |
 | `ui.rbac.create` | bool | `true` | Create ClusterRole and ClusterRoleBinding for K8s API access. |
 
+When `ui.rbac.create=true`, the generated ClusterRole includes the following permissions:
+
+| API Group | Resources | Verbs |
+|-----------|-----------|-------|
+| `acko.io` | `aerospikeclusters`, `aerospikeclustertemplates` | get, list, watch, create, update, patch, delete |
+| `acko.io` | `aerospikeclusters/status` | get |
+| `acko.io` | `aerospikeclustertemplates/status` | get |
+| `""` (core) | `pods`, `services`, `persistentvolumeclaims` | delete, get, list, watch |
+| `""` (core) | `pods/log` | get |
+| `""` (core) | `configmaps` | get, list, watch |
+| `""` (core) | `secrets` | list |
+| `""` (core) | `persistentvolumes` | get, list |
+| `""` (core) | `nodes` | get, list |
+| `""` (core) | `events` | get, list, watch |
+| `""` (core) | `namespaces` | create, list |
+| `storage.k8s.io` | `storageclasses` | list |
+| `autoscaling` | `horizontalpodautoscalers` | get, list, watch, create, update, patch, delete |
+
 ### Service
 
 | Key | Type | Default | Description |
@@ -193,6 +211,8 @@ The Aerospike Cluster Manager is a full-stack web dashboard deployed alongside t
 | `ui.postgresql.resources.limits.cpu` | string | `250m` | CPU limit. |
 | `ui.postgresql.resources.limits.memory` | string | `256Mi` | Memory limit. |
 
+The embedded PostgreSQL sidecar includes a **startup probe** that runs `pg_isready` to verify database readiness before the UI container begins accepting traffic. This prevents the backend from attempting database connections before PostgreSQL has finished initialization.
+
 ### Persistence
 
 | Key | Type | Default | Description |
@@ -201,6 +221,15 @@ The Aerospike Cluster Manager is a full-stack web dashboard deployed alongside t
 | `ui.persistence.storageClassName` | string | `""` | Storage class name (empty = default). |
 | `ui.persistence.accessMode` | string | `ReadWriteOnce` | Access mode. |
 | `ui.persistence.size` | string | `1Gi` | Volume size. |
+
+### Deployment Strategy & Graceful Shutdown
+
+The UI Deployment uses an explicit update strategy based on the PostgreSQL configuration:
+
+- **With embedded PostgreSQL** (`ui.postgresql.enabled=true`): Uses `Recreate` strategy because the PVC can only be mounted by one pod at a time.
+- **Without embedded PostgreSQL** (`ui.postgresql.enabled=false`): Uses `RollingUpdate` strategy with `maxSurge: 1` and `maxUnavailable: 0` for zero-downtime deployments.
+
+The UI container includes a **preStop lifecycle hook** (`sleep 5`) to allow in-flight requests to complete before the pod is terminated. Combined with `terminationGracePeriodSeconds` (default: 45), this ensures graceful shutdown during rollouts and node drains.
 
 ### K8s Cluster Management
 
@@ -253,6 +282,8 @@ The Aerospike Cluster Manager is a full-stack web dashboard deployed alongside t
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
+| `ui.env.frontendPort` | string | (from `ui.service.frontendPort`) | Frontend port injected into the ConfigMap as `FRONTEND_PORT`. Automatically derived from the service port configuration. |
+| `ui.env.backendPort` | string | (from `ui.service.backendPort`) | Backend port injected into the ConfigMap as `BACKEND_PORT`. Automatically derived from the service port configuration. |
 | `ui.env.corsOrigins` | string | `""` | Backend CORS origins. Empty means no CORS (frontend proxies via Next.js rewrites). |
 | `ui.env.logLevel` | string | `"INFO"` | Log level: `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
 | `ui.env.logFormat` | string | `"text"` | Log format: `text` for human-readable, `json` for structured logging. |
@@ -270,6 +301,8 @@ The Aerospike Cluster Manager is a full-stack web dashboard deployed alongside t
 | `ui.metrics.serviceMonitor.interval` | string | `30s` | Scrape interval. |
 | `ui.metrics.serviceMonitor.scrapeTimeout` | string | `10s` | Scrape timeout. |
 | `ui.metrics.serviceMonitor.labels` | object | `{}` | Additional labels for ServiceMonitor discovery. |
+
+The UI ServiceMonitor scrapes the backend metrics endpoint at `/api/metrics`. This path is explicitly set in the ServiceMonitor template to ensure Prometheus collects application-level metrics correctly.
 
 ### UI Scheduling
 
