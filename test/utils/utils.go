@@ -114,7 +114,7 @@ metadata:
 spec:
   selfSigned: {}`
 
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		cmd := exec.Command("kubectl", "apply", "-f", "-")
 		cmd.Stdin = strings.NewReader(issuerYAML)
 		if _, err := Run(cmd); err == nil {
