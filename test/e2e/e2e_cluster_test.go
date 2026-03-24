@@ -123,9 +123,11 @@ var _ = Describe("AerospikeCluster Samples", Ordered, func() {
 			}, defaultTimeout, 2*time.Second).Should(Succeed())
 
 			By("verifying status.size is 1")
-			cluster, err := utils.GetCluster(ctx, k8sClient, clusterName, aerospikeNS)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(cluster.Status.Size).To(Equal(int32(1)))
+			Eventually(func(g Gomega) {
+				cluster, err := utils.GetCluster(ctx, k8sClient, clusterName, aerospikeNS)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(cluster.Status.Size).To(Equal(int32(1)))
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
 		})
 	})
 
@@ -166,13 +168,11 @@ var _ = Describe("AerospikeCluster Samples", Ordered, func() {
 		})
 
 		It("should report correct status", func() {
-			By("verifying status.size is 3")
+			By("verifying status.size and pod status")
 			Eventually(func(g Gomega) {
 				cluster, err := utils.GetCluster(ctx, k8sClient, clusterName, aerospikeNS)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(cluster.Status.Size).To(Equal(int32(3)))
-
-				By("verifying all pods have correct image in status")
 				g.Expect(cluster.Status.Pods).To(HaveLen(3))
 				for _, ps := range cluster.Status.Pods {
 					g.Expect(ps.Image).To(Equal("aerospike:ce-8.1.1.1"))

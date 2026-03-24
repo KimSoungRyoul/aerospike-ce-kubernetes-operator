@@ -75,18 +75,20 @@ var _ = Describe("Multi-rack cluster", Ordered, Label("heavy"), func() {
 			}, multiNodeTimeout, 2*time.Second).Should(Succeed())
 
 			By("verifying one StatefulSet per rack is created")
-			stsList, err := utils.ListClusterStatefulSets(ctx, k8sClient, clusterName, multirackNS)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(stsList.Items).To(HaveLen(2))
+			Eventually(func(g Gomega) {
+				stsList, err := utils.ListClusterStatefulSets(ctx, k8sClient, clusterName, multirackNS)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(stsList.Items).To(HaveLen(2))
 
-			stsNames := make([]string, 0, len(stsList.Items))
-			for _, sts := range stsList.Items {
-				stsNames = append(stsNames, sts.Name)
-			}
-			Expect(stsNames).To(ContainElements(
-				fmt.Sprintf("%s-1", clusterName),
-				fmt.Sprintf("%s-2", clusterName),
-			))
+				stsNames := make([]string, 0, len(stsList.Items))
+				for _, sts := range stsList.Items {
+					stsNames = append(stsNames, sts.Name)
+				}
+				g.Expect(stsNames).To(ContainElements(
+					fmt.Sprintf("%s-1", clusterName),
+					fmt.Sprintf("%s-2", clusterName),
+				))
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
 
 			By("verifying total pod count matches spec.size")
 			Eventually(func(g Gomega) {
@@ -96,28 +98,32 @@ var _ = Describe("Multi-rack cluster", Ordered, Label("heavy"), func() {
 			}, multiNodeTimeout, 2*time.Second).Should(Succeed())
 
 			By("verifying pods are distributed evenly across racks")
-			podList, err := utils.ListClusterPods(ctx, k8sClient, clusterName, multirackNS)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(podList.Items).To(HaveLen(4))
+			Eventually(func(g Gomega) {
+				podList, err := utils.ListClusterPods(ctx, k8sClient, clusterName, multirackNS)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(podList.Items).To(HaveLen(4))
 
-			rackCounts := map[string]int{}
-			for _, pod := range podList.Items {
-				rack := pod.Labels["acko.io/rack"]
-				Expect(rack).NotTo(BeEmpty(), "pod %s should have rack label", pod.Name)
-				rackCounts[rack]++
-			}
-			Expect(rackCounts).To(HaveLen(2))
-			for rack, count := range rackCounts {
-				Expect(count).To(Equal(2), "rack %s should have 2 pods", rack)
-			}
+				rackCounts := map[string]int{}
+				for _, pod := range podList.Items {
+					rack := pod.Labels["acko.io/rack"]
+					g.Expect(rack).NotTo(BeEmpty(), "pod %s should have rack label", pod.Name)
+					rackCounts[rack]++
+				}
+				g.Expect(rackCounts).To(HaveLen(2))
+				for rack, count := range rackCounts {
+					g.Expect(count).To(Equal(2), "rack %s should have 2 pods", rack)
+				}
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
 
 			By("verifying one ConfigMap per rack is created")
-			for _, rackID := range []int{1, 2} {
-				cmName := fmt.Sprintf("%s-%d-config", clusterName, rackID)
-				exists, err := utils.ConfigMapExists(ctx, k8sClient, cmName, multirackNS)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(exists).To(BeTrue(), "configmap %s should exist", cmName)
-			}
+			Eventually(func(g Gomega) {
+				for _, rackID := range []int{1, 2} {
+					cmName := fmt.Sprintf("%s-%d-config", clusterName, rackID)
+					exists, err := utils.ConfigMapExists(ctx, k8sClient, cmName, multirackNS)
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(exists).To(BeTrue(), "configmap %s should exist", cmName)
+				}
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
 		})
 
 		It("should report correct status for multi-rack cluster", func() {
@@ -182,20 +188,22 @@ var _ = Describe("Multi-rack cluster", Ordered, Label("heavy"), func() {
 			}, multiNodeTimeout, 2*time.Second).Should(Succeed())
 
 			By("verifying pods are distributed evenly after scale up")
-			podList, err := utils.ListClusterPods(ctx, k8sClient, clusterName, multirackNS)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(podList.Items).To(HaveLen(4))
+			Eventually(func(g Gomega) {
+				podList, err := utils.ListClusterPods(ctx, k8sClient, clusterName, multirackNS)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(podList.Items).To(HaveLen(4))
 
-			rackCounts := map[string]int{}
-			for _, pod := range podList.Items {
-				rack := pod.Labels["acko.io/rack"]
-				Expect(rack).NotTo(BeEmpty(), "pod %s should have rack label", pod.Name)
-				rackCounts[rack]++
-			}
-			Expect(rackCounts).To(HaveLen(2))
-			for rack, count := range rackCounts {
-				Expect(count).To(Equal(2), "rack %s should have 2 pods after scale up", rack)
-			}
+				rackCounts := map[string]int{}
+				for _, pod := range podList.Items {
+					rack := pod.Labels["acko.io/rack"]
+					g.Expect(rack).NotTo(BeEmpty(), "pod %s should have rack label", pod.Name)
+					rackCounts[rack]++
+				}
+				g.Expect(rackCounts).To(HaveLen(2))
+				for rack, count := range rackCounts {
+					g.Expect(count).To(Equal(2), "rack %s should have 2 pods after scale up", rack)
+				}
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
 
 			By("verifying status.size reflects the new size")
 			Eventually(func(g Gomega) {
