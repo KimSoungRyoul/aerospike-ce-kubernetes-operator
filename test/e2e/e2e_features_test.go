@@ -351,6 +351,13 @@ var _ = Describe("Enhanced Features", Ordered, func() {
 			By("pausing the cluster")
 			Expect(utils.PatchCluster(ctx, k8sClient, clusterName, featuresNS, []byte(`{"spec":{"paused":true}}`))).To(Succeed())
 
+			By("waiting for controller to acknowledge pause")
+			Eventually(func(g Gomega) {
+				c, err := utils.GetCluster(ctx, k8sClient, clusterName, featuresNS)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(c.Status.Phase).To(Equal(ackov1alpha1.AerospikePhasePaused))
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
+
 			By("changing config while paused")
 			patch := `{"spec":{"aerospikeConfig":{"service":{"proto-fd-max":25000}}}}`
 			Expect(utils.PatchCluster(ctx, k8sClient, clusterName, featuresNS, []byte(patch))).To(Succeed())
