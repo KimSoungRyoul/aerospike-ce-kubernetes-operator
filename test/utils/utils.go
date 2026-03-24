@@ -150,7 +150,12 @@ func LoadImageToKindClusterWithName(name string) error {
 	// When using Podman, kind load docker-image may fail to find images.
 	// Use podman save + kind load image-archive as a workaround.
 	if usePodman {
-		archivePath := fmt.Sprintf("/tmp/kind-image-%d.tar", os.Getpid())
+		f, err := os.CreateTemp("", "kind-image-*.tar")
+		if err != nil {
+			return fmt.Errorf("creating temp archive: %w", err)
+		}
+		archivePath := f.Name()
+		_ = f.Close()
 		defer func() { _ = os.Remove(archivePath) }()
 
 		cmd := exec.Command("podman", "save", "--format", "docker-archive", name, "-o", archivePath)
@@ -158,7 +163,7 @@ func LoadImageToKindClusterWithName(name string) error {
 			return fmt.Errorf("podman save: %w", err)
 		}
 		cmd = exec.Command(kindBinary, "load", "image-archive", archivePath, "--name", cluster)
-		_, err := Run(cmd)
+		_, err = Run(cmd)
 		return err
 	}
 

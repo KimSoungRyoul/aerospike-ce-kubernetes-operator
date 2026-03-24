@@ -93,21 +93,21 @@ var _ = Describe("AerospikeCluster Samples", Ordered, func() {
 		})
 
 		It("should create expected Kubernetes resources", func() {
-			By("verifying headless service exists")
-			exists, err := utils.ServiceExists(ctx, k8sClient, clusterName, aerospikeNS)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(exists).To(BeTrue(), "headless service should exist")
+			By("verifying headless service, StatefulSet, and ConfigMap exist")
+			Eventually(func(g Gomega) {
+				exists, err := utils.ServiceExists(ctx, k8sClient, clusterName, aerospikeNS)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(exists).To(BeTrue(), "headless service should exist")
 
-			By("verifying StatefulSet exists with correct name")
-			stsList, err := utils.ListClusterStatefulSets(ctx, k8sClient, clusterName, aerospikeNS)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(stsList.Items).To(HaveLen(1))
-			Expect(stsList.Items[0].Name).To(Equal(fmt.Sprintf("%s-0", clusterName)))
+				stsList, err := utils.ListClusterStatefulSets(ctx, k8sClient, clusterName, aerospikeNS)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(stsList.Items).To(HaveLen(1))
+				g.Expect(stsList.Items[0].Name).To(Equal(fmt.Sprintf("%s-0", clusterName)))
 
-			By("verifying ConfigMap exists")
-			exists, err = utils.ConfigMapExists(ctx, k8sClient, fmt.Sprintf("%s-0-config", clusterName), aerospikeNS)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(exists).To(BeTrue(), "configmap should exist")
+				cmExists, err := utils.ConfigMapExists(ctx, k8sClient, fmt.Sprintf("%s-0-config", clusterName), aerospikeNS)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(cmExists).To(BeTrue(), "configmap should exist")
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
 		})
 
 		It("should populate pod status correctly", func() {
@@ -209,47 +209,51 @@ var _ = Describe("AerospikeCluster Samples", Ordered, func() {
 		})
 
 		It("should create 3 StatefulSets (one per rack)", func() {
-			stsList, err := utils.ListClusterStatefulSets(ctx, k8sClient, clusterName, aerospikeNS)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(stsList.Items).To(HaveLen(3))
+			Eventually(func(g Gomega) {
+				stsList, err := utils.ListClusterStatefulSets(ctx, k8sClient, clusterName, aerospikeNS)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(stsList.Items).To(HaveLen(3))
 
-			stsNames := make([]string, 0, len(stsList.Items))
-			for _, sts := range stsList.Items {
-				stsNames = append(stsNames, sts.Name)
-			}
-			Expect(stsNames).To(ContainElements(
-				fmt.Sprintf("%s-1", clusterName),
-				fmt.Sprintf("%s-2", clusterName),
-				fmt.Sprintf("%s-3", clusterName),
-			))
+				stsNames := make([]string, 0, len(stsList.Items))
+				for _, sts := range stsList.Items {
+					stsNames = append(stsNames, sts.Name)
+				}
+				g.Expect(stsNames).To(ContainElements(
+					fmt.Sprintf("%s-1", clusterName),
+					fmt.Sprintf("%s-2", clusterName),
+					fmt.Sprintf("%s-3", clusterName),
+				))
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
 		})
 
 		It("should assign rack labels to pods", func() {
-			podList, err := utils.ListClusterPods(ctx, k8sClient, clusterName, aerospikeNS)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(podList.Items).To(HaveLen(6))
+			Eventually(func(g Gomega) {
+				podList, err := utils.ListClusterPods(ctx, k8sClient, clusterName, aerospikeNS)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(podList.Items).To(HaveLen(6))
 
-			rackCounts := map[string]int{}
-			for _, pod := range podList.Items {
-				rack := pod.Labels["acko.io/rack"]
-				Expect(rack).NotTo(BeEmpty(), "pod %s should have rack label", pod.Name)
-				rackCounts[rack]++
-			}
-
-			By("verifying each rack has 2 pods")
-			Expect(rackCounts).To(HaveLen(3))
-			for rack, count := range rackCounts {
-				Expect(count).To(Equal(2), "rack %s should have 2 pods", rack)
-			}
+				rackCounts := map[string]int{}
+				for _, pod := range podList.Items {
+					rack := pod.Labels["acko.io/rack"]
+					g.Expect(rack).NotTo(BeEmpty(), "pod %s should have rack label", pod.Name)
+					rackCounts[rack]++
+				}
+				g.Expect(rackCounts).To(HaveLen(3))
+				for rack, count := range rackCounts {
+					g.Expect(count).To(Equal(2), "rack %s should have 2 pods", rack)
+				}
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
 		})
 
 		It("should create 3 ConfigMaps (one per rack)", func() {
-			for _, rackID := range []int{1, 2, 3} {
-				cmName := fmt.Sprintf("%s-%d-config", clusterName, rackID)
-				exists, err := utils.ConfigMapExists(ctx, k8sClient, cmName, aerospikeNS)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(exists).To(BeTrue(), "configmap %s should exist", cmName)
-			}
+			Eventually(func(g Gomega) {
+				for _, rackID := range []int{1, 2, 3} {
+					cmName := fmt.Sprintf("%s-%d-config", clusterName, rackID)
+					exists, err := utils.ConfigMapExists(ctx, k8sClient, cmName, aerospikeNS)
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(exists).To(BeTrue(), "configmap %s should exist", cmName)
+				}
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
 		})
 
 		It("should report correct status.size", func() {

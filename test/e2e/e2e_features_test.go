@@ -118,22 +118,24 @@ var _ = Describe("Enhanced Features", Ordered, func() {
 		})
 
 		It("should have matching config hash between pod annotation and status", func() {
-			podList, err := utils.ListClusterPods(ctx, k8sClient, clusterName, featuresNS)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(podList.Items).NotTo(BeEmpty())
+			Eventually(func(g Gomega) {
+				podList, err := utils.ListClusterPods(ctx, k8sClient, clusterName, featuresNS)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(podList.Items).NotTo(BeEmpty())
 
-			cluster, err := utils.GetCluster(ctx, k8sClient, clusterName, featuresNS)
-			Expect(err).NotTo(HaveOccurred())
+				cluster, err := utils.GetCluster(ctx, k8sClient, clusterName, featuresNS)
+				g.Expect(err).NotTo(HaveOccurred())
 
-			for _, pod := range podList.Items {
-				annotationHash := pod.Annotations["acko.io/config-hash"]
-				Expect(annotationHash).NotTo(BeEmpty())
+				for _, pod := range podList.Items {
+					annotationHash := pod.Annotations["acko.io/config-hash"]
+					g.Expect(annotationHash).NotTo(BeEmpty())
 
-				if ps, ok := cluster.Status.Pods[pod.Name]; ok {
-					Expect(ps.ConfigHash).To(Equal(annotationHash),
-						"status configHash should match pod annotation for %s", pod.Name)
+					if ps, ok := cluster.Status.Pods[pod.Name]; ok {
+						g.Expect(ps.ConfigHash).To(Equal(annotationHash),
+							"status configHash should match pod annotation for %s", pod.Name)
+					}
 				}
-			}
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
 		})
 	})
 
