@@ -51,7 +51,7 @@ var _ = Describe("AerospikeCluster Samples", Ordered, func() {
 
 	AfterAll(func() {
 		By("cleaning up all sample clusters")
-		for _, name := range []string{"aerospike-ce-basic", "aerospike-ce-3node", "aerospike-ce-multirack", "aerospike-ce-acl"} {
+		for _, name := range []string{"aerospike-basic", "aerospike-3node", "aerospike-multirack", "aerospike-acl"} {
 			// Use kubectl delete with timeout to wait for finalizer cleanup,
 			// ensuring the operator finishes reconciling before the next suite starts.
 			cmd := exec.Command("kubectl", "delete", "aerospikecluster", name,
@@ -63,7 +63,7 @@ var _ = Describe("AerospikeCluster Samples", Ordered, func() {
 	})
 
 	Context("Basic single-node cluster", func() {
-		const clusterName = "aerospike-ce-basic"
+		const clusterName = "aerospike-basic"
 
 		It("should deploy and reach Completed phase", func() {
 			samplePath := filepath.Join(projectDir, "config", "samples", "acko_v1alpha1_aerospikecluster.yaml")
@@ -129,10 +129,10 @@ var _ = Describe("AerospikeCluster Samples", Ordered, func() {
 	})
 
 	Context("3-node cluster with PV storage", Label("heavy"), func() {
-		const clusterName = "aerospike-ce-3node"
+		const clusterName = "aerospike-3node"
 
 		It("should deploy 3 nodes and reach Completed phase", func() {
-			samplePath := filepath.Join(projectDir, "config", "samples", "aerospike-ce-cluster-3node.yaml")
+			samplePath := filepath.Join(projectDir, "config", "samples", "aerospike-cluster-3node.yaml")
 
 			By("loading and creating the 3-node sample CR")
 			cluster, err := loadClusterFromFile(samplePath)
@@ -180,10 +180,10 @@ var _ = Describe("AerospikeCluster Samples", Ordered, func() {
 	})
 
 	Context("Multi-rack 6-node cluster", Label("heavy"), func() {
-		const clusterName = "aerospike-ce-multirack"
+		const clusterName = "aerospike-multirack"
 
 		It("should deploy 6 nodes across 3 racks and reach Completed phase", func() {
-			samplePath := filepath.Join(projectDir, "config", "samples", "aerospike-ce-cluster-multirack.yaml")
+			samplePath := filepath.Join(projectDir, "config", "samples", "aerospike-cluster-multirack.yaml")
 
 			By("loading and creating the multi-rack sample CR")
 			cluster, err := loadClusterFromFile(samplePath)
@@ -257,10 +257,10 @@ var _ = Describe("AerospikeCluster Samples", Ordered, func() {
 	})
 
 	Context("ACL/Storage sample with cascadeDelete", Label("heavy"), func() {
-		const clusterName = "aerospike-ce-acl"
+		const clusterName = "aerospike-acl"
 
 		It("should deploy 3 nodes and reach Completed phase", func() {
-			samplePath := filepath.Join(projectDir, "config", "samples", "aerospike-ce-cluster-acl.yaml")
+			samplePath := filepath.Join(projectDir, "config", "samples", "aerospike-cluster-acl.yaml")
 
 			By("loading and creating the ACL sample CR")
 			cluster, err := loadClusterFromFile(samplePath)

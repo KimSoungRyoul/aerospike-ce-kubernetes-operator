@@ -42,7 +42,7 @@ const namespace = "aerospike-operator"
 const serviceAccountName = "aerospike-ce-kubernetes-operator-controller-manager"
 
 // metricsServiceName is the name of the metrics service of the project
-const metricsServiceName = "aerospike-ce-kubernetes-operator-controller-manager-metrics-service"
+const metricsServiceName = "aerospike-ce-kubernetes-operator-metrics-service"
 
 // metricsRoleBindingName is the name of the RBAC that will be created to allow get the metrics data
 const metricsRoleBindingName = "aerospike-ce-kubernetes-operator-metrics-binding"
