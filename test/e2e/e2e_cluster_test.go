@@ -140,7 +140,9 @@ var _ = Describe("AerospikeCluster Samples", Ordered, func() {
 			By("loading and creating the 3-node sample CR")
 			cluster, err := loadClusterFromFile(samplePath)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(k8sClient.Create(ctx, cluster)).To(Succeed())
+			Eventually(func() error {
+				return k8sClient.Create(ctx, cluster)
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
 			By("waiting for Completed phase")
 			Eventually(func(g Gomega) {
@@ -191,7 +193,9 @@ var _ = Describe("AerospikeCluster Samples", Ordered, func() {
 			By("loading and creating the multi-rack sample CR")
 			cluster, err := loadClusterFromFile(samplePath)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(k8sClient.Create(ctx, cluster)).To(Succeed())
+			Eventually(func() error {
+				return k8sClient.Create(ctx, cluster)
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
 			By("waiting for Completed phase")
 			Eventually(func(g Gomega) {
@@ -287,7 +291,9 @@ var _ = Describe("AerospikeCluster Samples", Ordered, func() {
 			By("loading and creating the ACL sample CR")
 			cluster, err := loadClusterFromFile(samplePath)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(k8sClient.Create(ctx, cluster)).To(Succeed())
+			Eventually(func() error {
+				return k8sClient.Create(ctx, cluster)
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
 			By("waiting for Completed phase")
 			Eventually(func(g Gomega) {

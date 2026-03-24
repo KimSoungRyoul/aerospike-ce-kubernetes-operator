@@ -155,7 +155,9 @@ var _ = Describe("Multi-rack cluster", Ordered, Label("heavy"), func() {
 					},
 				}
 			})
-			Expect(k8sClient.Create(ctx, cluster)).To(Succeed())
+			Eventually(func() error {
+				return k8sClient.Create(ctx, cluster)
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
 			By("waiting for Completed phase with 2 pods")
 			Eventually(func(g Gomega) {
