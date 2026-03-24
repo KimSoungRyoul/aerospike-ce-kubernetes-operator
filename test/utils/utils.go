@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2" // nolint:revive,staticcheck
 )
@@ -93,9 +94,40 @@ func InstallCertManager() error {
 		"--namespace", "cert-manager",
 		"--timeout", "5m",
 	)
+	if _, err := Run(cmd); err != nil {
+		return err
+	}
 
-	_, err := Run(cmd)
-	return err
+	// Wait for the webhook to be able to serve TLS requests.
+	// The deployment may be Available before the webhook CA is fully provisioned.
+	return waitForCertManagerWebhookReady()
+}
+
+// waitForCertManagerWebhookReady polls cert-manager by creating and deleting
+// a self-signed Issuer until the webhook accepts the request (TLS ready).
+func waitForCertManagerWebhookReady() error {
+	issuerYAML := `apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: cert-manager-readiness-probe
+  namespace: cert-manager
+spec:
+  selfSigned: {}`
+
+	for i := 0; i < 30; i++ {
+		cmd := exec.Command("kubectl", "apply", "-f", "-")
+		cmd.Stdin = strings.NewReader(issuerYAML)
+		if _, err := Run(cmd); err == nil {
+			// Webhook accepted the request — clean up the probe resource.
+			cleanup := exec.Command("kubectl", "delete", "issuer",
+				"cert-manager-readiness-probe", "-n", "cert-manager", "--ignore-not-found")
+			_, _ = Run(cleanup)
+			return nil
+		}
+		_, _ = fmt.Fprintf(GinkgoWriter, "cert-manager webhook not ready yet, retrying (%d/30)...\n", i+1)
+		time.Sleep(2 * time.Second)
+	}
+	return fmt.Errorf("cert-manager webhook did not become ready within 60s")
 }
 
 // IsCertManagerCRDsInstalled checks if any Cert Manager CRDs are installed
