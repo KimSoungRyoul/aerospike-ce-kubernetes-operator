@@ -20,11 +20,11 @@ spec:
       - testns  # Namespaces that are rack-aware (must match aerospikeConfig namespaces)
     racks:
       - id: 1
-        zone: us-east1-a  # Pins rack-1 pods to this availability zone
+        zone: zone-a  # Pins rack-1 pods to this availability zone
       - id: 2
-        zone: us-east1-b  # Pins rack-2 pods to a different zone
+        zone: zone-b  # Pins rack-2 pods to a different zone
       - id: 3
-        zone: us-east1-c  # Pins rack-3 pods to a third zone
+        zone: zone-c  # Pins rack-3 pods to a third zone
 
   podSpec:
     aerospikeContainer:

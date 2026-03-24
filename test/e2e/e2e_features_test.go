@@ -317,12 +317,16 @@ var _ = Describe("Enhanced Features", Ordered, func() {
 			}, defaultTimeout, 2*time.Second).Should(Succeed())
 
 			By("recording current configHash")
-			c, err := utils.GetCluster(ctx, k8sClient, clusterName, featuresNS)
-			Expect(err).NotTo(HaveOccurred())
 			var oldHash string
-			for _, ps := range c.Status.Pods {
-				oldHash = ps.ConfigHash
-			}
+			Eventually(func(g Gomega) {
+				c, err := utils.GetCluster(ctx, k8sClient, clusterName, featuresNS)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(c.Status.Pods).NotTo(BeEmpty())
+				for _, ps := range c.Status.Pods {
+					g.Expect(ps.ConfigHash).NotTo(BeEmpty(), "configHash should be populated")
+					oldHash = ps.ConfigHash
+				}
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
 
 			By("pausing the cluster")
 			Expect(utils.PatchCluster(ctx, k8sClient, clusterName, featuresNS, []byte(`{"spec":{"paused":true}}`))).To(Succeed())
