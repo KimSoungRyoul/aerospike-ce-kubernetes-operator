@@ -148,7 +148,8 @@ var _ = Describe("Manager", Ordered, func() {
 						return
 					}
 				}
-				g.Expect(false).To(BeTrue(), "Ready condition not found")
+				g.Expect(false).To(BeTrue(), fmt.Sprintf(
+					"Ready condition not found on pod %s; conditions: %v", pod.Name, pod.Status.Conditions))
 			}, 3*time.Minute, time.Second).Should(Succeed())
 
 			By("verifying that the controller manager is serving the metrics server")

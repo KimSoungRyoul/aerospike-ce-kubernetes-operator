@@ -85,8 +85,12 @@ var _ = BeforeSuite(func() {
 
 	By("creating manager namespace")
 	cmd = exec.Command("kubectl", "create", "ns", namespace)
-	_, err = utils.Run(cmd)
-	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to create manager namespace")
+	output, nsErr := utils.Run(cmd)
+	if nsErr != nil {
+		// Tolerate AlreadyExists (e.g., re-run against an existing cluster)
+		ExpectWithOffset(1, output).To(ContainSubstring("already exists"),
+			"Failed to create manager namespace: "+output)
+	}
 
 	By("labeling the namespace to enforce the restricted security policy")
 	cmd = exec.Command("kubectl", "label", "--overwrite", "ns", namespace,
@@ -127,13 +131,15 @@ var _ = BeforeSuite(func() {
 		)
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(podList.Items).To(HaveLen(1), "expected 1 controller pod")
-		for _, cond := range podList.Items[0].Status.Conditions {
+		pod := podList.Items[0]
+		for _, cond := range pod.Status.Conditions {
 			if cond.Type == corev1.PodReady {
 				g.Expect(cond.Status).To(Equal(corev1.ConditionTrue), "controller-manager pod not ready")
 				return
 			}
 		}
-		g.Expect(false).To(BeTrue(), "Ready condition not found on controller pod")
+		g.Expect(false).To(BeTrue(), fmt.Sprintf(
+			"Ready condition not found on controller pod %s; conditions: %v", pod.Name, pod.Status.Conditions))
 	}, 2*time.Minute, time.Second).Should(Succeed())
 
 	By("waiting for webhook to be ready")

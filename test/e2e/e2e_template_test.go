@@ -183,9 +183,9 @@ var _ = Describe("Cluster templates", Ordered, Label("heavy"), func() {
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(c.Status.TemplateSnapshot).NotTo(BeNil())
 				g.Expect(c.Status.TemplateSnapshot.Synced).To(BeTrue())
+				g.Expect(c.Status.TemplateSnapshot.ResourceVersion).NotTo(BeEmpty())
 				oldResourceVersion = c.Status.TemplateSnapshot.ResourceVersion
 			}, defaultTimeout, 2*time.Second).Should(Succeed())
-			Expect(oldResourceVersion).NotTo(BeEmpty(), "oldResourceVersion should have been captured")
 
 			By("modifying the template to trigger drift")
 			Expect(utils.PatchTemplate(ctx, k8sClient, templateName,
