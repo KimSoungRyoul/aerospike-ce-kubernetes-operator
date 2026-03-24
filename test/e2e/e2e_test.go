@@ -137,6 +137,7 @@ var _ = Describe("Manager", Ordered, func() {
 			Expect(token).NotTo(BeEmpty())
 
 			By("ensuring the controller pod is ready")
+			Expect(controllerPodName).NotTo(BeEmpty(), "controllerPodName not set; did the first It block run?")
 			Eventually(func(g Gomega) {
 				pod := &corev1.Pod{}
 				err := k8sClient.Get(ctx, client.ObjectKey{Name: controllerPodName, Namespace: namespace}, pod)

@@ -176,18 +176,16 @@ var _ = Describe("Cluster templates", Ordered, Label("heavy"), func() {
 				g.Expect(c.Status.Phase).To(Equal(ackov1alpha1.AerospikePhaseCompleted))
 			}, defaultTimeout, 2*time.Second).Should(Succeed())
 
-			By("verifying snapshot is initially synced")
+			By("verifying snapshot is initially synced and recording resourceVersion")
+			var oldResourceVersion string
 			Eventually(func(g Gomega) {
 				c, err := utils.GetCluster(ctx, k8sClient, clusterName, templateTestNS)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(c.Status.TemplateSnapshot).NotTo(BeNil())
 				g.Expect(c.Status.TemplateSnapshot.Synced).To(BeTrue())
+				oldResourceVersion = c.Status.TemplateSnapshot.ResourceVersion
 			}, defaultTimeout, 2*time.Second).Should(Succeed())
-
-			By("recording the template snapshot resourceVersion")
-			c, err := utils.GetCluster(ctx, k8sClient, clusterName, templateTestNS)
-			Expect(err).NotTo(HaveOccurred())
-			oldResourceVersion := c.Status.TemplateSnapshot.ResourceVersion
+			Expect(oldResourceVersion).NotTo(BeEmpty(), "oldResourceVersion should have been captured")
 
 			By("modifying the template to trigger drift")
 			Expect(utils.PatchTemplate(ctx, k8sClient, templateName,

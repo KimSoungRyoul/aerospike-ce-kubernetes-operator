@@ -341,7 +341,7 @@ var _ = Describe("Enhanced Features", Ordered, func() {
 			Eventually(func(g Gomega) {
 				c, err := utils.GetCluster(ctx, k8sClient, clusterName, featuresNS)
 				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(c.Status.Pods).NotTo(BeEmpty())
+				g.Expect(c.Status.Pods).To(HaveLen(1), "expected exactly 1 pod for 1-node cluster")
 				for _, ps := range c.Status.Pods {
 					g.Expect(ps.ConfigHash).NotTo(BeEmpty(), "configHash should be populated")
 					oldHash = ps.ConfigHash
