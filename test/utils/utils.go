@@ -190,6 +190,7 @@ func LoadImageToKindClusterWithName(name string) error {
 	// When using Podman, kind load docker-image may fail to find images.
 	// Use podman save + kind load image-archive as a workaround.
 	if usePodman {
+		fmt.Fprintf(os.Stderr, "[info] using Podman code path for image loading (cluster=%q, image=%q)\n", cluster, name)
 		containerTool := containerToolEnv
 		if containerTool == "" {
 			containerTool = podmanRuntime

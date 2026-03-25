@@ -20,11 +20,19 @@ package e2e
 
 import (
 	"os"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 
 	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
+)
+
+// Shared constants used across all e2e test files.
+const (
+	aerospikeNS      = "aerospike"
+	defaultTimeout   = 3 * time.Minute
+	multiNodeTimeout = 5 * time.Minute
 )
 
 // newTestCluster creates a minimal AerospikeCluster for e2e testing.
