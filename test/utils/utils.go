@@ -32,6 +32,7 @@ const (
 
 	defaultKindBinary  = "kind"
 	defaultKindCluster = "kind"
+	podmanRuntime      = "podman"
 )
 
 func warnError(err error) {
@@ -177,7 +178,10 @@ func LoadImageToKindClusterWithName(name string) error {
 		kindBinary = v
 	}
 
-	usePodman := os.Getenv("CONTAINER_TOOL") == "podman" || os.Getenv("KIND_PROVIDER") == "podman"
+	usePodman := os.Getenv("CONTAINER_TOOL") == podmanRuntime ||
+		os.Getenv("KIND_PROVIDER") == podmanRuntime ||
+		os.Getenv("KIND_EXPERIMENTAL_PROVIDER") == podmanRuntime ||
+		isPodmanAvailable()
 
 	// When using Podman, kind load docker-image may fail to find images.
 	// Use podman save + kind load image-archive as a workaround.
@@ -202,6 +206,12 @@ func LoadImageToKindClusterWithName(name string) error {
 	cmd := exec.Command(kindBinary, "load", "docker-image", name, "--name", cluster)
 	_, err := Run(cmd)
 	return err
+}
+
+// isPodmanAvailable checks if podman is available on the system.
+func isPodmanAvailable() bool {
+	_, err := exec.LookPath(podmanRuntime)
+	return err == nil
 }
 
 // GetNonEmptyLines converts given command output string into individual objects
