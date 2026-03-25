@@ -2229,7 +2229,7 @@ func TestValidate_MetricLabels_KeyContainsEquals(t *testing.T) {
 	}
 }
 
-func TestValidate_MetricLabels_ValueContainsComma(t *testing.T) {
+func TestValidate_MetricLabels_ValueContainsCommaAndEquals(t *testing.T) {
 	v := &AerospikeClusterValidator{}
 	cluster := &AerospikeCluster{
 		Spec: AerospikeClusterSpec{
@@ -2240,18 +2240,17 @@ func TestValidate_MetricLabels_ValueContainsComma(t *testing.T) {
 				ExporterImage: "exporter:v1",
 				Port:          9145,
 				MetricLabels: map[string]string{
-					"env": "prod,staging",
+					"env":    "prod,staging",
+					"region": "us-east=1",
 				},
 			},
 		},
 	}
 
+	// ',' and '=' in values are valid (they are inside TOML-quoted strings).
 	_, err := v.validate(cluster)
-	if err == nil {
-		t.Error("expected error for metric label value containing ','")
-	}
-	if !strings.Contains(err.Error(), "must not contain") {
-		t.Errorf("error should mention reserved characters, got: %v", err)
+	if err != nil {
+		t.Errorf("unexpected error for metric label values with ',' or '=': %v", err)
 	}
 }
 

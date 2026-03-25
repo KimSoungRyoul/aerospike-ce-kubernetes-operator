@@ -1050,8 +1050,9 @@ func (v *AerospikeClusterValidator) validateMonitoring(m *AerospikeMonitoringSpe
 	}
 
 	// Validate MetricLabels keys and values for TOML compatibility.
-	// Keys must be valid TOML bare keys (alphanumeric, dash, underscore).
-	// Values must not contain control characters (which break TOML basic strings).
+	// Keys must not contain '=' or ',' (breaks inline table key parsing)
+	// or control characters. Values are TOML-quoted by the operator, so '='
+	// and ',' are safe inside values; only control characters are rejected.
 	for k, val := range m.MetricLabels {
 		if strings.ContainsAny(k, "=,") {
 			errors = append(errors, fmt.Sprintf("monitoring.metricLabels key %q must not contain '=' or ','", k))
@@ -1061,9 +1062,6 @@ func (v *AerospikeClusterValidator) validateMonitoring(m *AerospikeMonitoringSpe
 				errors = append(errors, fmt.Sprintf("monitoring.metricLabels key %q must not contain control characters", k))
 				break
 			}
-		}
-		if strings.ContainsAny(val, "=,") {
-			errors = append(errors, fmt.Sprintf("monitoring.metricLabels[%q] value %q must not contain '=' or ','", k, val))
 		}
 		for _, r := range val {
 			if r < 0x20 || r == 0x7f {
