@@ -87,8 +87,8 @@ spec:
     - kind: PodRestart
       id: "restart-pod-2"
       podList:
-        - aerospike-ce-3node-0
-        - aerospike-ce-3node-2
+        - aerospike-3node-0
+        - aerospike-3node-2
 ```
 
 :::warning
@@ -102,7 +102,7 @@ When targeting specific pods, ensure you use the correct pod names. Pod names fo
 ### Step 1: Add the operation to the cluster spec
 
 ```bash
-kubectl -n aerospike patch asc aerospike-ce-3node --type merge -p '{
+kubectl -n aerospike patch asc aerospike-3node --type merge -p '{
   "spec": {
     "operations": [
       {
@@ -118,12 +118,12 @@ kubectl -n aerospike patch asc aerospike-ce-3node --type merge -p '{
 
 ```bash
 # Check operation status
-kubectl -n aerospike get asc aerospike-ce-3node \
+kubectl -n aerospike get asc aerospike-3node \
   -o jsonpath='{.status.operationStatus}' | jq .
 
 # Watch events
 kubectl -n aerospike get events \
-  --field-selector involvedObject.name=aerospike-ce-3node,reason=Operation -w
+  --field-selector involvedObject.name=aerospike-3node,reason=Operation -w
 ```
 
 ### Step 3: Remove the operation after completion
@@ -131,7 +131,7 @@ kubectl -n aerospike get events \
 Once the operation reaches `Completed` or `Error` phase, remove it from the spec:
 
 ```bash
-kubectl -n aerospike patch asc aerospike-ce-3node --type merge -p '{
+kubectl -n aerospike patch asc aerospike-3node --type merge -p '{
   "spec": {
     "operations": null
   }
@@ -145,7 +145,7 @@ kubectl -n aerospike patch asc aerospike-ce-3node --type merge -p '{
 The operator tracks operation progress in `status.operationStatus`:
 
 ```bash
-kubectl -n aerospike get asc aerospike-ce-3node \
+kubectl -n aerospike get asc aerospike-3node \
   -o jsonpath='{.status.operationStatus}' | jq .
 ```
 
@@ -187,8 +187,8 @@ kubectl -n aerospike get asc aerospike-ce-3node \
   "kind": "WarmRestart",
   "phase": "InProgress",
   "completedPods": [
-    "aerospike-ce-3node-0",
-    "aerospike-ce-3node-1"
+    "aerospike-3node-0",
+    "aerospike-3node-1"
   ],
   "failedPods": []
 }
@@ -201,7 +201,7 @@ kubectl -n aerospike get asc aerospike-ce-3node \
 After an operation completes, individual pod status reflects the restart:
 
 ```bash
-kubectl -n aerospike get asc aerospike-ce-3node \
+kubectl -n aerospike get asc aerospike-3node \
   -o jsonpath='{.status.pods}' | jq 'to_entries[] | {pod: .key, lastRestart: .value.lastRestartReason, time: .value.lastRestartTime}'
 ```
 
@@ -258,7 +258,7 @@ The operator emits events for operation lifecycle:
 
 ```bash
 kubectl -n aerospike get events \
-  --field-selector involvedObject.name=aerospike-ce-3node,reason=Operation
+  --field-selector involvedObject.name=aerospike-3node,reason=Operation
 ```
 
 ---
@@ -271,7 +271,7 @@ kubectl -n aerospike get events \
 apiVersion: acko.io/v1alpha1
 kind: AerospikeCluster
 metadata:
-  name: aerospike-ce-3node
+  name: aerospike-3node
   namespace: aerospike
 spec:
   size: 3
@@ -295,7 +295,7 @@ spec:
     - kind: PodRestart
       id: "fix-pod-2"
       podList:
-        - aerospike-ce-3node-2
+        - aerospike-3node-2
 ```
 
 ### Warm Restart a Subset of Pods
@@ -306,8 +306,8 @@ spec:
     - kind: WarmRestart
       id: "reload-rack-1"
       podList:
-        - aerospike-ce-3node-0
-        - aerospike-ce-3node-1
+        - aerospike-3node-0
+        - aerospike-3node-1
 ```
 
 ---

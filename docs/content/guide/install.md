@@ -499,14 +499,14 @@ kubectl create namespace aerospike --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply -f config/samples/acko_v1alpha1_aerospikecluster.yaml
 
 echo "Waiting for Aerospike pod to be ready..."
-kubectl -n aerospike wait --for=condition=Ready pod/aerospike-ce-basic-0-0 --timeout=120s
+kubectl -n aerospike wait --for=condition=Ready pod/aerospike-basic-0-0 --timeout=120s
 
 # =============================================================================
 # 6. Verify: run asinfo inside the Aerospike pod
 # =============================================================================
 echo "=== Aerospike cluster info ==="
-kubectl -n aerospike exec -it aerospike-ce-basic-0-0 -- asinfo -v status
-kubectl -n aerospike exec -it aerospike-ce-basic-0-0 -- asinfo -v build
+kubectl -n aerospike exec -it aerospike-basic-0-0 -- asinfo -v status
+kubectl -n aerospike exec -it aerospike-basic-0-0 -- asinfo -v build
 
 # =============================================================================
 # 7. Port-forward Grafana (access at http://localhost:3000)

@@ -21,7 +21,7 @@ import TabItem from '@theme/TabItem';
 apiVersion: acko.io/v1alpha1
 kind: AerospikeCluster
 metadata:
-  name: aerospike-ce-basic
+  name: aerospike-basic
   namespace: aerospike
 spec:
   size: 1
@@ -51,7 +51,7 @@ kubectl apply -f config/samples/acko_v1alpha1_aerospikecluster.yaml
 apiVersion: acko.io/v1alpha1
 kind: AerospikeCluster
 metadata:
-  name: aerospike-ce-3node
+  name: aerospike-3node
   namespace: aerospike
 spec:
   size: 3
@@ -89,7 +89,7 @@ spec:
 
   aerospikeConfig:
     service:
-      cluster-name: aerospike-ce-3node
+      cluster-name: aerospike-3node
       proto-fd-max: 15000
 
     network:
@@ -115,7 +115,7 @@ spec:
 **사용 사례:** 데이터 영속성과 복제가 필요한 프로덕션 워크로드.
 
 ```bash
-kubectl apply -f config/samples/aerospike-ce-cluster-3node.yaml
+kubectl apply -f config/samples/aerospike-cluster-3node.yaml
 ```
 
 </TabItem>
@@ -127,7 +127,7 @@ kubectl apply -f config/samples/aerospike-ce-cluster-3node.yaml
 apiVersion: acko.io/v1alpha1
 kind: AerospikeCluster
 metadata:
-  name: aerospike-ce-multirack
+  name: aerospike-multirack
   namespace: aerospike
 spec:
   size: 6
@@ -185,7 +185,7 @@ spec:
 **사용 사례:** 랙 라벨 기반 스케줄링을 활용한 존 간 고가용성. 각 랙 ID는 별도의 StatefulSet(`<이름>-<랙ID>`)과 ConfigMap을 생성합니다.
 
 ```bash
-kubectl apply -f config/samples/aerospike-ce-cluster-multirack.yaml
+kubectl apply -f config/samples/aerospike-cluster-multirack.yaml
 ```
 
 </TabItem>

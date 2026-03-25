@@ -20,10 +20,10 @@ type clusterTest struct {
 
 func main() {
 	clusters := []clusterTest{
-		{Name: "aerospike-ce-basic", Host: "aerospike-ce-basic-0-0.aerospike-ce-basic.aerospike.svc.cluster.local", Port: 3000, Namespace: "test"},
-		{Name: "aerospike-ce-3node", Host: "aerospike-ce-3node-0-0.aerospike-ce-3node.aerospike.svc.cluster.local", Port: 3000, Namespace: "testns"},
-		{Name: "aerospike-ce-multirack", Host: "aerospike-ce-multirack-1-0.aerospike-ce-multirack.aerospike.svc.cluster.local", Port: 3000, Namespace: "testns"},
-		{Name: "aerospike-ce-acl", Host: "aerospike-ce-acl-0-0.aerospike-ce-acl.aerospike.svc.cluster.local", Port: 3000, Namespace: "testns"},
+		{Name: "aerospike-basic", Host: "aerospike-basic-0-0.aerospike-basic.aerospike.svc.cluster.local", Port: 3000, Namespace: "test"},
+		{Name: "aerospike-3node", Host: "aerospike-3node-0-0.aerospike-3node.aerospike.svc.cluster.local", Port: 3000, Namespace: "testns"},
+		{Name: "aerospike-multirack", Host: "aerospike-multirack-1-0.aerospike-multirack.aerospike.svc.cluster.local", Port: 3000, Namespace: "testns"},
+		{Name: "aerospike-acl", Host: "aerospike-acl-0-0.aerospike-acl.aerospike.svc.cluster.local", Port: 3000, Namespace: "testns"},
 	}
 
 	// Allow selecting a specific cluster by index

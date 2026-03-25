@@ -126,7 +126,7 @@ Or apply inline:
 apiVersion: acko.io/v1alpha1
 kind: AerospikeCluster
 metadata:
-  name: aerospike-ce-basic
+  name: aerospike-basic
   namespace: aerospike
 spec:
   size: 1
@@ -157,7 +157,7 @@ Launch an `aerospike-tools` pod to interact with the cluster:
 ```sh
 kubectl -n aerospike run aql-client --rm -it --restart=Never \
   --image=aerospike/aerospike-tools:latest \
-  -- aql -h aerospike-ce-basic -p 3000
+  -- aql -h aerospike-basic -p 3000
 ```
 
 #### Show namespaces
@@ -230,7 +230,7 @@ OK, 1 record affected.
 ```sh
 kubectl -n aerospike run asinfo-client --rm -it --restart=Never \
   --image=aerospike/aerospike-tools:latest \
-  -- asinfo -h aerospike-ce-basic -p 3000 -v status
+  -- asinfo -h aerospike-basic -p 3000 -v status
 ```
 
 ```
@@ -241,7 +241,7 @@ ok
 # Namespace statistics
 kubectl -n aerospike run asinfo-client --rm -it --restart=Never \
   --image=aerospike/aerospike-tools:latest \
-  -- asinfo -h aerospike-ce-basic -p 3000 -v "namespace/test"
+  -- asinfo -h aerospike-basic -p 3000 -v "namespace/test"
 ```
 
 ```
@@ -267,7 +267,7 @@ objects=3;sub_objects=0;...;memory_used_bytes=384;...
 
 ```sh
 # Delete the Aerospike cluster
-kubectl -n aerospike delete asc aerospike-ce-basic
+kubectl -n aerospike delete asc aerospike-basic
 
 # Uninstall the operator (Helm)
 helm uninstall aerospike-operator -n aerospike-operator
