@@ -1,8 +1,11 @@
+# 3-node Aerospike CE cluster with Prometheus monitoring enabled.
+# Demonstrates sidecar exporter, ServiceMonitor, and PrometheusRule configuration.
+# Apply with: kubectl apply -f aerospike-cluster-monitoring.yaml
 apiVersion: acko.io/v1alpha1
 kind: AerospikeCluster
 metadata:
   name: aerospike-monitoring
-  namespace: aerospike
+  namespace: aerospike  # Create namespace first: kubectl create namespace aerospike
 spec:
   size: 3
   image: aerospike:ce-8.1.1.1
@@ -38,7 +41,31 @@ spec:
       labels:
         release: prometheus
 
+  # Storage for Aerospike work directory (logs, etc.)
+  storage:
+    volumes:
+      - name: workdir
+        source:
+          emptyDir: {}  # Ephemeral volume for work files (logs, scratch)
+        aerospike:
+          path: /opt/aerospike/work
+
   aerospikeConfig:
+    service:
+      cluster-name: aerospike-monitoring
+      proto-fd-max: 15000
+
+    network:
+      service:
+        address: any
+        port: 3000
+      heartbeat:
+        mode: mesh
+        port: 3002
+      fabric:
+        address: any
+        port: 3001
+
     namespaces:
       - name: test
         replication-factor: 2
@@ -46,12 +73,6 @@ spec:
           type: memory
           data-size: 2147483648  # 2 GiB
 
-  storage:
-    volumes:
-      - name: workdir
-        source:
-          persistentVolume:
-            storageClass: standard
-            size: 10Gi
-        aerospike:
-          path: /opt/aerospike
+    logging:
+      - name: /var/log/aerospike/aerospike.log
+        context: any info

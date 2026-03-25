@@ -368,8 +368,8 @@ func TestBuildExporterSidecar_MetricLabels(t *testing.T) {
 		}
 	}
 
-	// Keys should be sorted
-	expected := "env=prod,team=platform"
+	// Values must be TOML-quoted for the exporter template: labels = {${METRIC_LABELS}}
+	expected := `env="prod", team="platform"`
 	if metricLabelsValue != expected {
 		t.Errorf("METRIC_LABELS = %q, want %q", metricLabelsValue, expected)
 	}
