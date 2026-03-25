@@ -16,6 +16,7 @@ const (
 	hostnameTopologyKey   = "kubernetes.io/hostname"
 	zoneTopologyKey       = "topology.kubernetes.io/zone"
 	exporterContainerName = "aerospike-prometheus-exporter"
+	metricLabelsEnvName   = "METRIC_LABELS"
 )
 
 func boolPtr(b bool) *bool { return &b }
@@ -363,7 +364,7 @@ func TestBuildExporterSidecar_MetricLabels(t *testing.T) {
 
 	var metricLabelsValue string
 	for _, e := range c.Env {
-		if e.Name == "METRIC_LABELS" {
+		if e.Name == metricLabelsEnvName {
 			metricLabelsValue = e.Value
 		}
 	}
@@ -389,7 +390,7 @@ func TestBuildExporterSidecar_MetricLabelsEscape(t *testing.T) {
 
 	var metricLabelsValue string
 	for _, e := range c.Env {
-		if e.Name == "METRIC_LABELS" {
+		if e.Name == metricLabelsEnvName {
 			metricLabelsValue = e.Value
 		}
 	}
@@ -397,6 +398,22 @@ func TestBuildExporterSidecar_MetricLabelsEscape(t *testing.T) {
 	expected := `desc="has \"quotes\" and \\ backslash"`
 	if metricLabelsValue != expected {
 		t.Errorf("METRIC_LABELS = %q, want %q", metricLabelsValue, expected)
+	}
+}
+
+func TestBuildExporterSidecar_NoMetricLabelsWhenEmpty(t *testing.T) {
+	monitoring := &v1alpha1.AerospikeMonitoringSpec{
+		Enabled:       true,
+		ExporterImage: "exporter:v1",
+		Port:          9145,
+	}
+
+	c := buildExporterSidecar(monitoring, nil)
+
+	for _, e := range c.Env {
+		if e.Name == metricLabelsEnvName {
+			t.Error("METRIC_LABELS should not be set when MetricLabels is nil")
+		}
 	}
 }
 
