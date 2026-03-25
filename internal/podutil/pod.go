@@ -375,10 +375,10 @@ func buildExporterSidecar(
 
 		pairs := make([]string, 0, len(keys))
 		for _, k := range keys {
-			// Escape TOML special characters in label values.
-			v := strings.ReplaceAll(monitoring.MetricLabels[k], `\`, `\\`)
-			v = strings.ReplaceAll(v, `"`, `\"`)
-			pairs = append(pairs, fmt.Sprintf(`%s="%s"`, k, v))
+			// Escape TOML special characters in both keys and values.
+			ek := escapeTOML(k)
+			ev := escapeTOML(monitoring.MetricLabels[k])
+			pairs = append(pairs, fmt.Sprintf(`%s="%s"`, ek, ev))
 		}
 		envVars = append(envVars, corev1.EnvVar{
 			Name:  "METRIC_LABELS",
@@ -430,6 +430,13 @@ func buildExporterSidecar(
 	}
 
 	return c
+}
+
+// escapeTOML escapes backslashes and double quotes for TOML basic string values.
+func escapeTOML(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	return s
 }
 
 // PodNameForIndex returns the pod name for a given StatefulSet and ordinal index.

@@ -10,6 +10,17 @@ spec:
   size: 3
   image: aerospike:ce-8.1.1.1
 
+  # Pod-level configuration for the Aerospike container.
+  podSpec:
+    aerospikeContainer:
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "1"
+        limits:
+          memory: "4Gi"
+          cpu: "2"
+
   monitoring:
     enabled: true
     exporterImage: aerospike/aerospike-prometheus-exporter:1.16.1
@@ -24,7 +35,7 @@ spec:
     # Custom environment variables for the exporter
     env:
       - name: AS_STAT_NAMESPACES
-        value: "test"
+        value: "testns"
     # Custom labels added to all exported metrics
     metricLabels:
       environment: production
@@ -67,7 +78,7 @@ spec:
         port: 3001
 
     namespaces:
-      - name: test
+      - name: testns
         replication-factor: 2
         storage-engine:
           type: memory

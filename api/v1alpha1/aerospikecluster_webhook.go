@@ -1049,13 +1049,27 @@ func (v *AerospikeClusterValidator) validateMonitoring(m *AerospikeMonitoringSpe
 		warnings = append(warnings, fmt.Sprintf("monitoring.exporterImage %q has no tag; use an explicit version tag for reproducible deployments", m.ExporterImage))
 	}
 
-	// Validate MetricLabels keys and values do not contain reserved characters.
+	// Validate MetricLabels keys and values for TOML compatibility.
+	// Keys must be valid TOML bare keys (alphanumeric, dash, underscore).
+	// Values must not contain control characters (which break TOML basic strings).
 	for k, val := range m.MetricLabels {
 		if strings.ContainsAny(k, "=,") {
 			errors = append(errors, fmt.Sprintf("monitoring.metricLabels key %q must not contain '=' or ','", k))
 		}
+		for _, r := range k {
+			if r < 0x20 || r == 0x7f {
+				errors = append(errors, fmt.Sprintf("monitoring.metricLabels key %q must not contain control characters", k))
+				break
+			}
+		}
 		if strings.ContainsAny(val, "=,") {
 			errors = append(errors, fmt.Sprintf("monitoring.metricLabels[%q] value %q must not contain '=' or ','", k, val))
+		}
+		for _, r := range val {
+			if r < 0x20 || r == 0x7f {
+				errors = append(errors, fmt.Sprintf("monitoring.metricLabels[%q] value must not contain control characters", k))
+				break
+			}
 		}
 	}
 
