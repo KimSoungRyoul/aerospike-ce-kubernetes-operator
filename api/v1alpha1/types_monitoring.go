@@ -50,7 +50,7 @@ type AerospikeMonitoringSpec struct {
 
 	// MetricLabels specifies custom labels to add to all exported metrics.
 	// These are passed to the exporter via the METRIC_LABELS environment variable
-	// as sorted key=value pairs.
+	// as sorted TOML inline-table entries (key="value" pairs).
 	// +optional
 	MetricLabels map[string]string `json:"metricLabels,omitempty"`
 

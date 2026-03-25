@@ -1,11 +1,25 @@
+# 3-node Aerospike CE cluster with Prometheus monitoring enabled.
+# Demonstrates sidecar exporter, ServiceMonitor, and PrometheusRule configuration.
+# Apply with: kubectl apply -f aerospike-cluster-monitoring.yaml
 apiVersion: acko.io/v1alpha1
 kind: AerospikeCluster
 metadata:
   name: aerospike-monitoring
-  namespace: aerospike
+  namespace: aerospike  # Create namespace first: kubectl create namespace aerospike
 spec:
   size: 3
   image: aerospike:ce-8.1.1.1
+
+  # Pod-level configuration for the Aerospike container.
+  podSpec:
+    aerospikeContainer:
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "1"
+        limits:
+          memory: "4Gi"
+          cpu: "2"
 
   monitoring:
     enabled: true
@@ -21,7 +35,7 @@ spec:
     # Custom environment variables for the exporter
     env:
       - name: AS_STAT_NAMESPACES
-        value: "test"
+        value: "testns"
     # Custom labels added to all exported metrics
     metricLabels:
       environment: production
@@ -38,20 +52,38 @@ spec:
       labels:
         release: prometheus
 
+  # Storage for Aerospike work directory (logs, etc.)
+  storage:
+    volumes:
+      - name: workdir
+        source:
+          emptyDir: {}  # Ephemeral volume for work files (logs, scratch)
+        aerospike:
+          path: /opt/aerospike/work
+
   aerospikeConfig:
+    service:
+      cluster-name: aerospike-monitoring
+      proto-fd-max: 15000
+
+    network:
+      service:
+        address: any
+        port: 3000
+      heartbeat:
+        mode: mesh
+        port: 3002
+      fabric:
+        address: any
+        port: 3001
+
     namespaces:
-      - name: test
+      - name: testns
         replication-factor: 2
         storage-engine:
           type: memory
           data-size: 2147483648  # 2 GiB
 
-  storage:
-    volumes:
-      - name: workdir
-        source:
-          persistentVolume:
-            storageClass: standard
-            size: 10Gi
-        aerospike:
-          path: /opt/aerospike
+    logging:
+      - name: /var/log/aerospike/aerospike.log
+        context: any info

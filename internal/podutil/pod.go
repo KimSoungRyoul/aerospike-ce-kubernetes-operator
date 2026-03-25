@@ -363,7 +363,9 @@ func buildExporterSidecar(
 		)
 	}
 
-	// Inject metric labels as METRIC_LABELS env var (sorted key=value pairs).
+	// Inject metric labels as METRIC_LABELS env var in TOML inline-table format.
+	// The exporter template uses labels = {${METRIC_LABELS}}, so values must be
+	// quoted strings: key1="val1", key2="val2".
 	if len(monitoring.MetricLabels) > 0 {
 		keys := make([]string, 0, len(monitoring.MetricLabels))
 		for k := range monitoring.MetricLabels {
@@ -373,11 +375,14 @@ func buildExporterSidecar(
 
 		pairs := make([]string, 0, len(keys))
 		for _, k := range keys {
-			pairs = append(pairs, fmt.Sprintf("%s=%s", k, monitoring.MetricLabels[k]))
+			// Escape TOML special characters in both keys and values.
+			ek := escapeTOML(k)
+			ev := escapeTOML(monitoring.MetricLabels[k])
+			pairs = append(pairs, fmt.Sprintf(`%s="%s"`, ek, ev))
 		}
 		envVars = append(envVars, corev1.EnvVar{
 			Name:  "METRIC_LABELS",
-			Value: strings.Join(pairs, ","),
+			Value: strings.Join(pairs, ", "),
 		})
 	}
 
@@ -425,6 +430,13 @@ func buildExporterSidecar(
 	}
 
 	return c
+}
+
+// escapeTOML escapes backslashes and double quotes for TOML basic string values.
+func escapeTOML(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	return s
 }
 
 // PodNameForIndex returns the pod name for a given StatefulSet and ordinal index.

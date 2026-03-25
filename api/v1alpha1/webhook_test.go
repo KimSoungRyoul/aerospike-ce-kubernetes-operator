@@ -2224,12 +2224,12 @@ func TestValidate_MetricLabels_KeyContainsEquals(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for metric label key containing '='")
 	}
-	if !strings.Contains(err.Error(), "must not contain") {
-		t.Errorf("error should mention reserved characters, got: %v", err)
+	if !strings.Contains(err.Error(), "must contain only") {
+		t.Errorf("error should mention allowed characters, got: %v", err)
 	}
 }
 
-func TestValidate_MetricLabels_ValueContainsComma(t *testing.T) {
+func TestValidate_MetricLabels_ValueContainsCommaAndEquals(t *testing.T) {
 	v := &AerospikeClusterValidator{}
 	cluster := &AerospikeCluster{
 		Spec: AerospikeClusterSpec{
@@ -2240,18 +2240,60 @@ func TestValidate_MetricLabels_ValueContainsComma(t *testing.T) {
 				ExporterImage: "exporter:v1",
 				Port:          9145,
 				MetricLabels: map[string]string{
-					"env": "prod,staging",
+					"env":    "prod,staging",
+					"region": "us-east=1",
 				},
 			},
 		},
 	}
 
+	// ',' and '=' in values are valid (they are inside TOML-quoted strings).
+	_, err := v.validate(cluster)
+	if err != nil {
+		t.Errorf("unexpected error for metric label values with ',' or '=': %v", err)
+	}
+}
+
+func TestValidate_MetricLabels_KeyContainsControlChar(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			Monitoring: &AerospikeMonitoringSpec{
+				Enabled:       true,
+				ExporterImage: "exporter:v1",
+				Port:          9145,
+				MetricLabels:  map[string]string{"key\x00name": "value"},
+			},
+		},
+	}
 	_, err := v.validate(cluster)
 	if err == nil {
-		t.Error("expected error for metric label value containing ','")
+		t.Error("expected error for control character in metric label key")
 	}
-	if !strings.Contains(err.Error(), "must not contain") {
-		t.Errorf("error should mention reserved characters, got: %v", err)
+}
+
+func TestValidate_MetricLabels_ValueContainsControlChar(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			Monitoring: &AerospikeMonitoringSpec{
+				Enabled:       true,
+				ExporterImage: "exporter:v1",
+				Port:          9145,
+				MetricLabels:  map[string]string{"env": "prod\x01staging"},
+			},
+		},
+	}
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Error("expected error for control character in metric label value")
+	}
+	if !strings.Contains(err.Error(), "control characters") {
+		t.Errorf("error should mention control characters, got: %v", err)
 	}
 }
 
