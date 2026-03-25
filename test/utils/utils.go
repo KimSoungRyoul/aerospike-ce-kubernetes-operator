@@ -181,7 +181,7 @@ func LoadImageToKindClusterWithName(name string) error {
 	usePodman := os.Getenv("CONTAINER_TOOL") == podmanRuntime ||
 		os.Getenv("KIND_PROVIDER") == podmanRuntime ||
 		os.Getenv("KIND_EXPERIMENTAL_PROVIDER") == podmanRuntime ||
-		isPodmanAvailable()
+		isPodmanOnlyEnvironment()
 
 	// When using Podman, kind load docker-image may fail to find images.
 	// Use podman save + kind load image-archive as a workaround.
@@ -208,10 +208,13 @@ func LoadImageToKindClusterWithName(name string) error {
 	return err
 }
 
-// isPodmanAvailable checks if podman is available on the system.
-func isPodmanAvailable() bool {
-	_, err := exec.LookPath(podmanRuntime)
-	return err == nil
+// isPodmanOnlyEnvironment returns true when Podman is available but Docker is not.
+// This avoids accidentally using the Podman code path on systems that have both
+// Docker and Podman installed side-by-side.
+func isPodmanOnlyEnvironment() bool {
+	_, podmanErr := exec.LookPath(podmanRuntime)
+	_, dockerErr := exec.LookPath("docker")
+	return podmanErr == nil && dockerErr != nil
 }
 
 // GetNonEmptyLines converts given command output string into individual objects
