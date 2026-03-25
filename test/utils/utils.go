@@ -17,10 +17,10 @@ limitations under the License.
 package utils
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -192,16 +192,12 @@ func LoadImageToKindClusterWithName(name string) error {
 			containerTool = podmanRuntime
 		}
 
-		f, err := os.CreateTemp("", "kind-image-*.tar")
+		tmpDir, err := os.MkdirTemp("", "kind-image-*")
 		if err != nil {
-			return fmt.Errorf("creating temp archive: %w", err)
+			return fmt.Errorf("creating temp directory: %w", err)
 		}
-		archivePath := f.Name()
-		_ = f.Close()
-		// Remove the empty file so podman save can create it fresh
-		// (some versions refuse to overwrite an existing file).
-		_ = os.Remove(archivePath)
-		defer func() { _ = os.Remove(archivePath) }()
+		defer func() { _ = os.RemoveAll(tmpDir) }()
+		archivePath := filepath.Join(tmpDir, "image.tar")
 
 		saveArgs := []string{"save"}
 		if containerTool == podmanRuntime {
@@ -228,11 +224,9 @@ func LoadImageToKindClusterWithName(name string) error {
 func isPodmanOnlyEnvironment() bool {
 	_, podmanErr := exec.LookPath(podmanRuntime)
 	_, dockerErr := exec.LookPath("docker")
-	// Use errors.Is for both sides so that permission errors or other
-	// non-ErrNotFound failures are not confused with "binary not found".
-	podmanNotFound := errors.Is(podmanErr, exec.ErrNotFound)
-	dockerNotFound := errors.Is(dockerErr, exec.ErrNotFound)
-	return !podmanNotFound && dockerNotFound
+	podmanFound := podmanErr == nil
+	dockerFound := dockerErr == nil
+	return podmanFound && !dockerFound
 }
 
 // GetNonEmptyLines converts given command output string into individual objects
