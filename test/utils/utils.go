@@ -1,3 +1,5 @@
+//go:build e2e
+
 /*
 Copyright 2026.
 
@@ -20,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -32,6 +35,7 @@ const (
 
 	defaultKindBinary  = "kind"
 	defaultKindCluster = "kind"
+	podmanRuntime      = "podman"
 )
 
 func warnError(err error) {
@@ -177,22 +181,36 @@ func LoadImageToKindClusterWithName(name string) error {
 		kindBinary = v
 	}
 
-	usePodman := os.Getenv("CONTAINER_TOOL") == "podman" || os.Getenv("KIND_PROVIDER") == "podman"
+	containerToolEnv, containerToolSet := os.LookupEnv("CONTAINER_TOOL")
+	usePodman := containerToolEnv == podmanRuntime ||
+		os.Getenv("KIND_PROVIDER") == podmanRuntime ||
+		os.Getenv("KIND_EXPERIMENTAL_PROVIDER") == podmanRuntime ||
+		(!containerToolSet && isPodmanOnlyEnvironment())
 
 	// When using Podman, kind load docker-image may fail to find images.
 	// Use podman save + kind load image-archive as a workaround.
 	if usePodman {
-		f, err := os.CreateTemp("", "kind-image-*.tar")
-		if err != nil {
-			return fmt.Errorf("creating temp archive: %w", err)
+		fmt.Fprintf(os.Stderr, "[info] using Podman code path for image loading (cluster=%q, image=%q)\n", cluster, name)
+		containerTool := containerToolEnv
+		if containerTool == "" {
+			containerTool = podmanRuntime
 		}
-		archivePath := f.Name()
-		_ = f.Close()
-		defer func() { _ = os.Remove(archivePath) }()
 
-		cmd := exec.Command("podman", "save", "--format", "docker-archive", name, "-o", archivePath)
+		tmpDir, err := os.MkdirTemp("", "kind-image-*")
+		if err != nil {
+			return fmt.Errorf("creating temp directory: %w", err)
+		}
+		defer func() { _ = os.RemoveAll(tmpDir) }()
+		archivePath := filepath.Join(tmpDir, "image.tar")
+
+		saveArgs := []string{"save"}
+		if containerTool == podmanRuntime {
+			saveArgs = append(saveArgs, "--format", "docker-archive")
+		}
+		saveArgs = append(saveArgs, name, "-o", archivePath)
+		cmd := exec.Command(containerTool, saveArgs...)
 		if _, err := Run(cmd); err != nil {
-			return fmt.Errorf("podman save: %w", err)
+			return fmt.Errorf("%s save: %w", containerTool, err)
 		}
 		cmd = exec.Command(kindBinary, "load", "image-archive", archivePath, "--name", cluster)
 		_, err = Run(cmd)
@@ -202,6 +220,17 @@ func LoadImageToKindClusterWithName(name string) error {
 	cmd := exec.Command(kindBinary, "load", "docker-image", name, "--name", cluster)
 	_, err := Run(cmd)
 	return err
+}
+
+// isPodmanOnlyEnvironment returns true when Podman is available but Docker is not
+// found on the PATH. This avoids accidentally using the Podman code path on
+// systems that have both Docker and Podman installed side-by-side.
+func isPodmanOnlyEnvironment() bool {
+	_, podmanErr := exec.LookPath(podmanRuntime)
+	_, dockerErr := exec.LookPath("docker")
+	podmanFound := podmanErr == nil
+	dockerFound := dockerErr == nil
+	return podmanFound && !dockerFound
 }
 
 // GetNonEmptyLines converts given command output string into individual objects
@@ -224,6 +253,6 @@ func GetProjectDir() (string, error) {
 	if err != nil {
 		return wd, fmt.Errorf("failed to get current working directory: %w", err)
 	}
-	wd = strings.ReplaceAll(wd, "/test/e2e", "")
+	wd = strings.TrimSuffix(wd, "/test/e2e")
 	return wd, nil
 }

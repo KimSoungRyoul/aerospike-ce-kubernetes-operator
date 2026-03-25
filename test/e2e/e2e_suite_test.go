@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,8 +84,12 @@ var _ = BeforeSuite(func() {
 
 	setupCertManager()
 
-	By("creating manager namespace")
-	cmd = exec.Command("kubectl", "create", "ns", namespace)
+	By("creating manager namespace (idempotent)")
+	cmd = exec.Command("kubectl", "create", "ns", namespace, "--dry-run=client", "-o", "yaml")
+	nsYAML, err := utils.Run(cmd)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to render manager namespace YAML")
+	cmd = exec.Command("kubectl", "apply", "-f", "-")
+	cmd.Stdin = strings.NewReader(string(nsYAML))
 	_, err = utils.Run(cmd)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to create manager namespace")
 

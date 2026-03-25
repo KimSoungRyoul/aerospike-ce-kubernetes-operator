@@ -9,10 +9,11 @@ GOBIN=$(shell go env GOBIN)
 endif
 
 # CONTAINER_TOOL defines the container tool to be used for building images.
-# Be aware that the target commands are only tested with Docker which is
-# scaffolded by default. However, you might want to replace it to use other
-# tools. (i.e. podman)
+# The default is Podman. Override with CONTAINER_TOOL=docker if needed.
 CONTAINER_TOOL ?= podman
+# Podman requires --format docker-archive for kind image loading; Docker does not support it.
+# Use findstring (substring match) so full-path values like /usr/bin/podman also work.
+SAVE_FORMAT_FLAG = $(if $(findstring podman,$(CONTAINER_TOOL)),--format docker-archive,)
 
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # Options are set to exit when a recipe line exits non-zero or a piped command fails.
@@ -81,7 +82,7 @@ clean: ## Remove build artifacts, coverage files, and tool binaries.
 	rm -f cover.html
 
 # TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
-# The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
+# The default setup assumes Kind is pre-installed and builds/loads the manager container image locally.
 # CertManager is installed by default; skip with:
 # - CERT_MANAGER_INSTALL_SKIP=true
 KIND_CLUSTER ?= aerospike-ce-kubernetes-operator-test-e2e
@@ -110,9 +111,9 @@ run-local: manifests helm-sync-crds ## Deploy operator + cluster-manager UI into
 	$(CONTAINER_TOOL) build -t $(CLUSTER_MANAGER_IMG):latest aerospike-cluster-manager/
 	@echo ""
 	@echo "==> [4/7] Loading images into Kind cluster..."
-	$(CONTAINER_TOOL) save --format docker-archive $(IMG) -o /tmp/acko-operator.tar
+	$(CONTAINER_TOOL) save $(SAVE_FORMAT_FLAG) $(IMG) -o /tmp/acko-operator.tar
 	$(KIND) load image-archive /tmp/acko-operator.tar --name kind
-	$(CONTAINER_TOOL) save --format docker-archive $(CLUSTER_MANAGER_IMG):latest -o /tmp/acko-cluster-manager.tar
+	$(CONTAINER_TOOL) save $(SAVE_FORMAT_FLAG) $(CLUSTER_MANAGER_IMG):latest -o /tmp/acko-cluster-manager.tar
 	$(KIND) load image-archive /tmp/acko-cluster-manager.tar --name kind
 	@rm -f /tmp/acko-operator.tar /tmp/acko-cluster-manager.tar
 	@echo ""
@@ -152,13 +153,15 @@ setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
 			echo "Kind cluster '$(KIND_CLUSTER)' already exists. Skipping creation." ;; \
 		*) \
 			echo "Creating Kind cluster '$(KIND_CLUSTER)' with provider '$(KIND_PROVIDER)'..."; \
-			KIND_EXPERIMENTAL_PROVIDER=$(KIND_PROVIDER) $(KIND) create cluster --name $(KIND_CLUSTER) ;; \
+			KIND_EXPERIMENTAL_PROVIDER=$(KIND_PROVIDER) $(KIND) create cluster --config kind-config.yaml --name $(KIND_CLUSTER) ;; \
 	esac
 
 .PHONY: test-e2e
 test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
-	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -ginkgo.v $(GINKGO_FLAGS)
-	$(MAKE) cleanup-test-e2e
+	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) CONTAINER_TOOL=$(CONTAINER_TOOL) \
+	  KIND_PROVIDER=$(KIND_PROVIDER) KIND_EXPERIMENTAL_PROVIDER=$(KIND_PROVIDER) \
+	  go test -tags=e2e -timeout 30m ./test/e2e/ -v -ginkgo.v $(GINKGO_FLAGS); \
+	  test_exit=$$?; $(MAKE) cleanup-test-e2e; exit $$test_exit
 
 .PHONY: cleanup-test-e2e
 cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
@@ -194,9 +197,9 @@ reload-cluster-manager: ## Build operator + cluster-manager images, load into Ki
 	$(CONTAINER_TOOL) build $(BUILD_NO_CACHE_FLAG) --build-arg VERSION=$(VERSION) -t $(IMG) .
 	$(CONTAINER_TOOL) build $(BUILD_NO_CACHE_FLAG) -t $(CLUSTER_MANAGER_IMG):latest aerospike-cluster-manager/
 	@echo ">>> [2/5] Loading images into Kind cluster '$(CLUSTER_MANAGER_KIND_CLUSTER)'"
-	$(CONTAINER_TOOL) save --format docker-archive $(IMG) -o /tmp/acko-operator.tar
+	$(CONTAINER_TOOL) save $(SAVE_FORMAT_FLAG) $(IMG) -o /tmp/acko-operator.tar
 	$(KIND) load image-archive /tmp/acko-operator.tar --name $(CLUSTER_MANAGER_KIND_CLUSTER)
-	$(CONTAINER_TOOL) save --format docker-archive $(CLUSTER_MANAGER_IMG):latest -o /tmp/acko-cluster-manager.tar
+	$(CONTAINER_TOOL) save $(SAVE_FORMAT_FLAG) $(CLUSTER_MANAGER_IMG):latest -o /tmp/acko-cluster-manager.tar
 	$(KIND) load image-archive /tmp/acko-cluster-manager.tar --name $(CLUSTER_MANAGER_KIND_CLUSTER)
 	@rm -f /tmp/acko-operator.tar /tmp/acko-cluster-manager.tar
 	@echo ">>> [3/5] Upgrading Helm release"
