@@ -1,3 +1,5 @@
+//go:build e2e
+
 /*
 Copyright 2026.
 
@@ -179,15 +181,16 @@ func LoadImageToKindClusterWithName(name string) error {
 		kindBinary = v
 	}
 
-	usePodman := os.Getenv("CONTAINER_TOOL") == podmanRuntime ||
+	containerToolEnv, containerToolSet := os.LookupEnv("CONTAINER_TOOL")
+	usePodman := containerToolEnv == podmanRuntime ||
 		os.Getenv("KIND_PROVIDER") == podmanRuntime ||
 		os.Getenv("KIND_EXPERIMENTAL_PROVIDER") == podmanRuntime ||
-		isPodmanOnlyEnvironment()
+		(!containerToolSet && isPodmanOnlyEnvironment())
 
 	// When using Podman, kind load docker-image may fail to find images.
 	// Use podman save + kind load image-archive as a workaround.
 	if usePodman {
-		containerTool := os.Getenv("CONTAINER_TOOL")
+		containerTool := containerToolEnv
 		if containerTool == "" {
 			containerTool = podmanRuntime
 		}
@@ -249,6 +252,6 @@ func GetProjectDir() (string, error) {
 	if err != nil {
 		return wd, fmt.Errorf("failed to get current working directory: %w", err)
 	}
-	wd = strings.ReplaceAll(wd, "/test/e2e", "")
+	wd = strings.TrimSuffix(wd, "/test/e2e")
 	return wd, nil
 }
