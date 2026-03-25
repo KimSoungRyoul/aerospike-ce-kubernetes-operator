@@ -13,6 +13,7 @@ spec:
   endpoints:
     - port: backend
       scheme: http
+      path: /api/metrics
       {{- with .Values.ui.metrics.serviceMonitor.interval }}
       interval: {{ . }}
       {{- end }}

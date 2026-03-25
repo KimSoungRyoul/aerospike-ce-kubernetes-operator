@@ -42,7 +42,7 @@ const namespace = "aerospike-operator"
 const serviceAccountName = "aerospike-ce-kubernetes-operator-controller-manager"
 
 // metricsServiceName is the name of the metrics service of the project
-const metricsServiceName = "aerospike-ce-kubernetes-operator-controller-manager-metrics-service"
+const metricsServiceName = "aerospike-ce-kubernetes-operator-metrics-service"
 
 // metricsRoleBindingName is the name of the RBAC that will be created to allow get the metrics data
 const metricsRoleBindingName = "aerospike-ce-kubernetes-operator-metrics-binding"
@@ -125,9 +125,11 @@ var _ = Describe("Manager", Ordered, func() {
 
 		It("should ensure the metrics endpoint is serving metrics", func() {
 			By("validating that the metrics service is available")
-			exists, err := utils.ServiceExists(ctx, k8sClient, metricsServiceName, namespace)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(exists).To(BeTrue(), "Metrics service should exist")
+			Eventually(func(g Gomega) {
+				exists, err := utils.ServiceExists(ctx, k8sClient, metricsServiceName, namespace)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(exists).To(BeTrue(), "Metrics service should exist")
+			}, 2*time.Minute, time.Second).Should(Succeed())
 
 			By("getting the service account token")
 			token, err := serviceAccountToken()
@@ -135,6 +137,7 @@ var _ = Describe("Manager", Ordered, func() {
 			Expect(token).NotTo(BeEmpty())
 
 			By("ensuring the controller pod is ready")
+			Expect(controllerPodName).NotTo(BeEmpty(), "controllerPodName not set; did the first It block run?")
 			Eventually(func(g Gomega) {
 				pod := &corev1.Pod{}
 				err := k8sClient.Get(ctx, client.ObjectKey{Name: controllerPodName, Namespace: namespace}, pod)

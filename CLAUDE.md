@@ -73,10 +73,12 @@ Converts unstructured `map[string]interface{}` to aerospike.conf text format. Ha
 - **Validator**: CE constraints — size<=8, namespaces<=2, no `xdr`/`tls` sections, no enterprise images, admin user required when ACL enabled, unique rack IDs
 
 
-## Aerospike Configuration Guide (Skills)
-- `/aerospike-ce-8-guide` — CE 8.1 파라미터 레퍼런스 (7.x→8.1 breaking changes, 버전별 기본값, 동적 설정 명령)
-- `/aerospike-ce8-configuration-guide` — CE 8.1 K8s Operator 가이드 (배포 체크리스트, CRD 매핑, Webhook 검증, 설정 예제)
-- `/acko-aerospikecluster-customresource` — AerospikeCluster CR 전체 필드 참조 YAML
+## Aerospike Configuration Guide
+
+Aerospike CE 8.1 파라미터, CRD 설정, Day-2 운영 가이드는 ecosystem plugin에서 제공:
+- `acko-config-reference` — CE 8.1 파라미터, breaking changes, CRD 매핑, Webhook 검증
+- `acko-deploy` — K8s 배포 가이드, CR 예제 (8개 시나리오)
+- `acko-operations` — Day-2 운영, 트러블슈팅, 진단 커맨드
 
 ## Sample CRs
 

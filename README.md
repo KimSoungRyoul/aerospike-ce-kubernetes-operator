@@ -327,6 +327,19 @@ make deploy
 
 > `config/manager/manager.yaml`에 `imagePullPolicy: IfNotPresent`가 설정되어 있어, Kind에 로드된 로컬 이미지를 그대로 사용합니다.
 
+## Claude Code
+
+이 프로젝트는 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 자동화가 설정되어 있습니다.
+
+### Ecosystem Plugin 설치
+
+[aerospike-ce-ecosystem-plugins](https://github.com/aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins)를 설치하면 Aerospike CE 8.1 설정 레퍼런스, K8s 배포 가이드, Day-2 운영 가이드 등 ecosystem 전체 스킬을 사용할 수 있습니다.
+
+```bash
+claude plugin marketplace add aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins
+claude plugin install aerospike-ce-ecosystem
+```
+
 ## TODO
 
 - [ ] Register OCI repository on [Artifact Hub](https://artifacthub.io/) — Add repository with Kind: **OCI**, URL: `oci://ghcr.io/aerospike-ce-ecosystem/aerospike-operator`

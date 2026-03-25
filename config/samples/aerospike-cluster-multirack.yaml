@@ -18,13 +18,16 @@ spec:
   rackConfig:
     namespaces:
       - testns  # Namespaces that are rack-aware (must match aerospikeConfig namespaces)
+    # Zone values must match your cluster's topology.kubernetes.io/zone node labels.
+    # Replace with your actual cloud zones (e.g. us-east-1a, europe-west1-b).
+    # These default to Kind cluster labels for local testing.
     racks:
       - id: 1
-        zone: us-east1-a  # Pins rack-1 pods to this availability zone
+        zone: zone-a
       - id: 2
-        zone: us-east1-b  # Pins rack-2 pods to a different zone
+        zone: zone-b
       - id: 3
-        zone: us-east1-c  # Pins rack-3 pods to a third zone
+        zone: zone-c
 
   podSpec:
     aerospikeContainer:

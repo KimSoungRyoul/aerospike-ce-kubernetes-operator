@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -51,7 +52,7 @@ var _ = Describe("AerospikeCluster Samples", Ordered, func() {
 
 	AfterAll(func() {
 		By("cleaning up all sample clusters")
-		for _, name := range []string{"aerospike-ce-basic", "aerospike-ce-3node", "aerospike-ce-multirack", "aerospike-ce-acl"} {
+		for _, name := range []string{"aerospike-basic", "aerospike-3node", "aerospike-multirack", "aerospike-acl"} {
 			// Use kubectl delete with timeout to wait for finalizer cleanup,
 			// ensuring the operator finishes reconciling before the next suite starts.
 			cmd := exec.Command("kubectl", "delete", "aerospikecluster", name,
@@ -63,7 +64,7 @@ var _ = Describe("AerospikeCluster Samples", Ordered, func() {
 	})
 
 	Context("Basic single-node cluster", func() {
-		const clusterName = "aerospike-ce-basic"
+		const clusterName = "aerospike-basic"
 
 		It("should deploy and reach Completed phase", func() {
 			samplePath := filepath.Join(projectDir, "config", "samples", "acko_v1alpha1_aerospikecluster.yaml")
@@ -92,21 +93,21 @@ var _ = Describe("AerospikeCluster Samples", Ordered, func() {
 		})
 
 		It("should create expected Kubernetes resources", func() {
-			By("verifying headless service exists")
-			exists, err := utils.ServiceExists(ctx, k8sClient, clusterName, aerospikeNS)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(exists).To(BeTrue(), "headless service should exist")
+			By("verifying headless service, StatefulSet, and ConfigMap exist")
+			Eventually(func(g Gomega) {
+				exists, err := utils.ServiceExists(ctx, k8sClient, clusterName, aerospikeNS)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(exists).To(BeTrue(), "headless service should exist")
 
-			By("verifying StatefulSet exists with correct name")
-			stsList, err := utils.ListClusterStatefulSets(ctx, k8sClient, clusterName, aerospikeNS)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(stsList.Items).To(HaveLen(1))
-			Expect(stsList.Items[0].Name).To(Equal(fmt.Sprintf("%s-0", clusterName)))
+				stsList, err := utils.ListClusterStatefulSets(ctx, k8sClient, clusterName, aerospikeNS)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(stsList.Items).To(HaveLen(1))
+				g.Expect(stsList.Items[0].Name).To(Equal(fmt.Sprintf("%s-0", clusterName)))
 
-			By("verifying ConfigMap exists")
-			exists, err = utils.ConfigMapExists(ctx, k8sClient, fmt.Sprintf("%s-0-config", clusterName), aerospikeNS)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(exists).To(BeTrue(), "configmap should exist")
+				cmExists, err := utils.ConfigMapExists(ctx, k8sClient, fmt.Sprintf("%s-0-config", clusterName), aerospikeNS)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(cmExists).To(BeTrue(), "configmap should exist")
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
 		})
 
 		It("should populate pod status correctly", func() {
@@ -122,22 +123,26 @@ var _ = Describe("AerospikeCluster Samples", Ordered, func() {
 			}, defaultTimeout, 2*time.Second).Should(Succeed())
 
 			By("verifying status.size is 1")
-			cluster, err := utils.GetCluster(ctx, k8sClient, clusterName, aerospikeNS)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(cluster.Status.Size).To(Equal(int32(1)))
+			Eventually(func(g Gomega) {
+				cluster, err := utils.GetCluster(ctx, k8sClient, clusterName, aerospikeNS)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(cluster.Status.Size).To(Equal(int32(1)))
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
 		})
 	})
 
 	Context("3-node cluster with PV storage", Label("heavy"), func() {
-		const clusterName = "aerospike-ce-3node"
+		const clusterName = "aerospike-3node"
 
 		It("should deploy 3 nodes and reach Completed phase", func() {
-			samplePath := filepath.Join(projectDir, "config", "samples", "aerospike-ce-cluster-3node.yaml")
+			samplePath := filepath.Join(projectDir, "config", "samples", "aerospike-cluster-3node.yaml")
 
 			By("loading and creating the 3-node sample CR")
 			cluster, err := loadClusterFromFile(samplePath)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(k8sClient.Create(ctx, cluster)).To(Succeed())
+			Eventually(func() error {
+				return k8sClient.Create(ctx, cluster)
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
 			By("waiting for Completed phase")
 			Eventually(func(g Gomega) {
@@ -165,30 +170,32 @@ var _ = Describe("AerospikeCluster Samples", Ordered, func() {
 		})
 
 		It("should report correct status", func() {
-			By("verifying status.size is 3")
-			cluster, err := utils.GetCluster(ctx, k8sClient, clusterName, aerospikeNS)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(cluster.Status.Size).To(Equal(int32(3)))
-
-			By("verifying all pods have correct image in status")
-			Expect(cluster.Status.Pods).To(HaveLen(3))
-			for _, ps := range cluster.Status.Pods {
-				Expect(ps.Image).To(Equal("aerospike:ce-8.1.1.1"))
-				Expect(ps.IsRunningAndReady).To(BeTrue())
-			}
+			By("verifying status.size and pod status")
+			Eventually(func(g Gomega) {
+				cluster, err := utils.GetCluster(ctx, k8sClient, clusterName, aerospikeNS)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(cluster.Status.Size).To(Equal(int32(3)))
+				g.Expect(cluster.Status.Pods).To(HaveLen(3))
+				for _, ps := range cluster.Status.Pods {
+					g.Expect(ps.Image).To(Equal("aerospike:ce-8.1.1.1"))
+					g.Expect(ps.IsRunningAndReady).To(BeTrue())
+				}
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
 		})
 	})
 
 	Context("Multi-rack 6-node cluster", Label("heavy"), func() {
-		const clusterName = "aerospike-ce-multirack"
+		const clusterName = "aerospike-multirack"
 
 		It("should deploy 6 nodes across 3 racks and reach Completed phase", func() {
-			samplePath := filepath.Join(projectDir, "config", "samples", "aerospike-ce-cluster-multirack.yaml")
+			samplePath := filepath.Join(projectDir, "config", "samples", "aerospike-cluster-multirack.yaml")
 
 			By("loading and creating the multi-rack sample CR")
 			cluster, err := loadClusterFromFile(samplePath)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(k8sClient.Create(ctx, cluster)).To(Succeed())
+			Eventually(func() error {
+				return k8sClient.Create(ctx, cluster)
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
 			By("waiting for Completed phase")
 			Eventually(func(g Gomega) {
@@ -206,66 +213,87 @@ var _ = Describe("AerospikeCluster Samples", Ordered, func() {
 		})
 
 		It("should create 3 StatefulSets (one per rack)", func() {
-			stsList, err := utils.ListClusterStatefulSets(ctx, k8sClient, clusterName, aerospikeNS)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(stsList.Items).To(HaveLen(3))
+			Eventually(func(g Gomega) {
+				stsList, err := utils.ListClusterStatefulSets(ctx, k8sClient, clusterName, aerospikeNS)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(stsList.Items).To(HaveLen(3))
 
-			stsNames := make([]string, 0, len(stsList.Items))
-			for _, sts := range stsList.Items {
-				stsNames = append(stsNames, sts.Name)
-			}
-			Expect(stsNames).To(ContainElements(
-				fmt.Sprintf("%s-1", clusterName),
-				fmt.Sprintf("%s-2", clusterName),
-				fmt.Sprintf("%s-3", clusterName),
-			))
+				stsNames := make([]string, 0, len(stsList.Items))
+				for _, sts := range stsList.Items {
+					stsNames = append(stsNames, sts.Name)
+				}
+				g.Expect(stsNames).To(ContainElements(
+					fmt.Sprintf("%s-1", clusterName),
+					fmt.Sprintf("%s-2", clusterName),
+					fmt.Sprintf("%s-3", clusterName),
+				))
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
 		})
 
 		It("should assign rack labels to pods", func() {
-			podList, err := utils.ListClusterPods(ctx, k8sClient, clusterName, aerospikeNS)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(podList.Items).To(HaveLen(6))
+			Eventually(func(g Gomega) {
+				podList, err := utils.ListClusterPods(ctx, k8sClient, clusterName, aerospikeNS)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(podList.Items).To(HaveLen(6))
 
-			rackCounts := map[string]int{}
-			for _, pod := range podList.Items {
-				rack := pod.Labels["acko.io/rack"]
-				Expect(rack).NotTo(BeEmpty(), "pod %s should have rack label", pod.Name)
-				rackCounts[rack]++
-			}
-
-			By("verifying each rack has 2 pods")
-			Expect(rackCounts).To(HaveLen(3))
-			for rack, count := range rackCounts {
-				Expect(count).To(Equal(2), "rack %s should have 2 pods", rack)
-			}
+				rackCounts := map[string]int{}
+				for _, pod := range podList.Items {
+					rack := pod.Labels["acko.io/rack"]
+					g.Expect(rack).NotTo(BeEmpty(), "pod %s should have rack label", pod.Name)
+					rackCounts[rack]++
+				}
+				g.Expect(rackCounts).To(HaveLen(3))
+				for rack, count := range rackCounts {
+					g.Expect(count).To(Equal(2), "rack %s should have 2 pods", rack)
+				}
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
 		})
 
 		It("should create 3 ConfigMaps (one per rack)", func() {
-			for _, rackID := range []int{1, 2, 3} {
-				cmName := fmt.Sprintf("%s-%d-config", clusterName, rackID)
-				exists, err := utils.ConfigMapExists(ctx, k8sClient, cmName, aerospikeNS)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(exists).To(BeTrue(), "configmap %s should exist", cmName)
-			}
+			Eventually(func(g Gomega) {
+				for _, rackID := range []int{1, 2, 3} {
+					cmName := fmt.Sprintf("%s-%d-config", clusterName, rackID)
+					exists, err := utils.ConfigMapExists(ctx, k8sClient, cmName, aerospikeNS)
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(exists).To(BeTrue(), "configmap %s should exist", cmName)
+				}
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
 		})
 
 		It("should report correct status.size", func() {
-			cluster, err := utils.GetCluster(ctx, k8sClient, clusterName, aerospikeNS)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(cluster.Status.Size).To(Equal(int32(6)))
+			Eventually(func(g Gomega) {
+				cluster, err := utils.GetCluster(ctx, k8sClient, clusterName, aerospikeNS)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(cluster.Status.Size).To(Equal(int32(6)))
+			}, defaultTimeout, 2*time.Second).Should(Succeed())
 		})
 	})
 
 	Context("ACL/Storage sample with cascadeDelete", Label("heavy"), func() {
-		const clusterName = "aerospike-ce-acl"
+		const clusterName = "aerospike-acl"
 
 		It("should deploy 3 nodes and reach Completed phase", func() {
-			samplePath := filepath.Join(projectDir, "config", "samples", "aerospike-ce-cluster-acl.yaml")
+			samplePath := filepath.Join(projectDir, "config", "samples", "aerospike-cluster-acl.yaml")
+
+			By("creating required Kubernetes Secrets for ACL users")
+			for _, secret := range []struct{ name, password string }{
+				{"aerospike-admin-secret", "admin123"},
+				{"aerospike-reader-secret", "reader123"},
+			} {
+				cmd := exec.Command("kubectl", "-n", aerospikeNS, "create", "secret", "generic",
+					secret.name, fmt.Sprintf("--from-literal=password=%s", secret.password))
+				_, err := utils.Run(cmd)
+				if err != nil && !strings.Contains(err.Error(), "already exists") {
+					Expect(err).NotTo(HaveOccurred(), "failed to create secret %s", secret.name)
+				}
+			}
 
 			By("loading and creating the ACL sample CR")
 			cluster, err := loadClusterFromFile(samplePath)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(k8sClient.Create(ctx, cluster)).To(Succeed())
+			Eventually(func() error {
+				return k8sClient.Create(ctx, cluster)
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
 
 			By("waiting for Completed phase")
 			Eventually(func(g Gomega) {

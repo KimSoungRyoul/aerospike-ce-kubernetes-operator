@@ -12,6 +12,8 @@ data:
   LOG_FORMAT: {{ .Values.ui.env.logFormat | quote }}
   K8S_MANAGEMENT_ENABLED: {{ .Values.ui.k8s.enabled | quote }}
   BACKEND_URL: "http://localhost:{{ .Values.ui.service.backendPort }}"
+  FRONTEND_PORT: {{ .Values.ui.service.frontendPort | quote }}
+  BACKEND_PORT: {{ .Values.ui.service.backendPort | quote }}
   DB_POOL_SIZE: {{ .Values.ui.env.dbPoolSize | quote }}
   DB_POOL_OVERFLOW: {{ .Values.ui.env.dbPoolOverflow | quote }}
   DB_POOL_TIMEOUT: {{ .Values.ui.env.dbPoolTimeout | quote }}
