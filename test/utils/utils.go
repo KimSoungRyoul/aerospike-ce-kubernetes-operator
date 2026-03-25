@@ -198,6 +198,9 @@ func LoadImageToKindClusterWithName(name string) error {
 		}
 		archivePath := f.Name()
 		_ = f.Close()
+		// Remove the empty file so podman save can create it fresh
+		// (some versions refuse to overwrite an existing file).
+		_ = os.Remove(archivePath)
 		defer func() { _ = os.Remove(archivePath) }()
 
 		saveArgs := []string{"save"}
