@@ -200,9 +200,14 @@ func LoadImageToKindClusterWithName(name string) error {
 		_ = f.Close()
 		defer func() { _ = os.Remove(archivePath) }()
 
-		cmd := exec.Command(containerTool, "save", "--format", "docker-archive", name, "-o", archivePath)
+		saveArgs := []string{"save"}
+		if containerTool == podmanRuntime {
+			saveArgs = append(saveArgs, "--format", "docker-archive")
+		}
+		saveArgs = append(saveArgs, name, "-o", archivePath)
+		cmd := exec.Command(containerTool, saveArgs...)
 		if _, err := Run(cmd); err != nil {
-			return fmt.Errorf("podman save: %w", err)
+			return fmt.Errorf("%s save: %w", containerTool, err)
 		}
 		cmd = exec.Command(kindBinary, "load", "image-archive", archivePath, "--name", cluster)
 		_, err = Run(cmd)
