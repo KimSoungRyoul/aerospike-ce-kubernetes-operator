@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -32,6 +33,8 @@ import (
 )
 
 var aerospikeclusterlog = logf.Log.WithName("aerospikecluster-resource")
+
+var tomlBareKeyRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 const (
 	maxCEClusterSize     = 8
@@ -1050,18 +1053,12 @@ func (v *AerospikeClusterValidator) validateMonitoring(m *AerospikeMonitoringSpe
 	}
 
 	// Validate MetricLabels keys and values for TOML compatibility.
-	// Keys must not contain '=' or ',' (breaks inline table key parsing)
-	// or control characters. Values are TOML-quoted by the operator, so '='
-	// and ',' are safe inside values; only control characters are rejected.
+	// TOML bare keys may only contain ASCII letters, digits, dashes, and
+	// underscores. Values are TOML-quoted by the operator, so '=' and ','
+	// are safe inside values; only control characters are rejected.
 	for k, val := range m.MetricLabels {
-		if strings.ContainsAny(k, "=,") {
-			errors = append(errors, fmt.Sprintf("monitoring.metricLabels key %q must not contain '=' or ','", k))
-		}
-		for _, r := range k {
-			if r < 0x20 || r == 0x7f {
-				errors = append(errors, fmt.Sprintf("monitoring.metricLabels key %q must not contain control characters", k))
-				break
-			}
+		if !tomlBareKeyRe.MatchString(k) {
+			errors = append(errors, fmt.Sprintf("monitoring.metricLabels key %q must contain only ASCII letters, digits, dashes, and underscores", k))
 		}
 		for _, r := range val {
 			if r < 0x20 || r == 0x7f {
