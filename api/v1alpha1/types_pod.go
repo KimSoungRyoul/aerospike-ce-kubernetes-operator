@@ -101,6 +101,12 @@ type AerospikePodSpec struct {
 	// Defaults to false for backward compatibility.
 	// +optional
 	ReadinessGateEnabled *bool `json:"readinessGateEnabled,omitempty"`
+
+	// PriorityClassName is the name of the PriorityClass for Aerospike pods.
+	// This controls pod scheduling priority and preemption behavior.
+	// The PriorityClass must already exist in the cluster.
+	// +optional
+	PriorityClassName string `json:"priorityClassName,omitempty"`
 }
 
 // AerospikeContainerSpec customizes the Aerospike server container.

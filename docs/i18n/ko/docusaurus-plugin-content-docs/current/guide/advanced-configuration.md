@@ -202,6 +202,16 @@ spec:
     podManagementPolicy: Parallel
 ```
 
+### priorityClassName
+
+Aerospike 파드에 [PriorityClass](https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/)를 설정합니다. PriorityClass는 클러스터에 미리 존재해야 합니다.
+
+```yaml
+spec:
+  podSpec:
+    priorityClassName: high-priority
+```
+
 ### 전체 파드 스케줄링 예제
 
 ```yaml
@@ -239,6 +249,7 @@ spec:
           matchLabels:
             app: aerospike
     terminationGracePeriodSeconds: 600
+    priorityClassName: high-priority
   aerospikeConfig:
     service:
       cluster-name: production

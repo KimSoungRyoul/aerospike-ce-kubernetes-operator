@@ -14,6 +14,7 @@ import (
 
 const (
 	hostnameTopologyKey   = "kubernetes.io/hostname"
+	zoneTopologyKey       = "topology.kubernetes.io/zone"
 	exporterContainerName = "aerospike-prometheus-exporter"
 )
 
@@ -115,7 +116,7 @@ func TestInjectPodAntiAffinity_PreservesExistingNodeAffinity(t *testing.T) {
 			NodeSelectorTerms: []corev1.NodeSelectorTerm{
 				{
 					MatchExpressions: []corev1.NodeSelectorRequirement{
-						{Key: "topology.kubernetes.io/zone", Operator: corev1.NodeSelectorOpIn, Values: []string{"us-east-1a"}},
+						{Key: zoneTopologyKey, Operator: corev1.NodeSelectorOpIn, Values: []string{"us-east-1a"}},
 					},
 				},
 			},
@@ -153,7 +154,7 @@ func TestInjectPodAntiAffinity_AppendsToExistingAntiAffinity(t *testing.T) {
 						LabelSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{"existing": "rule"},
 						},
-						TopologyKey: "topology.kubernetes.io/zone",
+						TopologyKey: zoneTopologyKey,
 					},
 				},
 			},
@@ -168,7 +169,7 @@ func TestInjectPodAntiAffinity_AppendsToExistingAntiAffinity(t *testing.T) {
 	}
 
 	// First should be the existing one
-	if required[0].TopologyKey != "topology.kubernetes.io/zone" {
+	if required[0].TopologyKey != zoneTopologyKey {
 		t.Error("existing anti-affinity term was not preserved")
 	}
 
@@ -563,8 +564,8 @@ func TestApplyRackAffinity_Zone(t *testing.T) {
 	if len(exprs) != 1 {
 		t.Fatalf("expected 1 MatchExpression, got %d", len(exprs))
 	}
-	if exprs[0].Key != "topology.kubernetes.io/zone" {
-		t.Errorf("key = %q, want %q", exprs[0].Key, "topology.kubernetes.io/zone")
+	if exprs[0].Key != zoneTopologyKey {
+		t.Errorf("key = %q, want %q", exprs[0].Key, zoneTopologyKey)
 	}
 	if exprs[0].Operator != corev1.NodeSelectorOpIn {
 		t.Errorf("operator = %q, want %q", exprs[0].Operator, corev1.NodeSelectorOpIn)
@@ -833,6 +834,69 @@ func TestBuildPodTemplateSpec_AerospikeContainerHasPreStopHook(t *testing.T) {
 	expectedArg := fmt.Sprintf("%d", PreStopSleepSeconds)
 	if cmd[1] != expectedArg {
 		t.Errorf("sleep arg = %q, want %q", cmd[1], expectedArg)
+	}
+}
+
+func TestBuildPodTemplateSpec_PriorityClassName(t *testing.T) {
+	cluster := &v1alpha1.AerospikeCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-cluster"},
+		Spec: v1alpha1.AerospikeClusterSpec{
+			Size:  1,
+			Image: "aerospike:ce-8.1.1.1",
+			PodSpec: &v1alpha1.AerospikePodSpec{
+				PriorityClassName: "high-priority",
+			},
+		},
+	}
+
+	pt := BuildPodTemplateSpec(cluster, nil, 0, "test-config", "abc123")
+
+	if pt.Spec.PriorityClassName != "high-priority" {
+		t.Errorf("PriorityClassName = %q, want %q", pt.Spec.PriorityClassName, "high-priority")
+	}
+}
+
+func TestBuildPodTemplateSpec_PriorityClassNameEmpty(t *testing.T) {
+	cluster := &v1alpha1.AerospikeCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-cluster"},
+		Spec: v1alpha1.AerospikeClusterSpec{
+			Size:  1,
+			Image: "aerospike:ce-8.1.1.1",
+		},
+	}
+
+	pt := BuildPodTemplateSpec(cluster, nil, 0, "test-config", "abc123")
+
+	if pt.Spec.PriorityClassName != "" {
+		t.Errorf("PriorityClassName = %q, want empty", pt.Spec.PriorityClassName)
+	}
+}
+
+func TestBuildPodTemplateSpec_TopologySpreadConstraints(t *testing.T) {
+	cluster := &v1alpha1.AerospikeCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-cluster"},
+		Spec: v1alpha1.AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			PodSpec: &v1alpha1.AerospikePodSpec{
+				TopologySpreadConstraints: []corev1.TopologySpreadConstraint{
+					{
+						MaxSkew:           1,
+						TopologyKey:       zoneTopologyKey,
+						WhenUnsatisfiable: corev1.DoNotSchedule,
+					},
+				},
+			},
+		},
+	}
+
+	pt := BuildPodTemplateSpec(cluster, nil, 0, "test-config", "abc123")
+
+	if len(pt.Spec.TopologySpreadConstraints) != 1 {
+		t.Fatalf("TopologySpreadConstraints length = %d, want 1", len(pt.Spec.TopologySpreadConstraints))
+	}
+	if pt.Spec.TopologySpreadConstraints[0].TopologyKey != zoneTopologyKey {
+		t.Errorf("TopologyKey = %q, want %q", pt.Spec.TopologySpreadConstraints[0].TopologyKey, zoneTopologyKey)
 	}
 }
 

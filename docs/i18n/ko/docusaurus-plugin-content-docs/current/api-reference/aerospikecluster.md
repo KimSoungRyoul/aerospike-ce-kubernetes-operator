@@ -381,6 +381,7 @@ Aerospike 파드의 파드 레벨 커스터마이징입니다.
 | `podManagementPolicy` | string | StatefulSet 파드 관리: `OrderedReady` (기본) 또는 `Parallel`. |
 | `metadata` | [AerospikePodMetadata](#aerospikepodmetadata) | 추가 파드 레이블/어노테이션. |
 | `readinessGateEnabled` | *bool | 커스텀 readiness gate `acko.io/aerospike-ready` 활성화. Aerospike가 클러스터 mesh에 참여하고 마이그레이션이 완료될 때까지 Service 엔드포인트에서 제외. |
+| `priorityClassName` | string | 파드 스케줄링 우선순위 및 선점(preemption)을 위한 PriorityClass 이름. 클러스터에 해당 PriorityClass가 미리 존재해야 합니다. |
 
 ---
 

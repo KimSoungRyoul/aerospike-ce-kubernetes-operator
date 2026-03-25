@@ -213,6 +213,14 @@ func applyPodSpecSettings(podSpec *corev1.PodSpec, spec *v1alpha1.AerospikePodSp
 			ConditionType: AerospikeReadinessGateConditionType,
 		})
 	}
+
+	if len(spec.TopologySpreadConstraints) > 0 {
+		podSpec.TopologySpreadConstraints = spec.TopologySpreadConstraints
+	}
+
+	if spec.PriorityClassName != "" {
+		podSpec.PriorityClassName = spec.PriorityClassName
+	}
 }
 
 // applyRackPodSpecOverrides overrides pod spec settings with rack-specific values.

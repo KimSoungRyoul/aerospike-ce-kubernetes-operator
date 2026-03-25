@@ -202,6 +202,16 @@ spec:
     podManagementPolicy: Parallel
 ```
 
+### priorityClassName
+
+Set a [PriorityClass](https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/) for Aerospike pods. The PriorityClass must already exist in the cluster.
+
+```yaml
+spec:
+  podSpec:
+    priorityClassName: high-priority
+```
+
 ### Full Pod Scheduling Example
 
 ```yaml
@@ -239,6 +249,7 @@ spec:
           matchLabels:
             app: aerospike
     terminationGracePeriodSeconds: 600
+    priorityClassName: high-priority
   aerospikeConfig:
     service:
       cluster-name: production

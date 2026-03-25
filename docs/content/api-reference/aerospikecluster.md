@@ -382,6 +382,7 @@ Pod-level customization for Aerospike pods.
 | `podManagementPolicy` | string | StatefulSet pod management: `OrderedReady` (default) or `Parallel`. |
 | `metadata` | [AerospikePodMetadata](#aerospikepodmetadata) | Additional pod labels/annotations. |
 | `readinessGateEnabled` | *bool | Enable custom readiness gate `acko.io/aerospike-ready`. Pods excluded from Service endpoints until Aerospike joins cluster mesh and finishes migrations. |
+| `priorityClassName` | string | PriorityClass name for pod scheduling priority and preemption. The PriorityClass must already exist in the cluster. |
 
 ---
 

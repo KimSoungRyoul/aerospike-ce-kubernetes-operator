@@ -275,7 +275,7 @@ Reconciliation 실패가 발생하면 **Reconciliation Health** 카드가 나타
 **Clone** — 클러스터 상세 페이지에서 **Clone** 버튼으로 기존 클러스터의 spec을 복사하여 새 클러스터를 생성합니다. 새 이름과 네임스페이스를 지정하면 `operations`와 `paused` 상태를 제외한 전체 spec이 복제됩니다. 프로덕션 클러스터의 설정을 테스트 환경에 복제하거나, 검증된 설정을 다른 네임스페이스에 배포할 때 유용합니다.
 
 :::caution 다른 네임스페이스로 복제 시 ACL Secret
-다른 네임스페이스로 클러스터를 복제할 때, ACL 사용자의 비밀번호에 연결된 Kubernetes Secret(`spec.acl.users[].secretName`)은 자동으로 복사되지 않습니다. 복제된 클러스터가 ACL이 활성화된 상태로 정상 시작하려면, 대상 네임스페이스에 동일한 Secret이 미리 존재해야 합니다.
+다른 네임스페이스로 클러스터를 복제할 때, ACL 사용자의 비밀번호에 연결된 Kubernetes Secret(`spec.aerospikeAccessControl.users[].secretName`)은 자동으로 복사되지 않습니다. 복제된 클러스터가 ACL이 활성화된 상태로 정상 시작하려면, 대상 네임스페이스에 동일한 Secret이 미리 존재해야 합니다.
 :::
 
 ---

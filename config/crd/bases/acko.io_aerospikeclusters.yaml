@@ -4384,6 +4384,12 @@ spec:
                     - OrderedReady
                     - Parallel
                     type: string
+                  priorityClassName:
+                    description: |-
+                      PriorityClassName is the name of the PriorityClass for Aerospike pods.
+                      This controls pod scheduling priority and preemption behavior.
+                      The PriorityClass must already exist in the cluster.
+                    type: string
                   readinessGateEnabled:
                     description: |-
                       ReadinessGateEnabled enables the custom Pod Readiness Gate "acko.io/aerospike-ready".
@@ -12931,6 +12937,12 @@ spec:
                         enum:
                         - OrderedReady
                         - Parallel
+                        type: string
+                      priorityClassName:
+                        description: |-
+                          PriorityClassName is the name of the PriorityClass for Aerospike pods.
+                          This controls pod scheduling priority and preemption behavior.
+                          The PriorityClass must already exist in the cluster.
                         type: string
                       readinessGateEnabled:
                         description: |-
