@@ -167,7 +167,7 @@ spec:
 
 ### topologySpreadConstraints
 
-장애 도메인(존, 노드 등)에 파드를 균등하게 분배합니다.
+장애 도메인(존, 노드 등)에 파드를 균등하게 분배합니다. 이 제약 조건은 StatefulSet 파드 템플릿에 적용되며 Kubernetes 스케줄러에 의해 시행됩니다.
 
 ```yaml
 spec:
@@ -186,6 +186,34 @@ spec:
           matchLabels:
             app: aerospike
 ```
+
+### 우선순위 클래스
+
+파드 스케줄링 우선순위를 제어하기 위해 파드 스펙에 `priorityClassName`을 설정합니다. 높은 우선순위 클래스의 파드는 낮은 우선순위 파드보다 먼저 스케줄링되며, 리소스 부족 시 축출될 가능성이 낮습니다.
+
+```yaml
+spec:
+  podSpec:
+    priorityClassName: high-priority
+```
+
+먼저 PriorityClass를 생성합니다:
+
+```bash
+kubectl apply -f - <<EOF
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: high-priority
+value: 1000000
+globalDefault: false
+description: "Aerospike 파드용 높은 우선순위"
+EOF
+```
+
+:::tip
+프로덕션에서는 우선순위 클래스를 사용하여 리소스 경합 시 Aerospike 파드가 낮은 우선순위 워크로드에 의해 축출되지 않도록 보장하세요.
+:::
 
 ### podManagementPolicy
 
@@ -224,6 +252,7 @@ spec:
   image: aerospike:ce-8.1.1.1
   podSpec:
     podManagementPolicy: OrderedReady
+    priorityClassName: high-priority
     nodeSelector:
       disktype: ssd
     tolerations:

@@ -60,6 +60,34 @@ spec:
 
 메트릭 라벨은 `METRIC_LABELS` 환경 변수를 통해 정렬된 `key=value` 쌍으로 exporter에 전달됩니다. 이 라벨은 exporter가 생성하는 모든 메트릭에 나타나며, Grafana나 Prometheus에서의 필터링에 유용합니다.
 
+### Exporter 환경 변수
+
+`env` 필드를 통해 Prometheus exporter 컨테이너에 커스텀 환경 변수를 전달할 수 있습니다. 이는 인증, 바인딩 설정, 특정 메트릭 카테고리 비활성화 등 exporter 동작을 제어하는 데 유용합니다.
+
+```yaml
+spec:
+  monitoring:
+    enabled: true
+    exporter:
+      env:
+        - name: AS_PROMETHEUS_DISABLE_CLUSTER_METRICS
+          value: "true"
+        - name: AS_PROMETHEUS_BIND_PORT
+          value: "9146"
+```
+
+주요 exporter 환경 변수:
+
+| 변수 | 설명 |
+|------|------|
+| `AS_AUTH_USER` | 인증이 활성화된 클러스터의 Aerospike 사용자 이름 |
+| `AS_AUTH_PASSWORD` | Aerospike 비밀번호 (K8s Secret 참조 권장) |
+| `AS_PROMETHEUS_BIND_PORT` | 기본 메트릭 바인딩 포트 오버라이드 |
+| `AS_PROMETHEUS_DISABLE_CLUSTER_METRICS` | 클러스터 수준 메트릭 수집 비활성화 |
+| `AS_PROMETHEUS_DISABLE_NAMESPACE_METRICS` | 네임스페이스 수준 메트릭 수집 비활성화 |
+
+이 설정은 클러스터 매니저 UI의 Edit 다이얼로그 Monitoring 섹션에서도 구성할 수 있습니다.
+
 ---
 
 ## ServiceMonitor

@@ -60,6 +60,34 @@ spec:
 
 Metric labels are passed to the exporter via the `METRIC_LABELS` environment variable as sorted `key=value` pairs. They appear on every metric the exporter produces, which is useful for filtering in Grafana or Prometheus.
 
+### Exporter Environment Variables
+
+Custom environment variables can be passed to the Prometheus exporter container via the `env` field. This is useful for controlling exporter behavior such as authentication, binding configuration, or disabling specific metric categories.
+
+```yaml
+spec:
+  monitoring:
+    enabled: true
+    exporter:
+      env:
+        - name: AS_PROMETHEUS_DISABLE_CLUSTER_METRICS
+          value: "true"
+        - name: AS_PROMETHEUS_BIND_PORT
+          value: "9146"
+```
+
+Common exporter environment variables:
+
+| Variable | Description |
+|----------|-------------|
+| `AS_AUTH_USER` | Aerospike username for authenticated clusters |
+| `AS_AUTH_PASSWORD` | Aerospike password (prefer K8s Secret references) |
+| `AS_PROMETHEUS_BIND_PORT` | Override the default metrics bind port |
+| `AS_PROMETHEUS_DISABLE_CLUSTER_METRICS` | Disable cluster-level metrics collection |
+| `AS_PROMETHEUS_DISABLE_NAMESPACE_METRICS` | Disable namespace-level metrics collection |
+
+These can also be configured through the Cluster Manager UI in the Monitoring section of the Edit dialog.
+
 ---
 
 ## ServiceMonitor

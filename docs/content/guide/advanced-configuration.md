@@ -167,7 +167,7 @@ When `podSpec.multiPodPerHost` is `false` (or `nil` with `hostNetwork: true`), t
 
 ### topologySpreadConstraints
 
-Distribute pods evenly across failure domains (zones, nodes, etc.).
+Distribute pods evenly across failure domains (zones, nodes, etc.). These constraints are applied to the StatefulSet pod template and enforced by the Kubernetes scheduler.
 
 ```yaml
 spec:
@@ -186,6 +186,34 @@ spec:
           matchLabels:
             app: aerospike
 ```
+
+### Priority Class
+
+Set `priorityClassName` in the pod spec to control pod scheduling priority. Pods with higher priority classes are scheduled before lower-priority pods and are less likely to be evicted under resource pressure.
+
+```yaml
+spec:
+  podSpec:
+    priorityClassName: high-priority
+```
+
+Create a PriorityClass first:
+
+```bash
+kubectl apply -f - <<EOF
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: high-priority
+value: 1000000
+globalDefault: false
+description: "High priority for Aerospike pods"
+EOF
+```
+
+:::tip
+Use priority classes in production to ensure Aerospike pods are not preempted by lower-priority workloads during resource contention.
+:::
 
 ### podManagementPolicy
 
@@ -224,6 +252,7 @@ spec:
   image: aerospike:ce-8.1.1.1
   podSpec:
     podManagementPolicy: OrderedReady
+    priorityClassName: high-priority
     nodeSelector:
       disktype: ssd
     tolerations:

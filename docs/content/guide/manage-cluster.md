@@ -701,6 +701,29 @@ storage:
               volume.kubernetes.io/storage-provisioner: "ebs.csi.aws.com"
 ```
 
+### PVC Management
+
+The operator creates PersistentVolumeClaims for each pod's storage volumes. You can monitor PVC status through the Cluster Manager UI, which shows:
+
+- **PVC binding status** -- Bound, Pending, Released, or Failed
+- **Pod binding** -- which pod each PVC is currently bound to
+- **Orphaned PVCs** -- PVCs that are bound to a PersistentVolume but not mounted by any running pod (can occur after scale-down or pod rescheduling)
+- **Capacity and StorageClass** -- provisioned storage size and the StorageClass used
+
+You can also check PVC status via kubectl:
+
+```bash
+# List all PVCs for a cluster
+kubectl -n aerospike get pvc -l app=aerospike-ce-3node
+
+# Check for orphaned PVCs (PVCs without a matching pod)
+kubectl -n aerospike get pvc -l app=aerospike-ce-3node -o custom-columns=NAME:.metadata.name,STATUS:.status.phase,POD:.metadata.annotations.acko\\.io/pod-name
+```
+
+:::note
+PVCs with `cascadeDelete: true` are automatically cleaned up when the CR is deleted or after scale-down. See [Cascade Delete](#cascade-delete) for details.
+:::
+
 ### Volume Mount Options
 
 Advanced mount options for Aerospike and sidecar containers:
