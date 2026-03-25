@@ -187,6 +187,11 @@ func LoadImageToKindClusterWithName(name string) error {
 	// When using Podman, kind load docker-image may fail to find images.
 	// Use podman save + kind load image-archive as a workaround.
 	if usePodman {
+		containerTool := os.Getenv("CONTAINER_TOOL")
+		if containerTool == "" {
+			containerTool = podmanRuntime
+		}
+
 		f, err := os.CreateTemp("", "kind-image-*.tar")
 		if err != nil {
 			return fmt.Errorf("creating temp archive: %w", err)
@@ -195,7 +200,7 @@ func LoadImageToKindClusterWithName(name string) error {
 		_ = f.Close()
 		defer func() { _ = os.Remove(archivePath) }()
 
-		cmd := exec.Command("podman", "save", "--format", "docker-archive", name, "-o", archivePath)
+		cmd := exec.Command(containerTool, "save", "--format", "docker-archive", name, "-o", archivePath)
 		if _, err := Run(cmd); err != nil {
 			return fmt.Errorf("podman save: %w", err)
 		}
@@ -215,10 +220,11 @@ func LoadImageToKindClusterWithName(name string) error {
 func isPodmanOnlyEnvironment() bool {
 	_, podmanErr := exec.LookPath(podmanRuntime)
 	_, dockerErr := exec.LookPath("docker")
-	// Only treat Docker as absent when it is genuinely not found on PATH, not
-	// when LookPath fails for other reasons (e.g., permission errors).
+	// Use errors.Is for both sides so that permission errors or other
+	// non-ErrNotFound failures are not confused with "binary not found".
+	podmanNotFound := errors.Is(podmanErr, exec.ErrNotFound)
 	dockerNotFound := errors.Is(dockerErr, exec.ErrNotFound)
-	return podmanErr == nil && dockerNotFound
+	return !podmanNotFound && dockerNotFound
 }
 
 // GetNonEmptyLines converts given command output string into individual objects
