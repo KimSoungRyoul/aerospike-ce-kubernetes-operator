@@ -110,24 +110,6 @@ func CountReadyPods(ctx context.Context, c client.Client, clusterName, ns string
 	return count, nil
 }
 
-// GetPodAnnotationValue returns a specific annotation value from a pod.
-func GetPodAnnotationValue(ctx context.Context, c client.Client, podName, ns, key string) (string, error) {
-	pod := &corev1.Pod{}
-	if err := c.Get(ctx, types.NamespacedName{Name: podName, Namespace: ns}, pod); err != nil {
-		return "", err
-	}
-	return pod.Annotations[key], nil
-}
-
-// GetPodLabelValue returns a specific label value from a pod.
-func GetPodLabelValue(ctx context.Context, c client.Client, podName, ns, key string) (string, error) {
-	pod := &corev1.Pod{}
-	if err := c.Get(ctx, types.NamespacedName{Name: podName, Namespace: ns}, pod); err != nil {
-		return "", err
-	}
-	return pod.Labels[key], nil
-}
-
 // --- StatefulSet helpers ---
 
 // ListClusterStatefulSets lists all StatefulSets belonging to a cluster.
@@ -182,14 +164,6 @@ func PDBExists(ctx context.Context, c client.Client, name, ns string) (bool, err
 }
 
 // --- AerospikeClusterTemplate helpers ---
-
-// GetTemplate retrieves an AerospikeClusterTemplate by name.
-// Templates are cluster-scoped, so no namespace is needed.
-func GetTemplate(ctx context.Context, c client.Client, name string) (*ackov1alpha1.AerospikeClusterTemplate, error) {
-	template := &ackov1alpha1.AerospikeClusterTemplate{}
-	err := c.Get(ctx, types.NamespacedName{Name: name}, template)
-	return template, err
-}
 
 // PatchTemplate applies a JSON merge patch to an AerospikeClusterTemplate.
 // Templates are cluster-scoped, so no namespace is needed.

@@ -67,7 +67,7 @@ func TestE2E(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	By("building the manager image")
-	buildArgs := []string{"docker-build", fmt.Sprintf("IMG=%s", managerImage)}
+	buildArgs := []string{"container-build", fmt.Sprintf("IMG=%s", managerImage)}
 	if ct := os.Getenv("CONTAINER_TOOL"); ct != "" {
 		buildArgs = append(buildArgs, fmt.Sprintf("CONTAINER_TOOL=%s", ct))
 	}

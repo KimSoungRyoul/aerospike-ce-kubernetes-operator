@@ -201,13 +201,13 @@ var _ = Describe("Cluster templates", Ordered, Label("heavy"), func() {
 			}, defaultTimeout, 2*time.Second).Should(Succeed())
 
 			By("verifying the snapshot still references the old resourceVersion")
-			Eventually(func(g Gomega) {
+			Consistently(func(g Gomega) {
 				c, err := utils.GetCluster(ctx, k8sClient, clusterName, templateTestNS)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(c.Status.TemplateSnapshot).NotTo(BeNil())
 				g.Expect(c.Status.TemplateSnapshot.ResourceVersion).To(Equal(oldResourceVersion),
 					"snapshot resourceVersion should not change until resync")
-			}, defaultTimeout, 2*time.Second).Should(Succeed())
+			}, 10*time.Second, 2*time.Second).Should(Succeed())
 		})
 	})
 })
