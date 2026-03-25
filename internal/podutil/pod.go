@@ -375,7 +375,10 @@ func buildExporterSidecar(
 
 		pairs := make([]string, 0, len(keys))
 		for _, k := range keys {
-			pairs = append(pairs, fmt.Sprintf(`%s="%s"`, k, monitoring.MetricLabels[k]))
+			// Escape TOML special characters in label values.
+			v := strings.ReplaceAll(monitoring.MetricLabels[k], `\`, `\\`)
+			v = strings.ReplaceAll(v, `"`, `\"`)
+			pairs = append(pairs, fmt.Sprintf(`%s="%s"`, k, v))
 		}
 		envVars = append(envVars, corev1.EnvVar{
 			Name:  "METRIC_LABELS",

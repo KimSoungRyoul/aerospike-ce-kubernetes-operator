@@ -375,6 +375,31 @@ func TestBuildExporterSidecar_MetricLabels(t *testing.T) {
 	}
 }
 
+func TestBuildExporterSidecar_MetricLabelsEscape(t *testing.T) {
+	monitoring := &v1alpha1.AerospikeMonitoringSpec{
+		Enabled:       true,
+		ExporterImage: "exporter:v1",
+		Port:          9145,
+		MetricLabels: map[string]string{
+			"desc": `has "quotes" and \ backslash`,
+		},
+	}
+
+	c := buildExporterSidecar(monitoring, nil)
+
+	var metricLabelsValue string
+	for _, e := range c.Env {
+		if e.Name == "METRIC_LABELS" {
+			metricLabelsValue = e.Value
+		}
+	}
+
+	expected := `desc="has \"quotes\" and \\ backslash"`
+	if metricLabelsValue != expected {
+		t.Errorf("METRIC_LABELS = %q, want %q", metricLabelsValue, expected)
+	}
+}
+
 func TestBuildExporterSidecar_CustomEnv(t *testing.T) {
 	monitoring := &v1alpha1.AerospikeMonitoringSpec{
 		Enabled:       true,

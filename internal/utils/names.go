@@ -51,8 +51,3 @@ func NetworkPolicyName(clusterName string) string {
 func PrometheusRuleName(clusterName string) string {
 	return fmt.Sprintf("%s-alerts", clusterName)
 }
-
-// ExporterConfigMapName returns the ConfigMap name for the exporter config.
-func ExporterConfigMapName(clusterName string) string {
-	return fmt.Sprintf("%s-exporter-config", clusterName)
-}
