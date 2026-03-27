@@ -23,6 +23,8 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GH_AW_GITHUB_TOKEN }}
+          bot_id: '24240623'
+          bot_name: 'KimSoungRyoul'
           prompt: |
             You are an AI planning agent for the **aerospike-ce-kubernetes-operator** (ACKO) project.
 
