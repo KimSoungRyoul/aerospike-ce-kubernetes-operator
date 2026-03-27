@@ -24,6 +24,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: '*'
           branch_prefix: 'agent/'
           prompt: |
             You are an AI implementation agent for the **aerospike-ce-kubernetes-operator** (ACKO) project.
