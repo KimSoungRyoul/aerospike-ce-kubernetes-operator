@@ -58,6 +58,6 @@ jobs:
             - Max 3 iterations, only auto-fix HIGH issues
             - Always mention @kimsoungryoul in final comment
           claude_args: |
-            --max-turns 25
+            --max-turns 300
             --dangerously-skip-permissions
           settings: '{"git":{"includeCoAuthor":false}}'

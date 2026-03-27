@@ -57,6 +57,6 @@ jobs:
             - Do NOT create branches, pull requests, or modify files
             - Your ONLY outputs are: one plan comment + one label
           claude_args: |
-            --max-turns 15
+            --max-turns 300
             --dangerously-skip-permissions
           settings: '{"git":{"includeCoAuthor":false}}'
