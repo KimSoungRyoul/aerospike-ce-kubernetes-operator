@@ -2,7 +2,7 @@
 description: "Issue-triggered AI planner: analyzes issues and posts structured implementation plans"
 on:
   issues:
-    types: [opened, labeled]
+    types: [labeled]
   roles: [admin, maintainer, write]
 engine:
   id: claude
