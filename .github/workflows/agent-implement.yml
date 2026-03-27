@@ -48,7 +48,7 @@ jobs:
             5. Verify: `go build ./...`, `go vet ./...`, `make test-unit`, `make lint`
             6. Commit with Conventional Commits format
             7. Create PR: `gh pr create --title "..." --body "Closes #${{ github.event.issue.number }}"`
-            8. Add `needs-review` label to the issue
+            8. Add `needs-review` label to the **PR** (not the issue): `gh pr edit <pr-number> --add-label "needs-review"`
 
             ## Constraints
             - Follow Conventional Commits for all commits and PR title
@@ -56,5 +56,6 @@ jobs:
             - If verification fails, comment the error and stop
           claude_args: |
             --max-turns 300
+            --model claude-opus-4-6
             --dangerously-skip-permissions
-          settings: '{"git":{"includeCoAuthor":false}}'
+          settings: '{"git":{"includeCoAuthor":false},"env":{"CLAUDE_CODE_EFFORT":"high"}}'
