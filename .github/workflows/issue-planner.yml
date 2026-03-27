@@ -1,0 +1,62 @@
+name: Issue Planner
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  plan:
+    if: github.event.label.name == 'agent'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code - Issue Planner
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            You are an AI planning agent for the **aerospike-ce-kubernetes-operator** (ACKO) project.
+
+            ## Project Context
+            - **Structure**: Go/kubebuilder v4 with controller-runtime
+            - **CRD types**: `api/v1alpha1/` (AerospikeCluster, AerospikeClusterStatus)
+            - **Controllers**: `internal/controller/` (reconciliation logic)
+            - **Config generation**: `internal/configgen/`
+            - **Build**: Go modules, Conventional Commits format
+            - **Tests**: unit (`make test-unit`), integration with envtest, e2e
+
+            ## Task
+            Analyze issue #${{ github.event.issue.number }} and create an implementation plan.
+
+            **Issue Title**: ${{ github.event.issue.title }}
+
+            ### Instructions
+            1. Read the issue description carefully
+            2. Explore the codebase to understand relevant files and patterns
+            3. If the issue is too vague, comment asking for clarification, add `needs-clarification` label, and stop.
+            4. Create a structured plan and post it as a comment using `gh issue comment ${{ github.event.issue.number }}`:
+
+            The comment must contain `<!-- agent-plan-start -->` and `<!-- agent-plan-end -->` markers with:
+            - Analysis section referencing specific files
+            - Proposed Changes table (File | Action | Description)
+            - Implementation Strategy (numbered steps)
+            - Risk Assessment (breaking changes, test coverage, dependencies)
+            - Verification checklist (`go build ./...`, `make test-unit`, `make lint`, `go vet ./...`)
+
+            5. After posting, add `plan-complete` label: `gh issue edit ${{ github.event.issue.number }} --add-label "plan-complete"`
+
+            ## Constraints
+            - Do NOT create branches, pull requests, or modify files
+            - Your ONLY outputs are: one plan comment + one label
+          claude_args: |
+            --max-turns 15
+            --allowedTools Bash(gh issue:*) Bash(gh api:*) Read Glob Grep
+          settings: '{"git":{"includeCoAuthor":false}}'

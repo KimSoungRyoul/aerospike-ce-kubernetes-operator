@@ -1,0 +1,61 @@
+name: PR Reviewer
+
+on:
+  pull_request:
+    types: [labeled]
+
+jobs:
+  review:
+    if: github.event.label.name == 'needs-review'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Run Claude Code - PR Review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          branch_prefix: ''
+          prompt: |
+            You are an AI code review agent for **aerospike-ce-kubernetes-operator** (ACKO).
+
+            ## Project Context
+            - Go/kubebuilder v4, controller-runtime
+            - CRD types in `api/v1alpha1/`, controllers in `internal/controller/`
+
+            ## Task
+            Review PR #${{ github.event.pull_request.number }} with auto-fix loop (max 3 iterations).
+
+            ### Review Loop
+            For each iteration (up to 3):
+
+            1. **Analyze**: `gh pr diff ${{ github.event.pull_request.number }}`
+               - **HIGH**: Bugs, security issues, data loss in cluster ops, breaking CRD changes, reconciliation errors, RBAC issues, resource leaks
+               - **MEDIUM**: Missing error handling, incomplete tests, missing status updates
+               - **LOW**: Naming, docs, style
+
+            2. **If HIGH issues + iteration < 3**: Fix, commit (`fix(review): ...`), push, comment progress, continue
+            3. **If no HIGH or limit reached**: Break
+
+            ### Final Review
+            Post summary comment with severity counts, auto-fixed items, and suggestions.
+            End with: `@kimsoungryoul — Review complete. Human review requested.`
+
+            Add `review-complete` label: `gh pr edit ${{ github.event.pull_request.number }} --add-label "review-complete"`
+
+            ## Constraints
+            - Max 3 iterations, only auto-fix HIGH issues
+            - Always mention @kimsoungryoul in final comment
+          claude_args: |
+            --max-turns 25
+          settings: '{"git":{"includeCoAuthor":false}}'
