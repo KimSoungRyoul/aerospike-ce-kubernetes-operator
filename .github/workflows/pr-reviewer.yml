@@ -59,4 +59,5 @@ jobs:
             - Always mention @kimsoungryoul in final comment
           claude_args: |
             --max-turns 25
+            --dangerously-skip-permissions
           settings: '{"git":{"includeCoAuthor":false}}'

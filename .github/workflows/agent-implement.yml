@@ -56,4 +56,5 @@ jobs:
             - If verification fails, comment the error and stop
           claude_args: |
             --max-turns 30
+            --dangerously-skip-permissions
           settings: '{"git":{"includeCoAuthor":false}}'
