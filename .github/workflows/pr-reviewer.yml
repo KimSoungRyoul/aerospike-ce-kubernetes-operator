@@ -48,8 +48,8 @@ jobs:
                - **MEDIUM**: Missing error handling, incomplete tests, missing status updates
                - **LOW**: Naming, docs, style
 
-            2. **If HIGH issues + iteration < 3**: Fix, commit (`fix(review): ...`), push, comment progress, continue
-            3. **If no HIGH or limit reached**: Break
+            2. **If HIGH or MEDIUM issues + iteration < 3**: Fix all HIGH and MEDIUM issues, commit (`fix(review): ...`), push, comment progress, continue
+            3. **If no HIGH/MEDIUM issues or limit reached**: Break
 
             ### Final Review
             Post summary comment with severity counts, auto-fixed items, and suggestions.
@@ -58,7 +58,8 @@ jobs:
             Add `review-complete` label: `gh pr edit ${{ github.event.pull_request.number }} --add-label "review-complete"`
 
             ## Constraints
-            - Max 3 iterations, only auto-fix HIGH issues
+            - Max 3 iterations, auto-fix HIGH and MEDIUM issues
+            - Leave LOW as suggestions only
             - Always mention @kimsoungryoul in final comment
           claude_args: |
             --max-turns 300
