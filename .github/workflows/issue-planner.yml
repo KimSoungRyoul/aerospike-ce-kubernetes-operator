@@ -1,4 +1,5 @@
 name: Issue Planner
+# agent 라벨 추가 시 Claude Code로 이슈 분석 → 구현 계획 코멘트 작성 → plan-complete 라벨
 
 on:
   issues:

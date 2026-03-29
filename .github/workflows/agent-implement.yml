@@ -1,4 +1,5 @@
 name: Agent Implement
+# plan-complete 라벨 시 계획 코멘트 기반으로 코드 구현 → PR 생성 → needs-review 라벨
 
 on:
   issues:

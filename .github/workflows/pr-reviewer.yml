@@ -1,4 +1,5 @@
 name: PR Reviewer
+# needs-review 라벨 시 PR diff 자동 리뷰 → HIGH/MEDIUM 이슈 자동 수정 (max 3회) → review-complete 라벨
 
 on:
   pull_request:

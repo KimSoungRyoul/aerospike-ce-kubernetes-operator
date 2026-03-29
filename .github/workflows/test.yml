@@ -1,4 +1,5 @@
 name: Tests
+# 유닛 테스트 + envtest 통합 테스트 (go test + setup-envtest)
 
 on:
   push:

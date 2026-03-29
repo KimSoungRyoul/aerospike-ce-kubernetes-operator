@@ -1,4 +1,5 @@
 name: Lint
+# PR 시 golangci-lint 실행 (Go 코드 정적 분석)
 
 on:
   push:
