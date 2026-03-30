@@ -375,11 +375,17 @@ func (v *AerospikeClusterValidator) validateAerospikeConfig(config map[string]an
 			}
 			// Validate each namespace's config
 			for i, nsEntry := range ns {
-				if nsMap, ok := nsEntry.(map[string]any); ok {
-					nsErrors, nsWarnings := v.validateNamespaceConfig(nsMap, i)
-					errors = append(errors, nsErrors...)
-					warnings = append(warnings, nsWarnings...)
+				nsMap, ok := nsEntry.(map[string]any)
+				if !ok {
+					errors = append(errors, fmt.Sprintf("aerospikeConfig.namespaces[%d] must be a map, got %T", i, nsEntry))
+					continue
 				}
+				if _, hasName := nsMap["name"]; !hasName {
+					errors = append(errors, fmt.Sprintf("aerospikeConfig.namespaces[%d] is missing required 'name' key", i))
+				}
+				nsErrors, nsWarnings := v.validateNamespaceConfig(nsMap, i)
+				errors = append(errors, nsErrors...)
+				warnings = append(warnings, nsWarnings...)
 			}
 		case map[string]any:
 			if len(ns) > maxCENamespaces {
@@ -401,6 +407,24 @@ func (v *AerospikeClusterValidator) validateAerospikeConfig(config map[string]an
 						"aerospikeConfig.security.%s is not allowed in CE edition (%s)", enterpriseKey, reason))
 				}
 			}
+		}
+	}
+
+	// Validate top-level section types to catch config errors at admission time
+	// rather than at runtime (where they would cause permanent configgen failures).
+	if svc, exists := config["service"]; exists {
+		if _, ok := svc.(map[string]any); !ok {
+			errors = append(errors, fmt.Sprintf("aerospikeConfig.service must be a map, got %T", svc))
+		}
+	}
+	if net, exists := config["network"]; exists {
+		if _, ok := net.(map[string]any); !ok {
+			errors = append(errors, fmt.Sprintf("aerospikeConfig.network must be a map, got %T", net))
+		}
+	}
+	if logging, exists := config["logging"]; exists {
+		if _, ok := logging.([]any); !ok {
+			errors = append(errors, fmt.Sprintf("aerospikeConfig.logging must be a list, got %T", logging))
 		}
 	}
 

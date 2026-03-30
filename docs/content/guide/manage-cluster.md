@@ -1062,7 +1062,7 @@ kubectl -n aerospike get asc aerospike-3node \
 ```
 
 :::info
-Validation errors (e.g., invalid spec) do **not** increment the circuit breaker counter. They are permanent errors that require user intervention to fix.
+**Permanent validation errors** (e.g., invalid Aerospike config structure, missing ACL secrets, invalid privilege codes) **immediately** activate the circuit breaker by setting `failedReconcileCount` to the maximum threshold. A `PermanentError` event is emitted, and the `ReconcileHealthy` status condition is set to `False` with reason `PermanentError`. These errors will never self-heal — fix the spec to recover.
 :::
 
 ### Common Issues
@@ -1156,5 +1156,6 @@ kubectl get events --field-selector involvedObject.kind=AerospikeCluster -n aero
 | `PVCCleanupFailed` | Warning | Failed to delete orphaned PVCs after scale-down |
 | `CircuitBreakerActive` | Warning | Reconciliation backed off after consecutive failures |
 | `CircuitBreakerReset` | Normal | Circuit breaker reset after successful reconciliation |
+| `PermanentError` | Warning | Permanent validation error detected, automatic retries halted |
 | `ReconcileError` | Warning | Reconciliation loop encountered an unrecoverable error |
 | `Operation` | Normal | On-demand operation event |

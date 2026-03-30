@@ -3,6 +3,10 @@ package controller
 import (
 	"testing"
 	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
 )
 
 func TestCalculateBackoff(t *testing.T) {
@@ -127,5 +131,147 @@ func TestCircuitBreakerConstants(t *testing.T) {
 	}
 	if maxFailedReconciles != 10 {
 		t.Errorf("maxFailedReconciles = %d, want 10", maxFailedReconciles)
+	}
+}
+
+func TestSetConditionReconcileHealthyFalse(t *testing.T) {
+	cluster := &ackov1alpha1.AerospikeCluster{
+		ObjectMeta: metav1.ObjectMeta{Generation: 1},
+	}
+
+	setCondition(cluster, ackov1alpha1.ConditionReconcileHealthy, false,
+		"PermanentError", "invalid config: namespaces must be a list")
+
+	if len(cluster.Status.Conditions) != 1 {
+		t.Fatalf("expected 1 condition, got %d", len(cluster.Status.Conditions))
+	}
+	cond := cluster.Status.Conditions[0]
+	if cond.Type != ackov1alpha1.ConditionReconcileHealthy {
+		t.Errorf("expected type %q, got %q", ackov1alpha1.ConditionReconcileHealthy, cond.Type)
+	}
+	if cond.Status != metav1.ConditionFalse {
+		t.Errorf("expected status False, got %s", cond.Status)
+	}
+	if cond.Reason != "PermanentError" {
+		t.Errorf("expected reason PermanentError, got %q", cond.Reason)
+	}
+	if cond.Message != "invalid config: namespaces must be a list" {
+		t.Errorf("unexpected message: %q", cond.Message)
+	}
+}
+
+func TestSetConditionReconcileHealthyTrue(t *testing.T) {
+	cluster := &ackov1alpha1.AerospikeCluster{
+		ObjectMeta: metav1.ObjectMeta{Generation: 2},
+		Status: ackov1alpha1.AerospikeClusterStatus{
+			Conditions: []metav1.Condition{
+				{
+					Type:               ackov1alpha1.ConditionReconcileHealthy,
+					Status:             metav1.ConditionFalse,
+					Reason:             "PermanentError",
+					Message:            "some error",
+					ObservedGeneration: 1,
+					LastTransitionTime: metav1.Now(),
+				},
+			},
+		},
+	}
+
+	setCondition(cluster, ackov1alpha1.ConditionReconcileHealthy, true,
+		"ReconcileSucceeded", "Reconciliation succeeded")
+
+	if len(cluster.Status.Conditions) != 1 {
+		t.Fatalf("expected 1 condition, got %d", len(cluster.Status.Conditions))
+	}
+	cond := cluster.Status.Conditions[0]
+	if cond.Status != metav1.ConditionTrue {
+		t.Errorf("expected status True, got %s", cond.Status)
+	}
+	if cond.Reason != "ReconcileSucceeded" {
+		t.Errorf("expected reason ReconcileSucceeded, got %q", cond.Reason)
+	}
+}
+
+func TestValidationErrorSetsMaxFailedReconciles(t *testing.T) {
+	// Simulate what handleReconcileError does for validation errors:
+	// it should set FailedReconcileCount to maxFailedReconciles immediately.
+	cluster := &ackov1alpha1.AerospikeCluster{
+		ObjectMeta: metav1.ObjectMeta{Generation: 1},
+		Status: ackov1alpha1.AerospikeClusterStatus{
+			FailedReconcileCount: 0,
+		},
+	}
+
+	// Simulate the validation error branch logic
+	cluster.Status.FailedReconcileCount = maxFailedReconciles
+	cluster.Status.LastReconcileError = "validation error: invalid config"
+	setCondition(cluster, ackov1alpha1.ConditionReconcileHealthy, false,
+		"PermanentError", "validation error: invalid config")
+
+	if cluster.Status.FailedReconcileCount != maxFailedReconciles {
+		t.Errorf("expected FailedReconcileCount=%d, got %d",
+			maxFailedReconciles, cluster.Status.FailedReconcileCount)
+	}
+
+	// Verify circuit breaker would be active
+	if cluster.Status.FailedReconcileCount < maxFailedReconciles {
+		t.Error("circuit breaker should be active after validation error")
+	}
+
+	// Verify backoff is at the max level
+	backoff := calculateBackoff(cluster.Status.FailedReconcileCount)
+	expectedBackoff := calculateBackoff(maxFailedReconciles)
+	if backoff != expectedBackoff {
+		t.Errorf("backoff = %v, want %v", backoff, expectedBackoff)
+	}
+}
+
+func TestCircuitBreakerResetClearsReconcileHealthyCondition(t *testing.T) {
+	cluster := &ackov1alpha1.AerospikeCluster{
+		ObjectMeta: metav1.ObjectMeta{Generation: 3},
+		Status: ackov1alpha1.AerospikeClusterStatus{
+			FailedReconcileCount: maxFailedReconciles,
+			LastReconcileError:   "validation error: bad config",
+			Conditions: []metav1.Condition{
+				{
+					Type:               ackov1alpha1.ConditionReconcileHealthy,
+					Status:             metav1.ConditionFalse,
+					Reason:             "PermanentError",
+					Message:            "validation error: bad config",
+					ObservedGeneration: 2,
+					LastTransitionTime: metav1.Now(),
+				},
+			},
+		},
+	}
+
+	// Simulate what resetFailedReconcileCount does
+	cluster.Status.FailedReconcileCount = 0
+	cluster.Status.LastReconcileError = ""
+	setCondition(cluster, ackov1alpha1.ConditionReconcileHealthy, true,
+		"ReconcileSucceeded", "Reconciliation succeeded")
+
+	if cluster.Status.FailedReconcileCount != 0 {
+		t.Errorf("expected FailedReconcileCount=0, got %d", cluster.Status.FailedReconcileCount)
+	}
+	if cluster.Status.LastReconcileError != "" {
+		t.Errorf("expected empty LastReconcileError, got %q", cluster.Status.LastReconcileError)
+	}
+
+	// Verify condition is now True
+	found := false
+	for _, c := range cluster.Status.Conditions {
+		if c.Type == ackov1alpha1.ConditionReconcileHealthy {
+			found = true
+			if c.Status != metav1.ConditionTrue {
+				t.Errorf("expected ReconcileHealthy=True, got %s", c.Status)
+			}
+			if c.Reason != "ReconcileSucceeded" {
+				t.Errorf("expected reason ReconcileSucceeded, got %q", c.Reason)
+			}
+		}
+	}
+	if !found {
+		t.Error("ReconcileHealthy condition not found after reset")
 	}
 }

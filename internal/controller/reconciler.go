@@ -319,16 +319,24 @@ func (r *AerospikeClusterReconciler) handleReconcileError(
 	errMsg := truncateUTF8(reconcileErr.Error(), 256)
 
 	// Validation errors are permanent and will never self-heal.
-	// Don't increment the circuit breaker counter for these.
+	// Immediately activate the circuit breaker to prevent wasteful retries.
 	if ackoerrors.IsValidation(reconcileErr) {
-		log.Info("Validation error detected, not incrementing circuit breaker",
+		log.Info("Permanent validation error detected, activating circuit breaker immediately",
 			"error", reconcileErr)
-		// Still update the error message for visibility.
+		latest.Status.FailedReconcileCount = maxFailedReconciles
 		latest.Status.LastReconcileError = errMsg
+		setCondition(latest, ackov1alpha1.ConditionReconcileHealthy, false,
+			"PermanentError", errMsg)
 		if err := r.Status().Update(updateCtx, latest); err != nil {
 			log.Error(err, "Failed to update validation error in status")
+			return ctrl.Result{}, reconcileErr
 		}
-		return ctrl.Result{}, reconcileErr
+		cluster.Status.FailedReconcileCount = latest.Status.FailedReconcileCount
+		cluster.Status.LastReconcileError = latest.Status.LastReconcileError
+		r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventPermanentError,
+			"Permanent validation error, automatic retries halted: %s", errMsg)
+		backoff := calculateBackoff(maxFailedReconciles)
+		return ctrl.Result{RequeueAfter: backoff}, nil
 	}
 
 	latest.Status.FailedReconcileCount++
@@ -371,6 +379,8 @@ func (r *AerospikeClusterReconciler) resetFailedReconcileCount(
 	prevCount := latest.Status.FailedReconcileCount
 	latest.Status.FailedReconcileCount = 0
 	latest.Status.LastReconcileError = ""
+	setCondition(latest, ackov1alpha1.ConditionReconcileHealthy, true,
+		"ReconcileSucceeded", "Reconciliation succeeded")
 
 	if err := r.Status().Update(ctx, latest); err != nil {
 		return err

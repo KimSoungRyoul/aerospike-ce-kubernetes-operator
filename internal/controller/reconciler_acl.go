@@ -10,6 +10,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
+	ackoerrors "github.com/ksr/aerospike-ce-kubernetes-operator/internal/errors"
 	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/metrics"
 	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/utils"
 )
@@ -128,7 +129,7 @@ func (r *AerospikeClusterReconciler) reconcileRoles(
 			// Create the role
 			privileges, err := roleParsedPrivileges(roleSpec)
 			if err != nil {
-				return fmt.Errorf("parsing privileges for role %s: %w", roleSpec.Name, err)
+				return ackoerrors.NewValidationf("parsing privileges for role %s: %v", roleSpec.Name, err)
 			}
 			log.Info("Creating role", "role", roleSpec.Name)
 			if err := aeroClient.CreateRole(adminPolicy, roleSpec.Name, privileges, nil, 0, 0); err != nil {
@@ -140,7 +141,7 @@ func (r *AerospikeClusterReconciler) reconcileRoles(
 		// Sync privileges: grant missing, revoke extra
 		desiredPrivs, err := roleParsedPrivileges(roleSpec)
 		if err != nil {
-			return fmt.Errorf("parsing privileges for role %s: %w", roleSpec.Name, err)
+			return ackoerrors.NewValidationf("parsing privileges for role %s: %v", roleSpec.Name, err)
 		}
 		if err := syncRolePrivileges(aeroClient, adminPolicy, roleSpec.Name, existing.Privileges, desiredPrivs, log); err != nil {
 			return fmt.Errorf("syncing privileges for role %s: %w", roleSpec.Name, err)
@@ -188,7 +189,7 @@ func (r *AerospikeClusterReconciler) reconcileUsers(
 		// Read desired password
 		password, err := r.getPasswordFromSecret(ctx, cluster.Namespace, userSpec.SecretName)
 		if err != nil {
-			return fmt.Errorf("getting password for user %s: %w", userSpec.Name, err)
+			return ackoerrors.NewValidationf("getting password for user %s: %v", userSpec.Name, err)
 		}
 
 		existing, exists := existingUserMap[userSpec.Name]

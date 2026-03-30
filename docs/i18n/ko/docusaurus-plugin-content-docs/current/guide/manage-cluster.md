@@ -1057,7 +1057,7 @@ kubectl -n aerospike get asc aerospike-3node \
 ```
 
 :::info
-검증 오류(예: 잘못된 스펙)는 서킷 브레이커 카운터를 증가시키지 **않습니다**. 이는 사용자 개입이 필요한 영구적 오류입니다.
+**영구적 검증 오류**(예: 잘못된 Aerospike 설정 구조, ACL 시크릿 누락, 잘못된 권한 코드)는 `failedReconcileCount`를 최대 임계값으로 즉시 설정하여 서킷 브레이커를 **즉시 활성화**합니다. `PermanentError` 이벤트가 발생하고, `ReconcileHealthy` 상태 조건이 `False` (reason: `PermanentError`)로 설정됩니다. 이러한 오류는 자동으로 복구되지 않으므로 spec을 수정해야 합니다.
 :::
 
 ### 일반적인 문제

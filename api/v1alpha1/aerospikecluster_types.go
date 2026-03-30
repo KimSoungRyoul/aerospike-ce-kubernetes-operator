@@ -329,6 +329,10 @@ const (
 	ConditionMigrationComplete = "MigrationComplete"
 	// ConditionReconciliationPaused indicates reconciliation is paused by the user.
 	ConditionReconciliationPaused = "ReconciliationPaused"
+	// ConditionReconcileHealthy indicates whether reconciliation is healthy (no permanent errors).
+	// Set to False with reason "PermanentError" when a ValidationError is detected.
+	// Set to True with reason "ReconcileSucceeded" when the circuit breaker resets.
+	ConditionReconcileHealthy = "ReconcileHealthy"
 )
 
 // AerospikePhase represents the current phase of the cluster.

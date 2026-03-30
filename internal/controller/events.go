@@ -65,6 +65,9 @@ const (
 	EventCircuitBreakerActive = "CircuitBreakerActive"
 	EventCircuitBreakerReset  = "CircuitBreakerReset"
 
+	// Permanent error
+	EventPermanentError = "PermanentError"
+
 	// Miscellaneous
 	EventValidationWarning = "ValidationWarning"
 	EventReconcileError    = "ReconcileError"
