@@ -1,0 +1,51 @@
+# Scenario E: Zone 기반 Rack Affinity
+#
+# rack의 zone 필드가 노드의 topology.kubernetes.io/zone 라벨과 매칭되어
+# 해당 zone에 속한 노드에만 파드가 스케줄링되는지 검증.
+#
+# 사전 조건:
+#   - soft-rack-test 템플릿
+#   - Kind 클러스터 노드에 zone 라벨 설정:
+#       kind-worker:  zone-a
+#       kind-worker2: zone-b
+#       kind-worker3: zone-c
+#
+# 기대 결과:
+#   - 3파드 모두 Running
+#   - rack 1 -> zone-a 노드, rack 2 -> zone-b 노드, rack 3 -> zone-c 노드
+#
+# 검증:
+#   for pod in $(kubectl get pods -l app.kubernetes.io/instance=test-zone-racks -o jsonpath='{.items[*].metadata.name}'); do
+#     node=$(kubectl get pod $pod -o jsonpath='{.spec.nodeName}')
+#     zone=$(kubectl get node $node -o jsonpath='{.metadata.labels.topology\.kubernetes\.io/zone}')
+#     rack=$(kubectl get pod $pod -o jsonpath='{.metadata.labels.acko\.io/rack}')
+#     echo "Pod=$pod  Rack=$rack  Node=$node  Zone=$zone"
+#   done
+---
+apiVersion: acko.io/v1alpha1
+kind: AerospikeCluster
+metadata:
+  name: test-zone-racks
+  namespace: default
+spec:
+  size: 3
+  image: aerospike:ce-8.1.1.1
+  templateRef:
+    name: soft-rack-test
+  rackConfig:
+    namespaces:
+      - data
+    racks:
+      - id: 1
+        zone: zone-a
+      - id: 2
+        zone: zone-b
+      - id: 3
+        zone: zone-c
+  aerospikeConfig:
+    namespaces:
+      - name: data
+        replication-factor: 2
+        storage-engine:
+          type: memory
+          data-size: 1073741824
