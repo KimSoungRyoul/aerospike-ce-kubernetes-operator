@@ -645,8 +645,6 @@ func collectAerospikeInfo(
 	return result
 }
 
-// parseServiceEndpoints splits the asinfo "service" response (semicolon-separated
-// "host:port" entries) into a string slice.
 // setConfigDegraded transitions the cluster to ConfigDegraded phase and sets
 // the DynamicConfigDegraded condition with details about which pods have
 // inconsistent configuration. This is called when a dynamic config rollback fails.
@@ -681,6 +679,8 @@ func (r *AerospikeClusterReconciler) setConfigDegraded(
 		"Cluster entered ConfigDegraded phase: rollback failed on pods %s", strings.Join(failedPods, ", "))
 }
 
+// parseServiceEndpoints splits the asinfo "service" response (semicolon-separated
+// "host:port" entries) into a string slice.
 func parseServiceEndpoints(serviceStr string) []string {
 	serviceStr = strings.TrimSpace(serviceStr)
 	if serviceStr == "" {

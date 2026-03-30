@@ -323,7 +323,10 @@ func (r *AerospikeClusterReconciler) rollbackDynamicChangesBatch(
 ) *RollbackResult {
 	result := &RollbackResult{}
 
-	for _, du := range updates {
+	// Rollback in reverse order (LIFO) for proper 2PC semantics:
+	// the last pod to receive changes is rolled back first.
+	for i := len(updates) - 1; i >= 0; i-- {
+		du := updates[i]
 		podLog := log.WithValues("pod", du.podName)
 		podResult := r.rollbackDynamicChangesWithResult(podLog, du.node, du.applied)
 
