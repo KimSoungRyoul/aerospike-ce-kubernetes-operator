@@ -241,7 +241,7 @@ kubectl -n aerospike get events --field-selector reason=ReadinessGateBlocking
 
 ## Pausing and Resuming Reconciliation
 
-Temporarily stop the operator from reconciling a cluster by setting `spec.paused: true`. While paused, the operator skips all reconciliation for this cluster -- no scaling, rolling restarts, config changes, or ACL syncs will be performed. The cluster phase changes to `Paused` and the `ReconciliationPaused` condition is set to `True`.
+Temporarily stop the operator from reconciling a cluster by setting `spec.paused: true`. While paused, the operator skips all reconciliation for this cluster -- no scaling, rolling restarts, config changes, or ACL syncs will be performed. The cluster phase changes to `Paused` and the `ReconciliationPaused` condition is set to `True` atomically. A `ReconciliationPaused` Kubernetes event is also recorded.
 
 **When to pause:**
 
@@ -257,13 +257,19 @@ kubectl -n aerospike patch asc aerospike-3node --type merge -p '{"spec":{"paused
 # Verify paused state
 kubectl -n aerospike get asc aerospike-3node -o jsonpath='{.status.phase}'
 # Output: Paused
+
+# Check pause event
+kubectl -n aerospike get events --field-selector reason=ReconciliationPaused
 ```
 
-To resume reconciliation, set `paused` to `false` or remove it entirely. The operator immediately begins reconciling the cluster toward its desired state:
+To resume reconciliation, set `paused` to `false` or remove it entirely. The operator immediately begins reconciling the cluster toward its desired state. On resume, stale error state (failed reconcile count, last error) accumulated before pause is automatically cleared. A `ReconciliationResumed` event is recorded:
 
 ```bash
 # Resume reconciliation
 kubectl -n aerospike patch asc aerospike-3node --type merge -p '{"spec":{"paused":null}}'
+
+# Verify resume event
+kubectl -n aerospike get events --field-selector reason=ReconciliationResumed
 ```
 
 :::warning
