@@ -129,7 +129,8 @@ Configuration changes trigger a restart instead of applying dynamically.
 1. **`enableDynamicConfigUpdate` not set** — Dynamic updates are off by default.
 2. **Static parameter changed** — Parameters like `replication-factor`, `storage-engine type`, and `name` always require a restart.
 3. **Invalid characters** — Parameter values containing `;` or `:` are rejected by pre-flight validation.
-4. **Partial failure with rollback** — If one change in a batch fails, the operator rolls back all applied changes and falls back to a cold restart.
+4. **Partial failure with rollback** — If one change in a batch fails, the operator rolls back all applied changes across all pods and falls back to a cold restart.
+5. **ConfigDegraded state** — If rollback itself fails, the cluster enters `ConfigDegraded` phase. The operator will attempt cold restart recovery.
 
 **Steps to diagnose:**
 
@@ -138,12 +139,16 @@ Configuration changes trigger a restart instead of applying dynamically.
 kubectl -n aerospike get asc <name> -o jsonpath='{.status.pods}' | \
   jq '.[] | {name: .podName, dynamicConfig: .dynamicConfigStatus}'
 
+# Check per-change details for a specific pod
+kubectl -n aerospike get asc <name> -o jsonpath='{.status.pods.<pod-name>.dynamicConfigChanges}'
+
 # Check for dynamic config events
 kubectl get events --field-selector reason=DynamicConfigApplied -n aerospike
-kubectl get events --field-selector reason=DynamicConfigStatusFailed -n aerospike
+kubectl get events --field-selector reason=DynamicConfigDegraded -n aerospike
+kubectl get events --field-selector reason=DynamicConfigRollback -n aerospike
 
-# Check operator logs for rollback activity
-kubectl -n aerospike-operator logs -l control-plane=controller-manager | grep -i "rollback\|dynamic config"
+# Check operator logs for 2PC and rollback activity
+kubectl -n aerospike-operator logs -l control-plane=controller-manager | grep -i "rollback\|dynamic config\|2PC\|ConfigDegraded"
 ```
 
 | Status | Meaning |
@@ -152,6 +157,8 @@ kubectl -n aerospike-operator logs -l control-plane=controller-manager | grep -i
 | `Failed` | Dynamic update failed — rolling restart will be triggered |
 | `Pending` | Waiting for the operator to apply the change |
 | (empty) | No dynamic config change was attempted |
+
+If the cluster is in `ConfigDegraded` phase, check the `DynamicConfigDegraded` condition for details about which pods have inconsistent configuration.
 
 ## Circuit Breaker and Recovery
 
@@ -469,6 +476,8 @@ The operator emits Kubernetes Events for significant lifecycle transitions. Use 
 | `ConfigMapUpdated` | Normal | ConfigMap content updated |
 | `DynamicConfigApplied` | Normal | Runtime config change applied |
 | `DynamicConfigStatusFailed` | Warning | Dynamic config change failed |
+| `DynamicConfigDegraded` | Warning | Cluster entered ConfigDegraded phase |
+| `DynamicConfigRollback` | Normal/Warning | Rollback result after failed batch apply |
 
 ### StatefulSet and Rack Events
 

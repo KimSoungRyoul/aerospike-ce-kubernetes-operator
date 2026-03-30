@@ -15,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
@@ -334,6 +335,7 @@ func buildPodStatus(
 	lastRestartTime := prev.LastRestartTime
 	migratingPartitions := prev.MigratingPartitions
 	dynamicConfigStatus := prev.DynamicConfigStatus
+	dynamicConfigChanges := prev.DynamicConfigChanges
 	initializedVolumes := prev.InitializedVolumes
 
 	// Track pod instability: set UnstableSince on first NotReady, preserve it
@@ -370,6 +372,7 @@ func buildPodStatus(
 		UnstableSince:          unstableSince,
 		MigratingPartitions:    migratingPartitions,
 		DynamicConfigStatus:    dynamicConfigStatus,
+		DynamicConfigChanges:   dynamicConfigChanges,
 		InitializedVolumes:     initializedVolumes,
 	}
 }
@@ -491,6 +494,13 @@ func setFineGrainedConditions(cluster *ackov1alpha1.AerospikeCluster, o StatusUp
 	} else {
 		// ACL was removed: clear any stale ACLSynced condition to avoid confusion.
 		removeCondition(cluster, ackov1alpha1.ConditionACLSynced)
+	}
+
+	// DynamicConfigDegraded — clear when the cluster reaches a healthy phase.
+	// The condition is set by setConfigDegraded() when rollback fails; once the
+	// operator recovers (e.g., via cold restart), it is removed.
+	if cluster.Status.Phase != ackov1alpha1.AerospikePhaseConfigDegraded {
+		removeCondition(cluster, ackov1alpha1.ConditionDynamicConfigDegraded)
 	}
 
 	// MigrationComplete — set to False while rolling restart is in progress,
@@ -637,6 +647,40 @@ func collectAerospikeInfo(
 
 // parseServiceEndpoints splits the asinfo "service" response (semicolon-separated
 // "host:port" entries) into a string slice.
+// setConfigDegraded transitions the cluster to ConfigDegraded phase and sets
+// the DynamicConfigDegraded condition with details about which pods have
+// inconsistent configuration. This is called when a dynamic config rollback fails.
+func (r *AerospikeClusterReconciler) setConfigDegraded(
+	ctx context.Context,
+	cluster *ackov1alpha1.AerospikeCluster,
+	failedPods []string,
+) {
+	log := logf.FromContext(ctx)
+
+	latest, err := r.refetchCluster(ctx, types.NamespacedName{Name: cluster.Name, Namespace: cluster.Namespace})
+	if err != nil {
+		log.Error(err, "Failed to re-fetch cluster for ConfigDegraded status update")
+		return
+	}
+
+	base := latest.DeepCopy()
+	latest.Status.Phase = ackov1alpha1.AerospikePhaseConfigDegraded
+	latest.Status.PhaseReason = fmt.Sprintf("Dynamic config rollback failed on pods: %s", strings.Join(failedPods, ", "))
+
+	setCondition(latest, ackov1alpha1.ConditionDynamicConfigDegraded, true,
+		"RollbackFailed",
+		fmt.Sprintf("Dynamic config rollback failed on %d pod(s): %s. Cold restart required.",
+			len(failedPods), strings.Join(failedPods, ", ")))
+
+	if err := r.Status().Patch(ctx, latest, client.MergeFrom(base)); err != nil {
+		log.Error(err, "Failed to set ConfigDegraded status")
+		return
+	}
+
+	r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventDynamicConfigDegraded,
+		"Cluster entered ConfigDegraded phase: rollback failed on pods %s", strings.Join(failedPods, ", "))
+}
+
 func parseServiceEndpoints(serviceStr string) []string {
 	serviceStr = strings.TrimSpace(serviceStr)
 	if serviceStr == "" {

@@ -140,18 +140,46 @@ Most Aerospike service and namespace parameters are dynamically configurable. Ex
 | Namespace | `high-water-memory-pct`, `high-water-disk-pct`, `stop-writes-pct`, `nsup-period`, `default-ttl` |
 | Not Dynamic | `replication-factor`, `storage-engine type`, `name` (requires restart) |
 
-#### Rollback on Partial Failure
+#### Two-Phase Commit (2PC) for Batch Updates
 
-When applying multiple dynamic config changes, the operator tracks each successfully applied change. If any change fails mid-way:
+When multiple pods need dynamic config changes, the operator uses a Two-Phase Commit pattern to prevent partial application across the cluster:
 
-1. The operator **rolls back** all previously applied changes in reverse order using the original values
-2. The rollback is best-effort — if a rollback command also fails, it is logged but does not block progress
-3. After rollback, the operator falls back to a **cold restart** to apply the correct configuration atomically
+1. **Phase 1 — Validate**: The operator validates all changes on every pod (syntax check + node responsiveness probe). If ANY pod fails validation, the entire batch is aborted with no changes applied.
+2. **Phase 2 — Apply**: Changes are applied to each pod sequentially. Each pod has an independent 30-second timeout.
+   - If any pod fails during apply, all previously updated pods are **rolled back** in reverse order.
+   - If rollback also fails, the cluster enters `ConfigDegraded` phase (see below).
+3. After successful application, the operator falls back to a **cold restart** only for pods where dynamic update was not possible.
 
-This prevents the cluster from running with a partially applied configuration. You can observe rollback activity in the operator logs:
+#### ConfigDegraded Phase
+
+If a dynamic config rollback fails on one or more pods, the cluster transitions to `ConfigDegraded` phase. This means some pods may have inconsistent configuration. The operator will:
+
+1. Set `status.phase: ConfigDegraded` with details about affected pods
+2. Set the `DynamicConfigDegraded` status condition to `True`
+3. Attempt cold restart recovery on the next reconcile to bring all pods back to a consistent state
+
+Check for degraded state:
 
 ```bash
-kubectl -n aerospike-operator logs -l control-plane=controller-manager | grep -i "rollback\|dynamic config"
+# Check cluster phase
+kubectl -n aerospike get asc <name> -o jsonpath='{.status.phase}'
+
+# Check DynamicConfigDegraded condition
+kubectl -n aerospike get asc <name> -o jsonpath='{.status.conditions[?(@.type=="DynamicConfigDegraded")].message}'
+```
+
+#### Rollback on Partial Failure
+
+When applying dynamic config changes, the operator tracks each successfully applied change per pod. If any change fails mid-way:
+
+1. The operator **rolls back** all previously applied changes in reverse order using the original values
+2. Cross-pod rollback is performed when a batch apply fails — all previously updated pods are reverted
+3. If rollback fails, the cluster enters `ConfigDegraded` phase and the operator falls back to a **cold restart**
+
+You can observe rollback activity in the operator logs:
+
+```bash
+kubectl -n aerospike-operator logs -l control-plane=controller-manager | grep -i "rollback\|dynamic config\|2PC"
 ```
 
 #### Pre-flight Validation
@@ -1092,7 +1120,8 @@ kubectl -n aerospike get asc aerospike-3node \
 **Dynamic config changes trigger a restart instead of applying at runtime:**
 - Verify `enableDynamicConfigUpdate: true` is set in the spec
 - Check if the changed parameters are static (e.g., `replication-factor`, `storage-engine type`) — static changes always require a restart
-- If a partial dynamic update failed, the operator rolls back applied changes and falls back to a cold restart. Check operator logs for `rollback` messages
+- If a partial dynamic update failed, the operator rolls back applied changes across all pods (2PC pattern) and falls back to a cold restart. Check operator logs for `rollback` or `2PC` messages
+- If the cluster is in `ConfigDegraded` phase, rollback itself failed — the operator will recover via cold restart on the next reconcile
 - Ensure parameter values do not contain `;` or `:` characters, which are invalid in `set-config` commands
 
 **Webhook rejection:**
@@ -1140,6 +1169,8 @@ kubectl get events --field-selector involvedObject.kind=AerospikeCluster -n aero
 | `ConfigMapUpdated` | Normal | Rack ConfigMap updated with new configuration |
 | `DynamicConfigApplied` | Normal | Config changes applied to a pod without restart |
 | `DynamicConfigStatusFailed` | Warning | Dynamic config status update failed |
+| `DynamicConfigDegraded` | Warning | Cluster entered ConfigDegraded phase due to rollback failure |
+| `DynamicConfigRollback` | Normal/Warning | Dynamic config rollback result (success or partial failure) |
 | `StatefulSetCreated` | Normal | Rack StatefulSet created for the first time |
 | `StatefulSetUpdated` | Normal | Rack StatefulSet spec updated |
 | `RackScaled` | Normal | Rack replica count changed; shows old and new counts |
