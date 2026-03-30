@@ -5,6 +5,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -69,6 +70,15 @@ func (r *AerospikeClusterReconciler) HandleResume(
 	log := logf.FromContext(ctx)
 	nn := types.NamespacedName{Name: cluster.Name, Namespace: cluster.Namespace}
 
+	// Capture pause start time from the condition before the retry loop clears it.
+	var pauseStartTime time.Time
+	for _, c := range cluster.Status.Conditions {
+		if c.Type == ackov1alpha1.ConditionReconciliationPaused && c.Status == metav1.ConditionTrue {
+			pauseStartTime = c.LastTransitionTime.Time
+			break
+		}
+	}
+
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		latest, fetchErr := r.refetchCluster(ctx, nn)
 		if fetchErr != nil {
@@ -96,11 +106,18 @@ func (r *AerospikeClusterReconciler) HandleResume(
 	r.Recorder.Event(cluster, corev1.EventTypeNormal, EventResumed,
 		"Reconciliation resumed")
 
-	// Observe pause duration and reset the timestamp.
-	pausedGauge := metrics.ClusterPausedTimestamp.WithLabelValues(cluster.Namespace, cluster.Name)
-	// We can't read from a prometheus gauge directly, so we track it via the gauge.
-	// Reset the timestamp to 0 to indicate not-paused.
-	pausedGauge.Set(0)
+	// Observe pause duration using the ReconciliationPaused condition's LastTransitionTime
+	// (captured before the retry loop cleared it), then reset the timestamp gauge.
+	if !pauseStartTime.IsZero() {
+		duration := time.Since(pauseStartTime).Seconds()
+		metrics.ClusterPausedDuration.WithLabelValues(cluster.Namespace, cluster.Name).Observe(duration)
+	}
+	metrics.ClusterPausedTimestamp.WithLabelValues(cluster.Namespace, cluster.Name).Set(0)
+
+	// Propagate cleared state back to caller's object so subsequent checks
+	// in the same reconcile loop (e.g. circuit breaker) use fresh data.
+	cluster.Status.FailedReconcileCount = 0
+	cluster.Status.LastReconcileError = ""
 
 	log.Info("Reconciliation resumed from paused state")
 	return nil
