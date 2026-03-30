@@ -189,7 +189,7 @@ func (r *AerospikeClusterReconciler) reconcileUsers(
 		// Read desired password
 		password, err := r.getPasswordFromSecret(ctx, cluster.Namespace, userSpec.SecretName)
 		if err != nil {
-			return ackoerrors.NewValidationf("getting password for user %s: %v", userSpec.Name, err)
+			return fmt.Errorf("getting password for user %s: %w", userSpec.Name, err)
 		}
 
 		existing, exists := existingUserMap[userSpec.Name]
