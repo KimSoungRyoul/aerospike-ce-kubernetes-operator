@@ -41,6 +41,10 @@ const (
 	EventServiceCreated = "ServiceCreated"
 	EventServiceUpdated = "ServiceUpdated"
 
+	// Pause/Resume lifecycle
+	EventPaused  = "ReconciliationPaused"
+	EventResumed = "ReconciliationResumed"
+
 	// Cluster lifecycle
 	EventClusterDeletionStarted = "ClusterDeletionStarted"
 	EventFinalizerRemoved       = "FinalizerRemoved"

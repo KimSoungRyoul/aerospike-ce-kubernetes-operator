@@ -131,6 +131,26 @@ var (
 		},
 		[]string{"namespace", "name"},
 	)
+
+	// ClusterPausedTimestamp records the Unix timestamp when reconciliation was paused.
+	// Used to compute pause duration when the cluster is resumed. Reset to 0 on resume.
+	ClusterPausedTimestamp = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "acko_cluster_paused_timestamp_seconds",
+			Help: "Unix timestamp when reconciliation was paused (0 = not paused)",
+		},
+		[]string{"namespace", "name"},
+	)
+
+	// ClusterPausedDuration observes the total duration (in seconds) of each pause/resume cycle.
+	ClusterPausedDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "acko_cluster_paused_duration_seconds",
+			Help:    "Duration of reconciliation pause cycles in seconds",
+			Buckets: prometheus.ExponentialBuckets(1, 2, 15), // 1s to ~16384s (~4.5h)
+		},
+		[]string{"namespace", "name"},
+	)
 )
 
 // ReconcileErrorReason constants define bounded labels for ReconcileErrorsTotal.
@@ -190,6 +210,8 @@ func CleanupClusterMetrics(namespace, name string) {
 	ClusterMigratingPartitions.Delete(labels)
 	ScaleDownDeferralsTotal.Delete(labels)
 	CircuitBreakerActive.Delete(labels)
+	ClusterPausedTimestamp.Delete(labels)
+	ClusterPausedDuration.Delete(labels)
 
 	for _, result := range []string{"success", "error"} {
 		ACLSyncTotal.Delete(prometheus.Labels{"namespace": namespace, "name": name, "result": result})
@@ -219,5 +241,7 @@ func init() {
 		ClusterMigratingPartitions,
 		ScaleDownDeferralsTotal,
 		CircuitBreakerActive,
+		ClusterPausedTimestamp,
+		ClusterPausedDuration,
 	)
 }

@@ -19,6 +19,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -150,15 +151,20 @@ func (r *AerospikeClusterReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	// 4. Check if paused
-	if cluster.Spec.Paused != nil && *cluster.Spec.Paused {
-		log.Info("Reconciliation paused")
-		if err := r.setPhase(ctx, cluster, ackov1alpha1.AerospikePhasePaused, "Reconciliation paused by user"); err != nil {
-			if errors.IsConflict(err) {
-				return ctrl.Result{Requeue: true}, nil
-			}
+	wasPaused := cluster.Status.Phase == ackov1alpha1.AerospikePhasePaused
+	isPaused := cluster.Spec.Paused != nil && *cluster.Spec.Paused
+
+	if isPaused {
+		if err := r.HandlePause(ctx, cluster); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
+	}
+	if wasPaused && !isPaused {
+		if err := r.HandleResume(ctx, cluster); err != nil {
+			log.Error(err, "Failed to handle resume from paused state")
+			return ctrl.Result{Requeue: true}, nil
+		}
 	}
 
 	// Circuit breaker: if consecutive failures exceed threshold, back off exponentially.
@@ -618,38 +624,42 @@ func (r *AerospikeClusterReconciler) getRackSize(cluster *ackov1alpha1.Aerospike
 }
 
 // setPhase re-fetches the latest cluster object and updates its phase and reason.
-// It handles conflict errors by returning a requeue result (nil error)
-// so the caller can decide to requeue without logging a spurious error.
+// Uses RetryOnConflict to handle transient conflict errors without requiring
+// a full requeue cycle.
 func (r *AerospikeClusterReconciler) setPhase(ctx context.Context, cluster *ackov1alpha1.AerospikeCluster, phase ackov1alpha1.AerospikePhase, reason string) error {
-	log := logf.FromContext(ctx)
 	desiredPendingRestartPods := slices.Clone(cluster.Status.PendingRestartPods)
+	nn := types.NamespacedName{Name: cluster.Name, Namespace: cluster.Namespace}
 
-	// Re-fetch the latest version to avoid "object has been modified" conflicts.
-	latest, err := r.refetchCluster(ctx, types.NamespacedName{Name: cluster.Name, Namespace: cluster.Namespace})
-	if err != nil {
-		return err
-	}
+	var latestRV string
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		latest, fetchErr := r.refetchCluster(ctx, nn)
+		if fetchErr != nil {
+			return fetchErr
+		}
 
-	if latest.Status.Phase == phase &&
-		latest.Status.PhaseReason == reason &&
-		slices.Equal(latest.Status.PendingRestartPods, desiredPendingRestartPods) {
-		return nil
-	}
+		if latest.Status.Phase == phase &&
+			latest.Status.PhaseReason == reason &&
+			slices.Equal(latest.Status.PendingRestartPods, desiredPendingRestartPods) {
+			latestRV = latest.ResourceVersion
+			return nil
+		}
 
-	latest.Status.Phase = phase
-	latest.Status.PhaseReason = reason
-	latest.Status.PendingRestartPods = desiredPendingRestartPods
-	if err := r.Status().Update(ctx, latest); err != nil {
-		if errors.IsConflict(err) {
-			log.V(1).Info("Conflict updating phase, will requeue", "phase", phase)
+		latest.Status.Phase = phase
+		latest.Status.PhaseReason = reason
+		latest.Status.PendingRestartPods = desiredPendingRestartPods
+		if err := r.Status().Update(ctx, latest); err != nil {
 			return err
 		}
+		latestRV = latest.ResourceVersion
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 
 	// Propagate the updated resource version back to the caller's object
 	// so subsequent operations in the same reconcile loop use fresh data.
-	cluster.ResourceVersion = latest.ResourceVersion
+	cluster.ResourceVersion = latestRV
 	cluster.Status.Phase = phase
 	cluster.Status.PhaseReason = reason
 	cluster.Status.PendingRestartPods = slices.Clone(desiredPendingRestartPods)

@@ -14,6 +14,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
@@ -118,7 +119,22 @@ func (r *AerospikeClusterReconciler) updateStatusAndPhase(
 		metrics.ClusterMigratingPartitions.WithLabelValues(latest.Namespace, latest.Name).Set(float64(latest.Status.MigrationStatus.RemainingPartitions))
 	}
 
-	return r.Status().Update(ctx, latest)
+	// Use RetryOnConflict for the final status write. On conflict, re-fetch the
+	// object and re-apply the computed status to avoid a full requeue cycle.
+	computedStatus := latest.Status.DeepCopy()
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		if err := r.Status().Update(ctx, latest); err != nil {
+			// Re-fetch on conflict and re-apply computed status.
+			refetched, fetchErr := r.refetchCluster(ctx, namespacedName)
+			if fetchErr != nil {
+				return fetchErr
+			}
+			refetched.Status = *computedStatus
+			latest = refetched
+			return err
+		}
+		return nil
+	})
 }
 
 // enrichStatusWithAerospikeInfo creates a single Aerospike client connection and uses it
