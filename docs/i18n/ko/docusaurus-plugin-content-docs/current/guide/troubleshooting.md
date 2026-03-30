@@ -172,7 +172,7 @@ kubectl -n aerospike-operator logs -l control-plane=controller-manager | grep -i
 서킷 브레이커가 활성화된 동안 실패 횟수와 마지막 에러를 포함한 `CircuitBreakerActive` 경고 이벤트가 발생합니다.
 
 :::info
-검증 에러(예: 유효하지 않은 spec)는 서킷 브레이커 카운터를 증가시키지 **않습니다**. 검증 에러는 사용자 개입이 필요한 영구적 에러입니다.
+**영구적 검증 에러**(예: 잘못된 Aerospike 설정 구조, ACL 시크릿 누락, 잘못된 권한 코드)는 `failedReconcileCount`를 최대 임계값으로 즉시 설정하여 서킷 브레이커를 **즉시 활성화**합니다. `PermanentError` 이벤트가 발생하고, `ReconcileHealthy` 상태 조건이 `False` (reason: `PermanentError`)로 설정됩니다. 이러한 에러는 자동으로 복구되지 않으므로 spec을 수정해야 합니다.
 :::
 
 ### 서킷 브레이커 상태 확인

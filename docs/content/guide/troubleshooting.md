@@ -172,7 +172,7 @@ After **10 consecutive reconciliation failures**, the operator enters a backoff 
 While the circuit breaker is active, a `CircuitBreakerActive` warning event is emitted with the failure count and last error.
 
 :::info
-Validation errors (e.g., invalid spec) do **not** increment the circuit breaker counter. They are permanent errors that require user intervention.
+**Permanent validation errors** (e.g., invalid Aerospike config structure, missing ACL secrets, invalid privilege codes) **immediately** activate the circuit breaker by setting `failedReconcileCount` to the maximum threshold. A `PermanentError` event is emitted, and the `ReconcileHealthy` status condition is set to `False` with reason `PermanentError`. These errors will never self-heal — fix the spec to recover.
 :::
 
 ### Checking Circuit Breaker Status
@@ -527,6 +527,7 @@ The operator emits Kubernetes Events for significant lifecycle transitions. Use 
 |--------|------|-------------|
 | `CircuitBreakerActive` | Warning | Reconciliation backed off after consecutive failures |
 | `CircuitBreakerReset` | Normal | Circuit breaker reset after success |
+| `PermanentError` | Warning | Permanent validation error detected, automatic retries halted |
 
 ### Other Events
 

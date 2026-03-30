@@ -171,6 +171,7 @@ The operator maintains the following condition types in `status.conditions`:
 | `ACLSynced` | ACL roles and users are synchronized with the cluster. |
 | `MigrationComplete` | No data migrations are pending. |
 | `ReconciliationPaused` | Reconciliation is paused by the user (`spec.paused: true`). |
+| `ReconcileHealthy` | Reconciliation is healthy (no permanent errors). Set to `False` with reason `PermanentError` when a validation error is detected; set to `True` with reason `ReconcileSucceeded` when the circuit breaker resets. |
 
 ---
 

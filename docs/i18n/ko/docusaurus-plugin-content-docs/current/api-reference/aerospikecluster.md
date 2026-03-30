@@ -170,6 +170,7 @@ Aerospike CE 클러스터의 관측된 상태입니다.
 | `ACLSynced` | ACL 역할과 사용자가 클러스터와 동기화됨. |
 | `MigrationComplete` | 보류 중인 데이터 마이그레이션이 없음. |
 | `ReconciliationPaused` | 사용자에 의해 재조정이 일시 중지됨 (`spec.paused: true`). |
+| `ReconcileHealthy` | 재조정이 정상 상태 (영구적 에러 없음). 검증 에러 감지 시 reason `PermanentError`로 `False` 설정; 서킷 브레이커 리셋 시 reason `ReconcileSucceeded`로 `True` 설정. |
 
 ---
 

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/remotecommand"
@@ -16,6 +17,7 @@ import (
 	aero "github.com/aerospike/aerospike-client-go/v8"
 
 	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
+	ackoerrors "github.com/ksr/aerospike-ce-kubernetes-operator/internal/errors"
 	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/podutil"
 	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/utils"
 )
@@ -130,12 +132,15 @@ func (r *AerospikeClusterReconciler) getPasswordFromSecret(
 ) (string, error) {
 	secret := &corev1.Secret{}
 	if err := r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: namespace}, secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			return "", ackoerrors.NewValidationf("secret %s not found", secretName)
+		}
 		return "", fmt.Errorf("getting secret %s: %w", secretName, err)
 	}
 
 	password, ok := secret.Data["password"]
 	if !ok {
-		return "", fmt.Errorf("secret %s does not have 'password' key", secretName)
+		return "", ackoerrors.NewValidationf("secret %s does not have 'password' key", secretName)
 	}
 
 	return string(password), nil

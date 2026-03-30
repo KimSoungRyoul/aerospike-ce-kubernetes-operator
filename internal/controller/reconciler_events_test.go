@@ -58,6 +58,8 @@ func TestEventConstants(t *testing.T) {
 		// Circuit breaker
 		{"CircuitBreakerActive", EventCircuitBreakerActive, "CircuitBreakerActive"},
 		{"CircuitBreakerReset", EventCircuitBreakerReset, "CircuitBreakerReset"},
+		// Permanent error
+		{"PermanentError", EventPermanentError, "PermanentError"},
 		// Miscellaneous
 		{"ValidationWarning", EventValidationWarning, "ValidationWarning"},
 		{"ReconcileError", EventReconcileError, "ReconcileError"},
