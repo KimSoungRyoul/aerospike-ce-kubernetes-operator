@@ -1,0 +1,49 @@
+# Scenario B: SoftRack Oversubscribed (핵심 차이 테스트)
+#
+# preferred anti-affinity는 "soft" 제약이므로, 노드 수 < 파드 수일 때
+# 동일 노드에 여러 파드가 공존(colocation)할 수 있음을 검증.
+# rack 1과 rack 4가 같은 nodeName(kind-worker)을 지정하여 강제로 oversubscribe.
+#
+# 사전 조건:
+#   - soft-rack-test 템플릿 (podAntiAffinityLevel: preferred)
+#   - Kind 클러스터: kind-worker, kind-worker2, kind-worker3
+#
+# 기대 결과:
+#   - 4파드 **모두 Running** (soft이므로 colocation 허용)
+#   - kind-worker에 2파드 공존, 나머지 노드에 1파드씩
+#
+# 검증:
+#   kubectl get pods -l app.kubernetes.io/instance=test-soft-oversub -o wide
+#   kubectl get pods -l app.kubernetes.io/instance=test-soft-oversub \
+#     -o jsonpath='{range .items[*]}{.spec.nodeName}{"\n"}{end}' | sort | uniq -c
+#   # Expected: 2 kind-worker, 1 kind-worker2, 1 kind-worker3
+---
+apiVersion: acko.io/v1alpha1
+kind: AerospikeCluster
+metadata:
+  name: test-soft-oversub
+  namespace: default
+spec:
+  size: 4
+  image: aerospike:ce-8.1.1.1
+  templateRef:
+    name: soft-rack-test
+  rackConfig:
+    namespaces:
+      - data
+    racks:
+      - id: 1
+        nodeName: kind-worker
+      - id: 2
+        nodeName: kind-worker2
+      - id: 3
+        nodeName: kind-worker3
+      - id: 4
+        nodeName: kind-worker    # rack 1과 같은 노드 — SoftRack이므로 공존 가능
+  aerospikeConfig:
+    namespaces:
+      - name: data
+        replication-factor: 2
+        storage-engine:
+          type: memory
+          data-size: 1073741824

@@ -260,6 +260,12 @@ func (r *AerospikeClusterReconciler) resolveTemplate(
 			}
 			return nil, err
 		}
+		// Re-apply the template to the in-memory spec. Status().Update refreshes
+		// the cluster object from the API server response, which resets the Spec
+		// to the server-side version and discards in-memory changes made by
+		// ApplyTemplate (e.g., PodAntiAffinity, Resources from the template).
+		aerotmpl.ApplyTemplate(aerotmpl.MergeTemplateSpec(
+			cluster.Status.TemplateSnapshot.Spec, cluster.Spec.Overrides), cluster)
 	}
 	// Remove the resync annotation from the API server now that the snapshot is persisted.
 	// This Patch runs after Status.Update so it does not overwrite the snapshot.
@@ -272,6 +278,9 @@ func (r *AerospikeClusterReconciler) resolveTemplate(
 			}
 			return nil, err
 		}
+		// Re-apply after Patch too, which also refreshes the cluster object.
+		aerotmpl.ApplyTemplate(aerotmpl.MergeTemplateSpec(
+			cluster.Status.TemplateSnapshot.Spec, cluster.Spec.Overrides), cluster)
 	}
 	if resolveResult.SnapshotUpdated && cluster.Status.TemplateSnapshot != nil {
 		r.Recorder.Eventf(cluster, corev1.EventTypeNormal, EventTemplateApplied,

@@ -1,0 +1,43 @@
+# Scenario A: SoftRack Happy Path
+#
+# 템플릿의 preferred anti-affinity(weight=100)가 파드를 서로 다른 노드로 spread하는지 검증.
+# 노드 수 >= 파드 수이므로 모든 파드가 각각 다른 노드에 배치된다.
+#
+# 사전 조건:
+#   - soft-rack-test 템플릿 (podAntiAffinityLevel: preferred)
+#   - 3개 이상의 Worker Node
+#
+# 기대 결과:
+#   - 3파드 모두 Running
+#   - 3개 서로 다른 노드에 1파드씩 배치
+#
+# 검증:
+#   kubectl get pods -l app.kubernetes.io/instance=test-soft-happy -o wide
+#   kubectl get pods -l app.kubernetes.io/instance=test-soft-happy \
+#     -o jsonpath='{range .items[*]}{.spec.nodeName}{"\n"}{end}' | sort -u | wc -l
+#   # Expected: 3
+---
+apiVersion: acko.io/v1alpha1
+kind: AerospikeCluster
+metadata:
+  name: test-soft-happy
+  namespace: default
+spec:
+  size: 3
+  image: aerospike:ce-8.1.1.1
+  templateRef:
+    name: soft-rack-test
+  rackConfig:
+    namespaces:
+      - data
+    racks:
+      - id: 1
+      - id: 2
+      - id: 3
+  aerospikeConfig:
+    namespaces:
+      - name: data
+        replication-factor: 2
+        storage-engine:
+          type: memory
+          data-size: 1073741824

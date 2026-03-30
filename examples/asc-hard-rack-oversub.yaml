@@ -1,0 +1,52 @@
+# Scenario D: HardRack Oversubscribed (핵심 차이 테스트)
+#
+# required anti-affinity는 "hard" 제약이므로, 동일 노드에 이미 Aerospike 파드가
+# 있으면 스케줄링이 거부되어 Pending 상태가 됨을 검증.
+# rack 1과 rack 4가 같은 nodeName(kind-worker)을 지정하여 충돌 유발.
+#
+# SoftRack(Scenario B)와 동일 조건이지만 결과가 다름:
+#   - SoftRack: 4파드 모두 Running (colocation 허용)
+#   - HardRack: 3파드 Running + 1파드 Pending (colocation 거부)
+#
+# 사전 조건:
+#   - hard-rack-test 템플릿 (podAntiAffinityLevel: required, maxRacksPerNode: 1)
+#   - Kind 클러스터: kind-worker, kind-worker2, kind-worker3
+#
+# 기대 결과:
+#   - 3파드 Running, 1파드 Pending (rack 4)
+#   - Pending 사유: "didn't match pod anti-affinity rules"
+#
+# 검증:
+#   kubectl get pods -l app.kubernetes.io/instance=test-hard-oversub -o wide
+#   kubectl describe pod test-hard-oversub-4-0 | grep -A2 "Events:"
+#   # Expected: FailedScheduling — pod anti-affinity rules
+---
+apiVersion: acko.io/v1alpha1
+kind: AerospikeCluster
+metadata:
+  name: test-hard-oversub
+  namespace: default
+spec:
+  size: 4
+  image: aerospike:ce-8.1.1.1
+  templateRef:
+    name: hard-rack-test
+  rackConfig:
+    namespaces:
+      - data
+    racks:
+      - id: 1
+        nodeName: kind-worker
+      - id: 2
+        nodeName: kind-worker2
+      - id: 3
+        nodeName: kind-worker3
+      - id: 4
+        nodeName: kind-worker    # rack 1과 같은 노드 — HardRack이므로 Pending
+  aerospikeConfig:
+    namespaces:
+      - name: data
+        replication-factor: 2
+        storage-engine:
+          type: memory
+          data-size: 1073741824

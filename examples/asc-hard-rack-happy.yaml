@@ -1,0 +1,45 @@
+# Scenario C: HardRack Happy Path
+#
+# 템플릿의 required anti-affinity가 노드당 정확히 1파드만 배치하는지 검증.
+# nodeName으로 각 rack을 다른 노드에 고정하여 1:1 매핑 확인.
+#
+# 사전 조건:
+#   - hard-rack-test 템플릿 (podAntiAffinityLevel: required, maxRacksPerNode: 1)
+#   - Kind 클러스터: kind-worker, kind-worker2, kind-worker3
+#
+# 기대 결과:
+#   - 3파드 모두 Running
+#   - rack 1 -> kind-worker, rack 2 -> kind-worker2, rack 3 -> kind-worker3
+#
+# 검증:
+#   kubectl get pods -l app.kubernetes.io/instance=test-hard-happy -o wide
+#   kubectl get pods -l app.kubernetes.io/instance=test-hard-happy \
+#     -o jsonpath='{range .items[*]}{.metadata.name} -> {.spec.nodeName}{"\n"}{end}'
+---
+apiVersion: acko.io/v1alpha1
+kind: AerospikeCluster
+metadata:
+  name: test-hard-happy
+  namespace: default
+spec:
+  size: 3
+  image: aerospike:ce-8.1.1.1
+  templateRef:
+    name: hard-rack-test
+  rackConfig:
+    namespaces:
+      - data
+    racks:
+      - id: 1
+        nodeName: kind-worker
+      - id: 2
+        nodeName: kind-worker2
+      - id: 3
+        nodeName: kind-worker3
+  aerospikeConfig:
+    namespaces:
+      - name: data
+        replication-factor: 2
+        storage-engine:
+          type: memory
+          data-size: 1073741824
