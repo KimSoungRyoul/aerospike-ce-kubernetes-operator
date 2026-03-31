@@ -6,10 +6,12 @@ import (
 	"testing"
 
 	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 )
 
 func TestGetRacks(t *testing.T) {
@@ -384,5 +386,96 @@ func TestTruncateUTF8(t *testing.T) {
 				t.Errorf("truncateUTF8(%q, %d) = %q, want %q", tc.input, tc.maxBytes, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestPodReadyPredicate_Update(t *testing.T) {
+	p := podReadyPredicate{}
+
+	makePod := func(ready corev1.ConditionStatus) *corev1.Pod {
+		pod := &corev1.Pod{}
+		if ready != "" {
+			pod.Status.Conditions = []corev1.PodCondition{
+				{Type: corev1.PodReady, Status: ready},
+			}
+		}
+		return pod
+	}
+
+	tests := []struct {
+		name string
+		old  *corev1.Pod
+		new  *corev1.Pod
+		want bool
+	}{
+		{
+			name: "no change (both true)",
+			old:  makePod(corev1.ConditionTrue),
+			new:  makePod(corev1.ConditionTrue),
+			want: false,
+		},
+		{
+			name: "no change (both false)",
+			old:  makePod(corev1.ConditionFalse),
+			new:  makePod(corev1.ConditionFalse),
+			want: false,
+		},
+		{
+			name: "false to true",
+			old:  makePod(corev1.ConditionFalse),
+			new:  makePod(corev1.ConditionTrue),
+			want: true,
+		},
+		{
+			name: "true to false",
+			old:  makePod(corev1.ConditionTrue),
+			new:  makePod(corev1.ConditionFalse),
+			want: true,
+		},
+		{
+			name: "no condition to true",
+			old:  makePod(""),
+			new:  makePod(corev1.ConditionTrue),
+			want: true,
+		},
+		{
+			name: "no condition on both",
+			old:  makePod(""),
+			new:  makePod(""),
+			want: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := p.Update(event.UpdateEvent{
+				ObjectOld: tc.old,
+				ObjectNew: tc.new,
+			})
+			if got != tc.want {
+				t.Errorf("podReadyPredicate.Update() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPodReadyPredicate_CreateReturnsFalse(t *testing.T) {
+	p := podReadyPredicate{}
+	if p.Create(event.CreateEvent{Object: &corev1.Pod{}}) {
+		t.Error("podReadyPredicate.Create() = true, want false")
+	}
+}
+
+func TestPodReadyPredicate_DeleteReturnsTrue(t *testing.T) {
+	p := podReadyPredicate{}
+	if !p.Delete(event.DeleteEvent{Object: &corev1.Pod{}}) {
+		t.Error("podReadyPredicate.Delete() = false, want true")
+	}
+}
+
+func TestPodReadyPredicate_GenericReturnsFalse(t *testing.T) {
+	p := podReadyPredicate{}
+	if p.Generic(event.GenericEvent{Object: &corev1.Pod{}}) {
+		t.Error("podReadyPredicate.Generic() = true, want false")
 	}
 }
