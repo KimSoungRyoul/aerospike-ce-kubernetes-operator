@@ -4177,3 +4177,241 @@ func TestValidate_CE8ImageAccepted(t *testing.T) {
 		t.Errorf("expected no error for CE 8 image, got: %v", err)
 	}
 }
+
+// --- Network port uniqueness validation tests ---
+
+func TestValidate_NetworkPortConflict_ServiceAndHeartbeat(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeConfig: &AerospikeConfigSpec{
+				Value: map[string]any{
+					"network": map[string]any{
+						"service":   map[string]any{"port": 3000},
+						"heartbeat": map[string]any{"port": 3000, "mode": "mesh"},
+						"fabric":    map[string]any{"port": 3001},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error for port conflict, got nil")
+	}
+	if !strings.Contains(err.Error(), "network port conflict") {
+		t.Errorf("expected 'network port conflict' error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "service.port and heartbeat.port") {
+		t.Errorf("expected error to mention service and heartbeat, got: %v", err)
+	}
+}
+
+func TestValidate_NetworkPortConflict_AllThreeSame(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeConfig: &AerospikeConfigSpec{
+				Value: map[string]any{
+					"network": map[string]any{
+						"service":   map[string]any{"port": 3000},
+						"heartbeat": map[string]any{"port": 3000, "mode": "mesh"},
+						"fabric":    map[string]any{"port": 3000},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error for all ports same, got nil")
+	}
+	// Should report multiple conflicts
+	errStr := err.Error()
+	count := strings.Count(errStr, "network port conflict")
+	if count < 2 {
+		t.Errorf("expected at least 2 port conflict errors when all 3 ports are same, got %d in: %v", count, err)
+	}
+}
+
+func TestValidate_NetworkPortConflict_Float64Ports(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	// JSON unmarshaling produces float64 for numbers
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeConfig: &AerospikeConfigSpec{
+				Value: map[string]any{
+					"network": map[string]any{
+						"service":   map[string]any{"port": float64(3000)},
+						"heartbeat": map[string]any{"port": float64(3000), "mode": "mesh"},
+						"fabric":    map[string]any{"port": float64(3001)},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error for port conflict with float64 ports, got nil")
+	}
+	if !strings.Contains(err.Error(), "network port conflict") {
+		t.Errorf("expected 'network port conflict' error, got: %v", err)
+	}
+}
+
+func TestValidate_NetworkPortUniqueness_DistinctPorts(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeConfig: &AerospikeConfigSpec{
+				Value: map[string]any{
+					"network": map[string]any{
+						"service":   map[string]any{"port": 3000},
+						"heartbeat": map[string]any{"port": 3002, "mode": "mesh"},
+						"fabric":    map[string]any{"port": 3001},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err != nil {
+		t.Errorf("expected no error for distinct ports, got: %v", err)
+	}
+}
+
+func TestValidate_NetworkPortUniqueness_NoNetworkSection(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeConfig: &AerospikeConfigSpec{
+				Value: map[string]any{},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err != nil {
+		t.Errorf("expected no error when network section is absent, got: %v", err)
+	}
+}
+
+// --- Rack batch size percentage warning tests ---
+
+func TestValidate_RackBatchSize_PercentageResolvesToZero(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	bs := intstr.FromString("10%")
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  5,
+			Image: "aerospike:ce-8.1.1.1",
+			RackConfig: &RackConfig{
+				Racks:                  []Rack{{ID: 1}},
+				RollingUpdateBatchSize: &bs,
+			},
+		},
+	}
+
+	warnings, err := v.validate(cluster)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, "resolves to 0 pods") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected warning about batch size resolving to 0, got warnings: %v", warnings)
+	}
+}
+
+func TestValidate_RackBatchSize_PercentageResolvesToNonZero(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	bs := intstr.FromString("50%")
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  8,
+			Image: "aerospike:ce-8.1.1.1",
+			RackConfig: &RackConfig{
+				Racks:                  []Rack{{ID: 1}},
+				RollingUpdateBatchSize: &bs,
+			},
+		},
+	}
+
+	warnings, err := v.validate(cluster)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, w := range warnings {
+		if strings.Contains(w, "resolves to 0 pods") {
+			t.Errorf("unexpected rack batch size warning: %v", w)
+		}
+	}
+}
+
+func TestValidate_RackBatchSize_IntegerValue(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	bs := intstr.FromInt32(2)
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  5,
+			Image: "aerospike:ce-8.1.1.1",
+			RackConfig: &RackConfig{
+				Racks:                  []Rack{{ID: 1}},
+				RollingUpdateBatchSize: &bs,
+			},
+		},
+	}
+
+	warnings, err := v.validate(cluster)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, w := range warnings {
+		if strings.Contains(w, "resolves to 0 pods") {
+			t.Errorf("unexpected rack batch size warning for integer value: %v", w)
+		}
+	}
+}
+
+func TestValidate_RackBatchSize_NilRackConfig(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+		},
+	}
+
+	warnings, err := v.validate(cluster)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, w := range warnings {
+		if strings.Contains(w, "resolves to 0 pods") {
+			t.Errorf("unexpected rack batch size warning when rackConfig is nil: %v", w)
+		}
+	}
+}
