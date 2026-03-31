@@ -17326,6 +17326,7 @@ spec:
                     - ACLSync
                     - Paused
                     - Deleting
+                    - ConfigDegraded
                     type: string
                 type: object
               operatorVersion:
@@ -17353,6 +17354,7 @@ spec:
                 - ACLSync
                 - Paused
                 - Deleting
+                - ConfigDegraded
                 type: string
               phaseReason:
                 description: |-
@@ -17383,6 +17385,36 @@ spec:
                         or cleanup.
                       items:
                         type: string
+                      type: array
+                    dynamicConfigChanges:
+                      description: DynamicConfigChanges records per-change details
+                        from the last dynamic config update.
+                      items:
+                        description: DynamicConfigChangeStatus records the result
+                          of a single dynamic config change on a pod.
+                        properties:
+                          newValue:
+                            description: NewValue is the value that was applied or
+                              attempted.
+                            type: string
+                          oldValue:
+                            description: OldValue is the previous value before the
+                              change (empty for new keys).
+                            type: string
+                          path:
+                            description: Path is the config parameter path (e.g.,
+                              "service.proto-fd-max").
+                            type: string
+                          result:
+                            description: |-
+                              Result indicates whether the change succeeded or failed.
+                              Possible values: "Applied", "Failed", "RolledBack", "RollbackFailed".
+                            type: string
+                        required:
+                        - newValue
+                        - path
+                        - result
+                        type: object
                       type: array
                     dynamicConfigStatus:
                       description: |-

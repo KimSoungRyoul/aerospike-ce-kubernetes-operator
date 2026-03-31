@@ -14,6 +14,8 @@ import (
 	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/metrics"
 )
 
+const pausePhaseReason = "Reconciliation paused by user"
+
 // HandlePause handles the transition into the paused state. It sets Phase=Paused,
 // the ReconciliationPaused condition to True, records a Kubernetes event, and
 // sets the pause timestamp metric. Uses RetryOnConflict for robustness.
@@ -31,7 +33,7 @@ func (r *AerospikeClusterReconciler) HandlePause(
 		}
 
 		latest.Status.Phase = ackov1alpha1.AerospikePhasePaused
-		latest.Status.PhaseReason = "Reconciliation paused by user"
+		latest.Status.PhaseReason = pausePhaseReason
 
 		setCondition(latest, ackov1alpha1.ConditionReconciliationPaused, true,
 			"ReconciliationPaused", "Reconciliation is paused by user (spec.paused=true)")
@@ -54,7 +56,7 @@ func (r *AerospikeClusterReconciler) HandlePause(
 
 	// Propagate to caller's object.
 	cluster.Status.Phase = ackov1alpha1.AerospikePhasePaused
-	cluster.Status.PhaseReason = "Reconciliation paused by user"
+	cluster.Status.PhaseReason = pausePhaseReason
 
 	log.Info("Reconciliation paused")
 	return nil
