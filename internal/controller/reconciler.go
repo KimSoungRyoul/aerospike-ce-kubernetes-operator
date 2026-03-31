@@ -903,8 +903,8 @@ func podReadyConditionStatus(pod *corev1.Pod) corev1.ConditionStatus {
 	return corev1.ConditionUnknown
 }
 
-// mapPodToCluster maps a Pod event to the owning AerospikeCluster by
-// traversing the owner chain: Pod → StatefulSet → AerospikeCluster.
+// mapPodToCluster maps a Pod event to the owning AerospikeCluster via
+// standard labels (app.kubernetes.io/name, app.kubernetes.io/instance).
 // Only pods managed by ACKO (identified by the app.kubernetes.io/name label)
 // are considered.
 func (r *AerospikeClusterReconciler) mapPodToCluster(_ context.Context, obj client.Object) []reconcile.Request {
