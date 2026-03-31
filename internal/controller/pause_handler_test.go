@@ -65,8 +65,8 @@ func TestHandlePause_SetsPhaseAndCondition(t *testing.T) {
 	if updated.Status.Phase != ackov1alpha1.AerospikePhasePaused {
 		t.Errorf("Phase = %q, want %q", updated.Status.Phase, ackov1alpha1.AerospikePhasePaused)
 	}
-	if updated.Status.PhaseReason != "Reconciliation paused by user" {
-		t.Errorf("PhaseReason = %q, want %q", updated.Status.PhaseReason, "Reconciliation paused by user")
+	if updated.Status.PhaseReason != pausePhaseReason {
+		t.Errorf("PhaseReason = %q, want %q", updated.Status.PhaseReason, pausePhaseReason)
 	}
 
 	// Verify ReconciliationPaused condition is True
@@ -108,7 +108,7 @@ func TestHandleResume_ClearsPausedCondition(t *testing.T) {
 		},
 		Status: ackov1alpha1.AerospikeClusterStatus{
 			Phase:       ackov1alpha1.AerospikePhasePaused,
-			PhaseReason: "Reconciliation paused by user",
+			PhaseReason: pausePhaseReason,
 			Conditions: []metav1.Condition{
 				{
 					Type:               ackov1alpha1.ConditionReconciliationPaused,
@@ -163,7 +163,7 @@ func TestHandleResume_ClearsStaleErrorState(t *testing.T) {
 		},
 		Status: ackov1alpha1.AerospikeClusterStatus{
 			Phase:                ackov1alpha1.AerospikePhasePaused,
-			PhaseReason:          "Reconciliation paused by user",
+			PhaseReason:          pausePhaseReason,
 			FailedReconcileCount: 5,
 			LastReconcileError:   "some error from before pause",
 			Conditions: []metav1.Condition{
@@ -243,7 +243,7 @@ func TestHandlePause_Idempotent(t *testing.T) {
 		},
 		Status: ackov1alpha1.AerospikeClusterStatus{
 			Phase:       ackov1alpha1.AerospikePhasePaused,
-			PhaseReason: "Reconciliation paused by user",
+			PhaseReason: pausePhaseReason,
 			Conditions: []metav1.Condition{
 				{
 					Type:               ackov1alpha1.ConditionReconciliationPaused,

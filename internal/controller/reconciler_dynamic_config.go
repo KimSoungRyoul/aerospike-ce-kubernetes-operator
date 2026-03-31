@@ -44,92 +44,10 @@ func (r RollbackResult) HasFailures() bool {
 	return r.FailedCount > 0
 }
 
-// tryDynamicConfigUpdate attempts to apply config changes dynamically without
-// restarting pods. Returns (true, node, applied) if all changes were applied
-// dynamically and no restart is needed. On failure, the applied changes for
-// that pod are rolled back internally before returning (false, nil, nil).
-// The returned node and applied slice are used by callers for cross-pod rollback.
-func (r *AerospikeClusterReconciler) tryDynamicConfigUpdate(
-	ctx context.Context,
-	cluster *ackov1alpha1.AerospikeCluster,
-	pod *corev1.Pod,
-	oldConfig, newConfig map[string]any,
-	aeroClient *aero.Client,
-) (bool, *aero.Node, []appliedChange) {
-	log := logf.FromContext(ctx).WithValues("pod", pod.Name, "cluster", cluster.Name)
-
-	// Check if dynamic config update is enabled
-	if cluster.Spec.EnableDynamicConfigUpdate == nil || !*cluster.Spec.EnableDynamicConfigUpdate {
-		return false, nil, nil
-	}
-
-	// Diff the configs
-	diff := configdiff.Diff(oldConfig, newConfig)
-	if !diff.HasChanges() {
-		return true, nil, nil // No changes at all
-	}
-
-	// If there are static changes, dynamic update alone is not sufficient
-	if diff.HasStaticChanges() {
-		log.Info("Config has static changes, dynamic update not sufficient",
-			"staticChanges", len(diff.Static))
-		return false, nil, nil
-	}
-
-	// Find the node corresponding to this pod
-	node := findNodeForPod(aeroClient, pod)
-	if node == nil {
-		log.Info("Could not find Aerospike node for pod, skipping dynamic update")
-		return false, nil, nil
-	}
-
-	// Pre-flight: validate all changes before applying any
-	if err := validateDynamicChanges(diff.Dynamic); err != nil {
-		log.Error(err, "Pre-flight validation failed for dynamic config changes")
-		return false, nil, nil
-	}
-
-	// Apply each dynamic change with per-pod timeout
-	podCtx, podCancel := context.WithTimeout(ctx, perPodDynamicConfigTimeout)
-	defer podCancel()
-
-	applied, ok := r.applyDynamicConfigOnPod(podCtx, log, node, diff.Dynamic)
-	if !ok {
-		r.rollbackDynamicChanges(log, node, applied)
-		log.Info("Rolled back partial dynamic config changes, falling back to cold restart",
-			"appliedBeforeFailure", len(applied))
-		return false, nil, nil
-	}
-
-	// All dynamic changes applied successfully — update the config hash annotation
-	// on the pod so that the rolling restart logic doesn't delete it.
-	desiredHash := configHash(&ackov1alpha1.AerospikeConfigSpec{Value: newConfig})
-
-	if desiredHash != "" {
-		if err := r.updatePodConfigHash(ctx, pod, desiredHash); err != nil {
-			log.Error(err, "Failed to update pod config hash after dynamic update")
-			// This is non-fatal; the pod may get restarted but config is already applied
-		}
-	}
-
-	metrics.DynamicConfigUpdatesTotal.WithLabelValues(cluster.Namespace, cluster.Name).Inc()
-	r.Recorder.Eventf(cluster, corev1.EventTypeNormal, EventDynamicConfigApplied,
-		"Dynamic config applied to pod %s (%d changes)", pod.Name, len(diff.Dynamic))
-	log.Info("Dynamic config update successful", "changes", len(diff.Dynamic))
-
-	// Update pod status with dynamic config status and per-change details
-	r.updateDynamicConfigStatus(ctx, cluster, pod.Name, "Applied")
-	r.updateDynamicConfigChanges(ctx, cluster, pod.Name, applied)
-
-	return true, node, applied
-}
-
 // validateDynamicConfigOnPod performs the "prepare" phase of 2PC for a single pod.
 // It validates that all changes can be built into valid set-config commands and
 // that the Aerospike node is responsive. Returns an error if validation fails.
 func (r *AerospikeClusterReconciler) validateDynamicConfigOnPod(
-	ctx context.Context,
-	log logr.Logger,
 	node *aero.Node,
 	changes []configdiff.Change,
 ) error {
@@ -150,10 +68,10 @@ func (r *AerospikeClusterReconciler) validateDynamicConfigOnPod(
 // Returns the list of successfully applied changes and whether all changes succeeded.
 func (r *AerospikeClusterReconciler) applyDynamicConfigOnPod(
 	ctx context.Context,
-	log logr.Logger,
 	node *aero.Node,
 	changes []configdiff.Change,
 ) ([]appliedChange, bool) {
+	log := logf.FromContext(ctx)
 	var applied []appliedChange
 
 	for i, change := range changes {
@@ -247,9 +165,7 @@ func (r *AerospikeClusterReconciler) tryDynamicConfigUpdateBatch(
 			return false, nil, nil
 		}
 
-		podCtx, podCancel := context.WithTimeout(ctx, perPodDynamicConfigTimeout)
-		err := r.validateDynamicConfigOnPod(podCtx, log.WithValues("pod", t.pod.Name), t.node, diff.Dynamic)
-		podCancel()
+		err := r.validateDynamicConfigOnPod(t.node, diff.Dynamic)
 
 		if err != nil {
 			log.Info("2PC Phase 1 failed: validation failed on pod, aborting batch",
@@ -275,7 +191,8 @@ func (r *AerospikeClusterReconciler) tryDynamicConfigUpdateBatch(
 		}
 
 		podCtx, podCancel := context.WithTimeout(ctx, perPodDynamicConfigTimeout)
-		applied, ok := r.applyDynamicConfigOnPod(podCtx, log.WithValues("pod", t.pod.Name), t.node, diff.Dynamic)
+		podCtx = logf.IntoContext(podCtx, log.WithValues("pod", t.pod.Name))
+		applied, ok := r.applyDynamicConfigOnPod(podCtx, t.node, diff.Dynamic)
 		podCancel()
 
 		if !ok {
