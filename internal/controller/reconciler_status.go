@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	aero "github.com/aerospike/aerospike-client-go/v8"
 	"github.com/go-logr/logr"
@@ -588,8 +589,13 @@ type aeroPodInfo struct {
 	AccessEndpoints []string
 }
 
+// maxParallelInfoQueries limits the number of concurrent per-node info queries
+// to prevent connection storms on large clusters.
+const maxParallelInfoQueries = 8
+
 // collectAerospikeInfo collects per-node information (NodeID, ClusterName,
 // AccessEndpoints) keyed by pod name using the provided Aerospike client.
+// Queries are executed concurrently (bounded by maxParallelInfoQueries).
 // Errors are logged at V(1) and the function returns nil rather than failing
 // so that status updates are never blocked by an unreachable cluster.
 func collectAerospikeInfo(
@@ -605,9 +611,19 @@ func collectAerospikeInfo(
 		}
 	}
 
-	result := make(map[string]aeroPodInfo)
+	nodes := aeroClient.GetNodes()
+	if len(nodes) == 0 {
+		return nil
+	}
 
-	for _, node := range aeroClient.GetNodes() {
+	var (
+		mu     sync.Mutex
+		wg     sync.WaitGroup
+		sem    = make(chan struct{}, maxParallelInfoQueries)
+		result = make(map[string]aeroPodInfo, len(nodes))
+	)
+
+	for _, node := range nodes {
 		nodeHost := node.GetHost()
 		if nodeHost == nil {
 			log.V(1).Info("Skipping Aerospike node with nil host info")
@@ -619,28 +635,40 @@ func collectAerospikeInfo(
 			continue
 		}
 
-		info := aeroPodInfo{}
+		wg.Add(1)
+		sem <- struct{}{} // acquire semaphore slot
 
-		if nodeID, err := asinfoCommandOnNode(node, "node"); err == nil {
-			info.NodeID = strings.TrimSpace(nodeID)
-		} else {
-			log.V(1).Info("Failed to get nodeID", "pod", podName, "error", err)
-		}
+		go func(node *aero.Node, podName string) {
+			defer wg.Done()
+			defer func() { <-sem }() // release semaphore slot
 
-		if clusterName, err := asinfoCommandOnNode(node, "cluster-name"); err == nil {
-			info.ClusterName = strings.TrimSpace(clusterName)
-		} else {
-			log.V(1).Info("Failed to get cluster-name", "pod", podName, "error", err)
-		}
+			info := aeroPodInfo{}
 
-		if serviceStr, err := asinfoCommandOnNode(node, "service"); err == nil {
-			info.AccessEndpoints = parseServiceEndpoints(serviceStr)
-		} else {
-			log.V(1).Info("Failed to get service endpoints", "pod", podName, "error", err)
-		}
+			if nodeID, err := asinfoCommandOnNode(node, "node"); err == nil {
+				info.NodeID = strings.TrimSpace(nodeID)
+			} else {
+				log.V(1).Info("Failed to get nodeID", "pod", podName, "error", err)
+			}
 
-		result[podName] = info
+			if clusterName, err := asinfoCommandOnNode(node, "cluster-name"); err == nil {
+				info.ClusterName = strings.TrimSpace(clusterName)
+			} else {
+				log.V(1).Info("Failed to get cluster-name", "pod", podName, "error", err)
+			}
+
+			if serviceStr, err := asinfoCommandOnNode(node, "service"); err == nil {
+				info.AccessEndpoints = parseServiceEndpoints(serviceStr)
+			} else {
+				log.V(1).Info("Failed to get service endpoints", "pod", podName, "error", err)
+			}
+
+			mu.Lock()
+			result[podName] = info
+			mu.Unlock()
+		}(node, podName)
 	}
+
+	wg.Wait()
 
 	return result
 }

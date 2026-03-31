@@ -797,3 +797,23 @@ The per-pod status field `readinessGateSatisfied` in `status.pods` also reflects
 :::tip
 Enable readiness gates in production clusters to ensure zero-downtime rolling updates. During a rolling restart, the new pod will not receive client traffic until it has fully joined the cluster and completed data migrations.
 :::
+
+---
+
+## Reconciliation Architecture
+
+### Pod Readiness Watch
+
+The operator watches Pod `Ready` condition transitions directly, so `Available` and `Ready` status conditions on the AerospikeCluster are updated promptly when pods become ready or lose readiness. A 60-second fallback polling interval is retained as a safety net for edge cases where watch events may be missed (e.g., informer cache lag).
+
+This means:
+
+- **Scale-up**: The cluster's `Ready` condition transitions to `True` as soon as the last pod reports Ready, without waiting for a polling cycle.
+- **Pod failure**: If a pod loses readiness, the operator is notified immediately via the watch and updates status conditions accordingly.
+- **Rolling restart**: Pod readiness transitions during restart batches trigger reconciliation, allowing the next batch to proceed without unnecessary delay.
+
+### Parallel Status Enrichment
+
+When the operator reaches the `Completed` phase, it queries each Aerospike node for per-node information (NodeID, cluster name, access endpoints) and migration statistics. These queries are executed concurrently (up to 8 nodes in parallel) to reduce status enrichment latency on multi-node clusters.
+
+For single-node or small clusters, the behavior is identical to sequential execution. For larger clusters (e.g., 8 nodes), the wall-clock time for status enrichment is reduced proportionally.

@@ -51,12 +51,11 @@ const (
 	// take minutes to hours, so polling every 5s creates unnecessary API server load.
 	migrationRequeueInterval = 30 * time.Second
 
-	// podReadyPollInterval is the requeue interval used when reconciliation
-	// completes successfully but not all pods are ready yet. The controller
-	// does not watch pod readiness events directly, so periodic polling is
-	// required to detect when pods transition to Ready and update status
-	// conditions (Available, Ready).
-	podReadyPollInterval = 10 * time.Second
+	// podReadyPollInterval is the fallback requeue interval used when
+	// reconciliation completes but not all pods are ready yet. The controller
+	// watches pod readiness events directly via podReadyPredicate, so this
+	// longer interval serves only as a safety net for missed watch events.
+	podReadyPollInterval = 60 * time.Second
 
 	// reconcileTimeout is the maximum duration for a single reconciliation loop.
 	// If the context deadline is exceeded, the reconcile will be retried with backoff.
@@ -560,10 +559,9 @@ func (r *AerospikeClusterReconciler) reconcileCluster(
 
 	log.Info("Reconciliation completed successfully")
 
-	// The controller does not watch pod readiness events directly (StatefulSet
-	// Owns() uses GenerationChangedPredicate which ignores status-only updates).
-	// If not all pods are ready yet, poll periodically so that the Available and
-	// Ready conditions are updated once the pods finish starting up.
+	// The controller watches pod Ready condition transitions via podReadyPredicate,
+	// but as a safety net for missed watch events, requeue with a longer fallback
+	// interval if not all pods are ready yet.
 	latest, err := r.refetchCluster(ctx, namespacedName)
 	if err == nil && latest.Status.Size < latest.Spec.Size {
 		log.Info("Not all pods ready yet, requeuing for status update",
@@ -716,6 +714,14 @@ func (r *AerospikeClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			handler.EnqueueRequestsFromMapFunc(r.mapTemplateToCluster),
 			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
 		).
+		// Watch Pods for Ready condition transitions. When a pod becomes ready
+		// (or loses readiness), the owning AerospikeCluster is reconciled to
+		// update Available/Ready conditions without relying solely on polling.
+		Watches(
+			&corev1.Pod{},
+			handler.EnqueueRequestsFromMapFunc(r.mapPodToCluster),
+			builder.WithPredicates(podReadyPredicate{}),
+		).
 		// Watch Secrets referenced by AerospikeCluster ACL users.
 		// Secret data changes (e.g., password rotation) don't increment the CR's
 		// generation, so an explicit watch is needed to trigger ACL re-sync.
@@ -861,6 +867,69 @@ func (secretDataChangedPredicate) Update(e event.UpdateEvent) bool {
 	// Compare actual Data content to avoid unnecessary reconciliation on
 	// metadata-only changes (e.g., label updates that bump ResourceVersion).
 	return !reflect.DeepEqual(oldSecret.Data, newSecret.Data)
+}
+
+// podReadyPredicate fires only when a pod's Ready condition status changes
+// (false→true or true→false). This avoids reconciliation on unrelated pod
+// updates (e.g., label changes, resource version bumps).
+type podReadyPredicate struct {
+	predicate.Funcs
+}
+
+func (podReadyPredicate) Create(_ event.CreateEvent) bool   { return false }
+func (podReadyPredicate) Generic(_ event.GenericEvent) bool { return false }
+func (podReadyPredicate) Delete(e event.DeleteEvent) bool   { return true }
+
+func (podReadyPredicate) Update(e event.UpdateEvent) bool {
+	oldPod, ok := e.ObjectOld.(*corev1.Pod)
+	if !ok {
+		return false
+	}
+	newPod, ok := e.ObjectNew.(*corev1.Pod)
+	if !ok {
+		return false
+	}
+	return podReadyConditionStatus(oldPod) != podReadyConditionStatus(newPod)
+}
+
+// podReadyConditionStatus returns the status of the PodReady condition,
+// or ConditionUnknown if not present.
+func podReadyConditionStatus(pod *corev1.Pod) corev1.ConditionStatus {
+	for _, c := range pod.Status.Conditions {
+		if c.Type == corev1.PodReady {
+			return c.Status
+		}
+	}
+	return corev1.ConditionUnknown
+}
+
+// mapPodToCluster maps a Pod event to the owning AerospikeCluster by
+// traversing the owner chain: Pod → StatefulSet → AerospikeCluster.
+// Only pods managed by ACKO (identified by the app.kubernetes.io/name label)
+// are considered.
+func (r *AerospikeClusterReconciler) mapPodToCluster(_ context.Context, obj client.Object) []reconcile.Request {
+	pod, ok := obj.(*corev1.Pod)
+	if !ok {
+		return nil
+	}
+
+	// Fast-path: skip pods not managed by ACKO.
+	labels := pod.GetLabels()
+	if labels[utils.AppLabel] != "aerospike-cluster" {
+		return nil
+	}
+
+	clusterName, ok := labels[utils.InstanceLabel]
+	if !ok {
+		return nil
+	}
+
+	return []reconcile.Request{{
+		NamespacedName: types.NamespacedName{
+			Namespace: pod.Namespace,
+			Name:      clusterName,
+		},
+	}}
 }
 
 // truncateUTF8 truncates s to at most maxBytes bytes without splitting
