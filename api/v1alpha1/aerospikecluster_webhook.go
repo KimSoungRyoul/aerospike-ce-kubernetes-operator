@@ -329,11 +329,18 @@ func (v *AerospikeClusterValidator) validate(cluster *AerospikeCluster) (admissi
 		warnings = append(warnings, storageWarnings...)
 	}
 
+	// Validate network port uniqueness
+	if cluster.Spec.AerospikeConfig != nil {
+		portErrors := v.validateNetworkPortUniqueness(cluster)
+		allErrors = append(allErrors, portErrors...)
+	}
+
 	// Validate replication-factor, work directory, batch size, max unavailable, and operations
 	rfErrors := v.validateReplicationFactor(cluster)
 	allErrors = append(allErrors, rfErrors...)
 	warnings = append(warnings, v.validateWorkDirectory(cluster)...)
 	warnings = append(warnings, v.validateBatchSize(cluster)...)
+	warnings = append(warnings, v.validateRackBatchSize(cluster)...)
 	warnings = append(warnings, v.validateMaxUnavailable(cluster)...)
 	if len(cluster.Spec.Operations) > 0 {
 		allErrors = append(allErrors, v.validateOperations(cluster.Spec.Operations)...)
@@ -1110,4 +1117,83 @@ func (v *AerospikeClusterValidator) validateMonitoring(m *AerospikeMonitoringSpe
 	}
 
 	return errors, warnings
+}
+
+// validateNetworkPortUniqueness checks that service, heartbeat, and fabric ports are distinct.
+func (v *AerospikeClusterValidator) validateNetworkPortUniqueness(cluster *AerospikeCluster) []string {
+	netCfg, ok := cluster.Spec.AerospikeConfig.Value["network"].(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	type portEntry struct {
+		name string
+		port int
+	}
+
+	extractPort := func(section map[string]any) (int, bool) {
+		raw, exists := section["port"]
+		if !exists {
+			return 0, false
+		}
+		switch v := raw.(type) {
+		case int:
+			return v, true
+		case float64:
+			return int(v), true
+		case int64:
+			return int(v), true
+		}
+		return 0, false
+	}
+
+	var ports []portEntry
+	for _, sub := range []string{"service", "heartbeat", "fabric"} {
+		subCfg, ok := netCfg[sub].(map[string]any)
+		if !ok {
+			continue
+		}
+		if port, ok := extractPort(subCfg); ok {
+			ports = append(ports, portEntry{name: sub, port: port})
+		}
+	}
+
+	var errors []string
+	for i := 0; i < len(ports); i++ {
+		for j := i + 1; j < len(ports); j++ {
+			if ports[i].port == ports[j].port {
+				errors = append(errors, fmt.Sprintf(
+					"network port conflict: %s.port and %s.port are both %d",
+					ports[i].name, ports[j].name, ports[i].port))
+			}
+		}
+	}
+	return errors
+}
+
+// validateRackBatchSize warns when a rack-level percentage batch size resolves to 0 pods.
+func (v *AerospikeClusterValidator) validateRackBatchSize(cluster *AerospikeCluster) admission.Warnings {
+	if cluster.Spec.RackConfig == nil || cluster.Spec.RackConfig.RollingUpdateBatchSize == nil {
+		return nil
+	}
+	bs := cluster.Spec.RackConfig.RollingUpdateBatchSize
+	if bs.Type != intstr.String {
+		return nil
+	}
+	s := bs.StrVal
+	numStr, ok := strings.CutSuffix(s, "%")
+	if !ok {
+		return nil
+	}
+	num, err := strconv.Atoi(numStr)
+	if err != nil {
+		return nil
+	}
+	resolved := int(cluster.Spec.Size) * num / 100
+	if resolved == 0 {
+		return admission.Warnings{fmt.Sprintf(
+			"rackConfig.rollingUpdateBatchSize %q resolves to 0 pods for cluster size %d; effective batch size will be clamped to 1",
+			s, cluster.Spec.Size)}
+	}
+	return nil
 }
