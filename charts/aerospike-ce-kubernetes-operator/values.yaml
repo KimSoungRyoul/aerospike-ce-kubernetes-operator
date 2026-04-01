@@ -23,8 +23,8 @@ replicaCount: 1
 image:
   # -- Container image repository
   repository: ghcr.io/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator
-  # -- Container image tag; defaults to Chart.appVersion when empty
-  tag: ""
+  # -- Container image tag
+  tag: "latest"
   # -- Image pull policy: Always, IfNotPresent, or Never
   pullPolicy: IfNotPresent
 
