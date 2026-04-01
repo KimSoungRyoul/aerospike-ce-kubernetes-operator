@@ -10,7 +10,7 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ vars.CLAUDE_IMPLEMENT_TIMEOUT || 45 }}
+    timeout-minutes: 30
     permissions:
       contents: write
       id-token: write
@@ -82,7 +82,7 @@ jobs:
           github_token: ${{ secrets.GH_AW_GITHUB_TOKEN }}
           bot_id: '${{ vars.CLAUDE_BOT_ID }}'
           bot_name: '${{ vars.CLAUDE_BOT_NAME }}'
-          direct_prompt: |
+          prompt: |
             You are a release manager for the **aerospike-ce-kubernetes-operator** (ACKO) project.
 
             ## Task
