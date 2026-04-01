@@ -3,13 +3,8 @@ name: Publish Helm Charts
 
 on:
   push:
-    branches:
-      - main
     tags:
       - "v*"
-    paths:
-      - "charts/**"
-      - "config/crd/bases/**"
   workflow_dispatch:
 
 jobs:
