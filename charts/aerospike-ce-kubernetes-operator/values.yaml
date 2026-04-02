@@ -74,10 +74,11 @@ webhook:
 certManager:
   # -- Use cert-manager to provision webhook TLS certificates.
   # This controls whether Certificate/Issuer resources are created.
-  # Requires cert-manager to be installed in the cluster — either:
-  #   1) Via subchart: set cert-manager.enabled=true below, OR
-  #   2) Pre-installed: install cert-manager separately before this chart.
-  # When disabled, you must provide a TLS secret manually via webhookTlsSecret.
+  # Requires cert-manager to be pre-installed in the cluster.
+  # Install cert-manager separately before installing this chart:
+  #   helm install cert-manager jetstack/cert-manager --set crds.enabled=true
+  # Alternatively, disable cert-manager integration and provide a TLS secret manually
+  # via webhookTlsSecret below.
   enabled: true
 
   # -- Issuer configuration for cert-manager
@@ -112,9 +113,9 @@ serviceMonitor:
   # -- Create a ServiceMonitor resource for Prometheus Operator
   enabled: false
   # -- Scrape interval (e.g., "30s")
-  # interval: 30s
+  interval: ""
   # -- Scrape timeout (e.g., "10s")
-  # scrapeTimeout: 10s
+  scrapeTimeout: ""
   # -- Additional labels for the ServiceMonitor (useful for Prometheus selection)
   additionalLabels: {}
 
@@ -182,7 +183,7 @@ podDisruptionBudget:
   minAvailable: 1
   # -- Maximum unavailable pods (mutually exclusive with minAvailable).
   # Uncomment and remove minAvailable to use.
-  # maxUnavailable: 0
+  maxUnavailable: ""
 
 # =============================================================================
 # Horizontal Pod Autoscaler
@@ -198,7 +199,7 @@ autoscaling:
   # -- Target average CPU utilization percentage
   targetCPUUtilizationPercentage: 80
   # -- Target average memory utilization percentage (optional)
-  # targetMemoryUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: ""
 
 # =============================================================================
 # Scheduling
@@ -548,7 +549,7 @@ ui:
     minAvailable: 1
     # -- Maximum number of pods that can be unavailable (mutually exclusive with minAvailable).
     # Uncomment and remove minAvailable to use.
-    # maxUnavailable: 1
+    maxUnavailable: ""
 
   # =============================================================================
   # Autoscaling (HPA)
@@ -563,7 +564,7 @@ ui:
     # -- Target CPU utilization percentage
     targetCPUUtilizationPercentage: 80
     # -- Target memory utilization percentage (optional, uncomment to enable)
-    # targetMemoryUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: ""
 
   # =============================================================================
   # Extra Environment Variables
