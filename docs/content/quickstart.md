@@ -170,8 +170,8 @@ kind delete cluster --name aerospike
 
 ## Next Steps
 
-- [Installation Guide](./guide/install) — production installation options, Helm values, GitOps setup
-- [Create Cluster](./guide/create-cluster) — multi-node, persistent storage, rack-aware configurations
-- [Cluster Manager UI](./guide/cluster-manager-ui) — full UI feature guide and Ingress configuration
-- [Manage Cluster](./guide/manage-cluster) — scaling, rolling updates, configuration changes
-- [API Reference](./api-reference/aerospikecluster) — complete CRD specification
+- [Installation Guide](./getting-started/install) — production installation options, Helm values, GitOps setup
+- [Create Cluster](./getting-started/create-cluster) — multi-node, persistent storage, rack-aware configurations
+- [Cluster Manager UI](./getting-started/cluster-manager-ui) — full UI feature guide and Ingress configuration
+- [Manage Cluster](./operations/manage-cluster) — scaling, rolling updates, configuration changes
+- [API Reference](./reference/api-reference/aerospikecluster) — complete CRD specification

@@ -170,8 +170,8 @@ kind delete cluster --name aerospike
 
 ## 다음 단계
 
-- [설치 가이드](./guide/install) — 프로덕션 설치 옵션, Helm values, GitOps 설정
-- [클러스터 생성](./guide/create-cluster) — 멀티 노드, 영구 스토리지, 랙 인식 구성
-- [클러스터 매니저 UI](./guide/cluster-manager-ui) — UI 기능 가이드 및 Ingress 구성
-- [클러스터 관리](./guide/manage-cluster) — 스케일링, 롤링 업데이트, 설정 변경
-- [API 레퍼런스](./api-reference/aerospikecluster) — 전체 CRD 스펙 문서
+- [설치 가이드](./getting-started/install) — 프로덕션 설치 옵션, Helm values, GitOps 설정
+- [클러스터 생성](./getting-started/create-cluster) — 멀티 노드, 영구 스토리지, 랙 인식 구성
+- [클러스터 매니저 UI](./getting-started/cluster-manager-ui) — UI 기능 가이드 및 Ingress 구성
+- [클러스터 관리](./operations/manage-cluster) — 스케일링, 롤링 업데이트, 설정 변경
+- [API 레퍼런스](./reference/api-reference/aerospikecluster) — 전체 CRD 스펙 문서
