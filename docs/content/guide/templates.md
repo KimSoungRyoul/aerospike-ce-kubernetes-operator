@@ -428,7 +428,6 @@ Use the `defaultTemplates.enabled=true` Helm value to create all three template 
 helm install aerospike-ce-kubernetes-operator \
   oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
   -n aerospike-operator --create-namespace \
-  --set certManagerSubchart.enabled=true \
   --set defaultTemplates.enabled=true
 ```
 
