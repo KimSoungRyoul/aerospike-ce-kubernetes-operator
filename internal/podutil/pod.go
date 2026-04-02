@@ -340,7 +340,8 @@ func buildExporterSidecar(
 	acl *v1alpha1.AerospikeAccessControlSpec,
 ) corev1.Container {
 	envVars := []corev1.EnvVar{
-		{Name: "AS_HOST", Value: "localhost"},
+		// Use explicit IPv4; "localhost" may resolve to [::1] in IPv6-enabled pods
+		{Name: "AS_HOST", Value: "127.0.0.1"},
 		{Name: "AS_PORT", Value: fmt.Sprintf("%d", ServicePort)},
 	}
 
