@@ -6,7 +6,7 @@ title: 빠른 시작
 
 # 빠른 시작
 
-로컬 Kind 클러스터에 Aerospike CE 클러스터와 클러스터 매니저 UI를 배포합니다 — 각 블록을 복사-붙여넣기하면 끝입니다.
+로컬 Kind 클러스터에 Aerospike CE 클러스터와 클러스터 매니저 UI를 배포합니다.
 
 ## 사전 준비
 
@@ -52,15 +52,23 @@ Creating cluster "aerospike" ...
 Set kubectl context to "kind-aerospike"
 ```
 
-## Step 2: 오퍼레이터 설치
+## Step 2: cert-manager 설치
 
-오퍼레이터, cert-manager, 클러스터 매니저 UI를 한 번에 설치합니다:
+```bash
+helm repo add jetstack https://charts.jetstack.io
+helm repo update
+helm install cert-manager jetstack/cert-manager \
+  --namespace cert-manager --create-namespace \
+  --set crds.enabled=true \
+  --wait
+```
+
+## Step 3: 오퍼레이터 설치
 
 ```bash
 helm install aerospike-ce-kubernetes-operator \
   oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
   -n aerospike-operator --create-namespace \
-  --set certManagerSubchart.enabled=true \
   --set ui.enabled=true \
   --wait
 ```
@@ -72,13 +80,12 @@ kubectl -n aerospike-operator get pods
 ```
 
 ```
-NAME                                                                      READY   STATUS    AGE
-aerospike-ce-kubernetes-operator-controller-manager-xxxxx-yyyyy           1/1     Running   60s
-aerospike-ce-kubernetes-operator-ui-xxxxx-yyyyy                           2/2     Running   60s
-aerospike-ce-kubernetes-operator-cert-manager-xxxxx-yyyyy                 1/1     Running   60s
+NAME                                                  READY   STATUS    AGE
+aerospike-ce-kubernetes-operator-xxxxx-yyyyy           1/1     Running   60s
+aerospike-ce-kubernetes-operator-ui-xxxxx-yyyyy        2/2     Running   60s
 ```
 
-## Step 3: Aerospike 클러스터 배포
+## Step 4: Aerospike 클러스터 배포
 
 ```bash
 kubectl create namespace aerospike
@@ -110,11 +117,11 @@ kubectl -n aerospike get asc
 ```
 
 ```
-NAME              RACKSIZE   HEALTH   PHASE       AGE
-aerospike-basic   1          1/1      Completed   60s
+NAME              RACKSIZE   HEALTH   PHASE       AGE   AVAILABLE
+aerospike-basic   1          1/1      Completed   60s   True
 ```
 
-## Step 4: 클러스터 매니저 UI 접속
+## Step 5: 클러스터 매니저 UI 접속
 
 ```bash
 kubectl -n aerospike-operator port-forward svc/aerospike-ce-kubernetes-operator-ui 3000:3000
@@ -126,7 +133,7 @@ kubectl -n aerospike-operator port-forward svc/aerospike-ce-kubernetes-operator-
 이 터미널은 열어두세요 — port-forward는 포그라운드에서 실행됩니다. 다음 단계를 위해 새 터미널을 여세요.
 :::
 
-## Step 5: AQL로 접속
+## Step 6: AQL로 접속
 
 ```bash
 kubectl -n aerospike run aql-client --rm -it --restart=Never \

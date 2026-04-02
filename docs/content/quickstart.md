@@ -6,7 +6,7 @@ title: Quick Start
 
 # Quick Start
 
-Deploy an Aerospike CE cluster with the Cluster Manager UI on a local Kind cluster — copy-paste each block and you're done.
+Deploy an Aerospike CE cluster with the Cluster Manager UI on a local Kind cluster.
 
 ## Prerequisites
 
@@ -52,15 +52,23 @@ Creating cluster "aerospike" ...
 Set kubectl context to "kind-aerospike"
 ```
 
-## Step 2: Install the Operator
+## Step 2: Install cert-manager
 
-Installs the operator, cert-manager, and Cluster Manager UI in one command:
+```bash
+helm repo add jetstack https://charts.jetstack.io
+helm repo update
+helm install cert-manager jetstack/cert-manager \
+  --namespace cert-manager --create-namespace \
+  --set crds.enabled=true \
+  --wait
+```
+
+## Step 3: Install the Operator
 
 ```bash
 helm install aerospike-ce-kubernetes-operator \
   oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
   -n aerospike-operator --create-namespace \
-  --set certManagerSubchart.enabled=true \
   --set ui.enabled=true \
   --wait
 ```
@@ -72,13 +80,12 @@ kubectl -n aerospike-operator get pods
 ```
 
 ```
-NAME                                                                      READY   STATUS    AGE
-aerospike-ce-kubernetes-operator-controller-manager-xxxxx-yyyyy           1/1     Running   60s
-aerospike-ce-kubernetes-operator-ui-xxxxx-yyyyy                           2/2     Running   60s
-aerospike-ce-kubernetes-operator-cert-manager-xxxxx-yyyyy                 1/1     Running   60s
+NAME                                                  READY   STATUS    AGE
+aerospike-ce-kubernetes-operator-xxxxx-yyyyy           1/1     Running   60s
+aerospike-ce-kubernetes-operator-ui-xxxxx-yyyyy        2/2     Running   60s
 ```
 
-## Step 3: Deploy an Aerospike Cluster
+## Step 4: Deploy an Aerospike Cluster
 
 ```bash
 kubectl create namespace aerospike
@@ -110,11 +117,11 @@ kubectl -n aerospike get asc
 ```
 
 ```
-NAME              RACKSIZE   HEALTH   PHASE       AGE
-aerospike-basic   1          1/1      Completed   60s
+NAME              RACKSIZE   HEALTH   PHASE       AGE   AVAILABLE
+aerospike-basic   1          1/1      Completed   60s   True
 ```
 
-## Step 4: Access the Cluster Manager UI
+## Step 5: Access the Cluster Manager UI
 
 ```bash
 kubectl -n aerospike-operator port-forward svc/aerospike-ce-kubernetes-operator-ui 3000:3000
@@ -126,7 +133,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser. The UI prov
 Keep this terminal open — port-forward runs in the foreground. Open a new terminal for the next step.
 :::
 
-## Step 5: Connect with AQL
+## Step 6: Connect with AQL
 
 ```bash
 kubectl -n aerospike run aql-client --rm -it --restart=Never \
