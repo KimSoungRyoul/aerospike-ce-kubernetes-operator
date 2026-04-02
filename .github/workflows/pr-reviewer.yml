@@ -9,7 +9,7 @@ jobs:
   review:
     if: github.event.label.name == 'needs-review'
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ vars.CLAUDE_REVIEW_TIMEOUT }}
+    timeout-minutes: 30
     permissions:
       contents: write
       issues: write
