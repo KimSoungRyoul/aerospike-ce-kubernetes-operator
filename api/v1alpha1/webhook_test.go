@@ -39,11 +39,11 @@ func TestDefaultMonitoring_SetsDefaults(t *testing.T) {
 	}
 
 	m := cluster.Spec.Monitoring
-	if m.ExporterImage != defaultExporterImage {
-		t.Errorf("ExporterImage = %q, want %q", m.ExporterImage, defaultExporterImage)
+	if m.ExporterImage != DefaultExporterImage {
+		t.Errorf("ExporterImage = %q, want %q", m.ExporterImage, DefaultExporterImage)
 	}
-	if m.Port != defaultExporterPort {
-		t.Errorf("Port = %d, want %d", m.Port, defaultExporterPort)
+	if m.Port != DefaultExporterPort {
+		t.Errorf("Port = %d, want %d", m.Port, DefaultExporterPort)
 	}
 	if m.ServiceMonitor.Interval != defaultScrapeInterval {
 		t.Errorf("Interval = %q, want %q", m.ServiceMonitor.Interval, defaultScrapeInterval)

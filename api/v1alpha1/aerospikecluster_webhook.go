@@ -43,8 +43,6 @@ const (
 	defaultProtoFdMax    = 15000
 	defaultHeartbeatMode = "mesh"
 
-	defaultExporterImage  = "aerospike/aerospike-prometheus-exporter:1.16.1"
-	defaultExporterPort   = int32(9145)
 	defaultScrapeInterval = "30s"
 )
 
@@ -152,10 +150,10 @@ func (d *AerospikeClusterDefaulter) defaultMonitoring(cluster *AerospikeCluster)
 
 	m := cluster.Spec.Monitoring
 	if m.ExporterImage == "" {
-		m.ExporterImage = defaultExporterImage
+		m.ExporterImage = DefaultExporterImage
 	}
 	if m.Port == 0 {
-		m.Port = defaultExporterPort
+		m.Port = DefaultExporterPort
 	}
 	if m.ServiceMonitor != nil && m.ServiceMonitor.Enabled && m.ServiceMonitor.Interval == "" {
 		m.ServiceMonitor.Interval = defaultScrapeInterval

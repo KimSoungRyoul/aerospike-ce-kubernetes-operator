@@ -140,6 +140,72 @@ func TestApplyMonitoring_NoopWhenTemplateMonitoringNil(t *testing.T) {
 	}
 }
 
+func TestApplyMonitoring_DefaultsExporterImageWhenEmpty(t *testing.T) {
+	cluster := newCluster()
+	tmpl := &ackov1alpha1.AerospikeMonitoringSpec{
+		Enabled: true,
+		Port:    9145,
+		// ExporterImage intentionally left empty
+	}
+	applyMonitoring(tmpl, cluster)
+	if cluster.Spec.Monitoring.ExporterImage != ackov1alpha1.DefaultExporterImage {
+		t.Errorf("expected ExporterImage to default to %q, got %q",
+			ackov1alpha1.DefaultExporterImage, cluster.Spec.Monitoring.ExporterImage)
+	}
+}
+
+func TestApplyMonitoring_DefaultsPortWhenZero(t *testing.T) {
+	cluster := newCluster()
+	tmpl := &ackov1alpha1.AerospikeMonitoringSpec{
+		Enabled:       true,
+		ExporterImage: "custom:latest",
+		// Port intentionally left as zero
+	}
+	applyMonitoring(tmpl, cluster)
+	if cluster.Spec.Monitoring.Port != ackov1alpha1.DefaultExporterPort {
+		t.Errorf("expected Port to default to %d, got %d",
+			ackov1alpha1.DefaultExporterPort, cluster.Spec.Monitoring.Port)
+	}
+}
+
+func TestApplyMonitoring_NoDefaultsWhenDisabled(t *testing.T) {
+	cluster := newCluster()
+	tmpl := &ackov1alpha1.AerospikeMonitoringSpec{
+		Enabled: false,
+		// ExporterImage and Port left empty/zero
+	}
+	applyMonitoring(tmpl, cluster)
+	if cluster.Spec.Monitoring.ExporterImage != "" {
+		t.Errorf("expected ExporterImage to remain empty when Enabled=false, got %q",
+			cluster.Spec.Monitoring.ExporterImage)
+	}
+	if cluster.Spec.Monitoring.Port != 0 {
+		t.Errorf("expected Port to remain 0 when Enabled=false, got %d",
+			cluster.Spec.Monitoring.Port)
+	}
+}
+
+func TestApplyMonitoring_DefaultsDoNotOverwriteExistingValues(t *testing.T) {
+	cluster := newCluster()
+	cluster.Spec.Monitoring = &ackov1alpha1.AerospikeMonitoringSpec{
+		Enabled:       true,
+		ExporterImage: "custom-exporter:v2",
+		Port:          9999,
+	}
+	tmpl := &ackov1alpha1.AerospikeMonitoringSpec{
+		Enabled: true,
+	}
+	applyMonitoring(tmpl, cluster)
+	if cluster.Spec.Monitoring.ExporterImage != "custom-exporter:v2" {
+		t.Errorf("expected ExporterImage to be preserved, got %q",
+			cluster.Spec.Monitoring.ExporterImage)
+	}
+	if cluster.Spec.Monitoring.Port != 9999 {
+		t.Errorf("expected Port to be preserved (9999), got %d",
+			cluster.Spec.Monitoring.Port)
+	}
+}
+
 func TestApplyMonitoring_DeepCopied(t *testing.T) {
 	cluster := newCluster()
 	tmpl := &ackov1alpha1.AerospikeMonitoringSpec{Enabled: true, Port: 9145}
