@@ -664,7 +664,6 @@ defaultTemplates:
       size: 6
       monitoring:
         enabled: true
-        exporterImage: aerospike/aerospike-prometheus-exporter:1.16.1
         port: 9145
         resources:
           requests:
@@ -702,3 +701,4 @@ defaultTemplates:
           proto-fd-max: 15000
         namespaceDefaults:
           replication-factor: 2
+          data-size: 2147483648

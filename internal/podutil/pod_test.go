@@ -206,8 +206,8 @@ func TestBuildExporterSidecar_Basic(t *testing.T) {
 	for _, e := range c.Env {
 		envMap[e.Name] = e.Value
 	}
-	if envMap["AS_HOST"] != "127.0.0.1" {
-		t.Errorf("AS_HOST = %q, want %q", envMap["AS_HOST"], "127.0.0.1")
+	if envMap["AS_HOST"] != "localhost" {
+		t.Errorf("AS_HOST = %q, want %q", envMap["AS_HOST"], "localhost")
 	}
 	if envMap["AS_PORT"] != "3000" {
 		t.Errorf("AS_PORT = %q, want %q", envMap["AS_PORT"], "3000")
