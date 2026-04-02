@@ -340,7 +340,7 @@ func buildExporterSidecar(
 	acl *v1alpha1.AerospikeAccessControlSpec,
 ) corev1.Container {
 	envVars := []corev1.EnvVar{
-		{Name: "AS_HOST", Value: "localhost"},
+		{Name: "AS_HOST", Value: "127.0.0.1"},
 		{Name: "AS_PORT", Value: fmt.Sprintf("%d", ServicePort)},
 	}
 

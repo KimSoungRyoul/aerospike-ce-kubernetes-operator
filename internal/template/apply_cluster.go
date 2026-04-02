@@ -43,14 +43,31 @@ func applySize(tmplSize *int32, cluster *ackov1alpha1.AerospikeCluster) {
 	}
 }
 
+const (
+	defaultExporterImage = "aerospike/aerospike-prometheus-exporter:1.16.1"
+	defaultExporterPort  = int32(9145)
+)
+
 // applyMonitoring applies the template monitoring defaults to the cluster.
 // Only applied when the cluster does not already have monitoring configured.
+// After applying, ensures required fields (ExporterImage, Port) have defaults,
+// because the webhook defaulter only runs at admission time — before template
+// application — and cannot fill these in.
 func applyMonitoring(tmplMonitoring *ackov1alpha1.AerospikeMonitoringSpec, cluster *ackov1alpha1.AerospikeCluster) {
 	if tmplMonitoring == nil {
 		return
 	}
 	if cluster.Spec.Monitoring == nil {
 		cluster.Spec.Monitoring = tmplMonitoring.DeepCopy()
+	}
+	m := cluster.Spec.Monitoring
+	if m.Enabled {
+		if m.ExporterImage == "" {
+			m.ExporterImage = defaultExporterImage
+		}
+		if m.Port == 0 {
+			m.Port = defaultExporterPort
+		}
 	}
 }
 
