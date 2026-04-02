@@ -4,28 +4,22 @@ slug: /
 title: Quick Start
 ---
 
-import Tabs from '@theme/Tabs';
-import TabItem from '@theme/TabItem';
-
 # Quick Start
 
-Deploy an Aerospike CE cluster on Kubernetes in minutes.
+Deploy an Aerospike CE cluster with the Cluster Manager UI on a local Kind cluster — copy-paste each block and you're done.
 
 ## Prerequisites
 
-- Kubernetes cluster v1.26+ (or [Kind](https://kind.sigs.k8s.io/) for local development)
-- kubectl configured to access the cluster
-- [Helm](https://helm.sh/) v3.x
-
-<Tabs groupId="os">
-<TabItem value="macos" label="macOS" default>
+- [Kind](https://kind.sigs.k8s.io/) — local Kubernetes cluster
+- [kubectl](https://kubernetes.io/docs/tasks/tools/) — Kubernetes CLI
+- [Helm](https://helm.sh/) v3.x — package manager
 
 ```bash
 brew install kind kubectl helm
 ```
 
-</TabItem>
-<TabItem value="linux" label="Linux">
+<details>
+<summary>Linux</summary>
 
 ```bash
 # kubectl
@@ -39,70 +33,56 @@ curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 go install sigs.k8s.io/kind@latest
 ```
 
-</TabItem>
-</Tabs>
+</details>
 
 ## Step 1: Create a Kind Cluster
-
-Skip this step if you already have a Kubernetes cluster.
 
 ```bash
 kind create cluster --name aerospike
 ```
 
-## Step 2: Install cert-manager (Optional)
-
-Skip this step if you plan to use the bundled cert-manager option in Step 3.
-
-```bash
-helm repo add jetstack https://charts.jetstack.io
-helm repo update
-helm install cert-manager jetstack/cert-manager \
-  --namespace cert-manager \
-  --create-namespace \
-  --set crds.enabled=true
+```
+Creating cluster "aerospike" ...
+ ✓ Ensuring node image (kindest/node:v1.32.0) 🖼
+ ✓ Preparing nodes 📦
+ ✓ Writing configuration 📜
+ ✓ Starting control-plane 🕹️
+ ✓ Installing CNI 🔌
+ ✓ Installing StorageClass 💾
+Set kubectl context to "kind-aerospike"
 ```
 
-Verify cert-manager is running:
+## Step 2: Install the Operator
+
+Installs the operator, cert-manager, and Cluster Manager UI in one command:
 
 ```bash
-kubectl -n cert-manager wait --for=condition=Available deployment/cert-manager --timeout=60s
-```
-
-## Step 3: Install the Operator
-
-```bash
-# With bundled cert-manager (recommended if you skipped Step 2)
-helm install aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+helm install aerospike-ce-kubernetes-operator \
+  oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
   -n aerospike-operator --create-namespace \
-  --set certManagerSubchart.enabled=true
+  --set certManagerSubchart.enabled=true \
+  --set ui.enabled=true \
+  --wait
 ```
 
-Verify the operator is running:
+Verify all pods are running:
 
 ```bash
 kubectl -n aerospike-operator get pods
 ```
 
-## Step 4: Deploy an Aerospike Cluster
+```
+NAME                                                                      READY   STATUS    AGE
+aerospike-ce-kubernetes-operator-controller-manager-xxxxx-yyyyy           1/1     Running   60s
+aerospike-ce-kubernetes-operator-ui-xxxxx-yyyyy                           2/2     Running   60s
+aerospike-ce-kubernetes-operator-cert-manager-xxxxx-yyyyy                 1/1     Running   60s
+```
+
+## Step 3: Deploy an Aerospike Cluster
 
 ```bash
 kubectl create namespace aerospike
-```
 
-Apply a minimal single-node in-memory cluster:
-
-<Tabs groupId="apply-method">
-<TabItem value="file" label="Sample File" default>
-
-```bash
-kubectl apply -f config/samples/acko_v1alpha1_aerospikecluster.yaml
-```
-
-</TabItem>
-<TabItem value="inline" label="Inline YAML">
-
-```bash
 kubectl apply -f - <<'EOF'
 apiVersion: acko.io/v1alpha1
 kind: AerospikeCluster
@@ -122,32 +102,31 @@ spec:
 EOF
 ```
 
-</TabItem>
-</Tabs>
-
-## Step 5: Verify
+Wait for the cluster to be ready:
 
 ```bash
-# Check cluster status (Phase should be "Completed")
+kubectl -n aerospike wait --for=condition=Ready pod/aerospike-basic-0-0 --timeout=120s
 kubectl -n aerospike get asc
-
-# Check pods
-kubectl -n aerospike get pods
 ```
-
-Expected output:
 
 ```
 NAME              RACKSIZE   HEALTH   PHASE       AGE
 aerospike-basic   1          1/1      Completed   60s
 ```
 
-## Step 6: Connect to Aerospike
+## Step 4: Access the Cluster Manager UI
 
-Launch an `aerospike-tools` pod to interact with the cluster:
+```bash
+kubectl -n aerospike-operator port-forward svc/aerospike-ce-kubernetes-operator-ui 3000:3000
+```
 
-<Tabs groupId="aerospike-tool">
-<TabItem value="aql" label="aql (Interactive)" default>
+Open [http://localhost:3000](http://localhost:3000) in your browser. The UI provides a visual dashboard for managing clusters, browsing records, and running AQL queries.
+
+:::tip
+Keep this terminal open — port-forward runs in the foreground. Open a new terminal for the next step.
+:::
+
+## Step 5: Connect with AQL
 
 ```bash
 kubectl -n aerospike run aql-client --rm -it --restart=Never \
@@ -163,64 +142,29 @@ aql> SHOW NAMESPACES
 | "test" |
 +--------+
 
-aql> INSERT INTO test.users (PK, name, age, email) VALUES ("user1", "Alice", 30, "alice@example.com")
+aql> INSERT INTO test.users (PK, name, age) VALUES ("user1", "Alice", 30)
 OK, 1 record affected.
 
 aql> SELECT * FROM test.users
-+---------+-----+---------------------+
-| name    | age | email               |
-+---------+-----+---------------------+
-| "Alice" | 30  | "alice@example.com" |
-+---------+-----+---------------------+
++---------+-----+
+| name    | age |
++---------+-----+
+| "Alice" | 30  |
++---------+-----+
+
+aql> EXIT
 ```
 
-</TabItem>
-<TabItem value="asinfo" label="asinfo (Health Check)">
+## Clean Up
 
 ```bash
-kubectl -n aerospike run asinfo-client --rm -it --restart=Never \
-  --image=aerospike/aerospike-tools:latest \
-  -- asinfo -h aerospike-basic -p 3000 -v status
+kind delete cluster --name aerospike
 ```
-
-```
-ok
-```
-
-```bash
-# Namespace statistics
-kubectl -n aerospike run asinfo-client --rm -it --restart=Never \
-  --image=aerospike/aerospike-tools:latest \
-  -- asinfo -h aerospike-basic -p 3000 -v "namespace/test"
-```
-
-</TabItem>
-</Tabs>
-
-## Deploy with Cluster Manager UI (Optional)
-
-Add `--set ui.enabled=true` to the Helm install command to deploy the web-based management UI alongside the operator:
-
-```bash
-helm install aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
-  -n aerospike-operator --create-namespace \
-  --set certManagerSubchart.enabled=true \
-  --set ui.enabled=true
-```
-
-Access the UI via port-forward:
-
-```bash
-kubectl -n aerospike-operator port-forward svc/aerospike-ce-kubernetes-operator-ui 3000:3000
-# Open http://localhost:3000
-```
-
-The UI provides a visual wizard for creating and managing Aerospike clusters, record browsing, AQL terminal, and more. See the [Cluster Manager UI](./guide/cluster-manager-ui) guide for details.
 
 ## Next Steps
 
-- [Installation Guide](./guide/install) — detailed installation options (Helm, Kustomize)
-- [Create Cluster](./guide/create-cluster) — sample configurations and CRD field reference
-- [Manage Cluster](./guide/manage-cluster) — scaling, rolling updates, monitoring
-- [Cluster Manager UI](./guide/cluster-manager-ui) — web-based GUI for browsing records, managing clusters, and executing AQL
-- [API Reference](./api-reference/aerospikecluster) — full CRD type documentation
+- [Installation Guide](./guide/install) — production installation options, Helm values, GitOps setup
+- [Create Cluster](./guide/create-cluster) — multi-node, persistent storage, rack-aware configurations
+- [Cluster Manager UI](./guide/cluster-manager-ui) — full UI feature guide and Ingress configuration
+- [Manage Cluster](./guide/manage-cluster) — scaling, rolling updates, configuration changes
+- [API Reference](./api-reference/aerospikecluster) — complete CRD specification
