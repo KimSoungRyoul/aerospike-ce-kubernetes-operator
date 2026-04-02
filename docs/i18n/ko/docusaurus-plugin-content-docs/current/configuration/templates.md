@@ -1,6 +1,6 @@
 ---
 sidebar_position: 5
-title: 템플릿 관리
+title: AerospikeClusterTemplate
 ---
 
 # 템플릿 관리

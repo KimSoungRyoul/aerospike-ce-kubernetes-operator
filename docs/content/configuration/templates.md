@@ -1,6 +1,6 @@
 ---
 sidebar_position: 5
-title: Template Management
+title: AerospikeClusterTemplate
 ---
 
 # Template Management
