@@ -393,6 +393,10 @@ ui:
   k8s:
     # -- Enable Kubernetes cluster management features (Create Cluster)
     enabled: true
+    # -- Verify TLS certificates when connecting to the Kubernetes API server.
+    # Set to false for clusters with self-signed or non-standard CA certificates
+    # (e.g., Missing Authority Key Identifier).
+    verifySsl: true
 
   # =============================================================================
   # Resources
