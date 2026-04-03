@@ -9,7 +9,7 @@ metadata:
 spec:
   accessModes:
     - {{ .Values.ui.persistence.accessMode }}
-  {{- if .Values.ui.persistence.storageClassName }}
+  {{- if not (kindIs "invalid" .Values.ui.persistence.storageClassName) }}
   storageClassName: {{ .Values.ui.persistence.storageClassName | quote }}
   {{- end }}
   resources:

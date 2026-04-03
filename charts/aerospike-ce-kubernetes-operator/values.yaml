@@ -377,8 +377,11 @@ ui:
   persistence:
     # -- Enable persistent storage for the embedded PostgreSQL database
     enabled: true
-    # -- Storage class name (empty = default)
-    storageClassName: ""
+    # -- Storage class name for the PostgreSQL PVC.
+    # null  = use cluster default StorageClass
+    # ""    = disable dynamic provisioning (use pre-provisioned PV)
+    # "name" = use the specified StorageClass (e.g., "rbd-ssd-user", "gp3")
+    storageClassName: null
     # -- Access mode
     accessMode: ReadWriteOnce
     # -- Volume size
