@@ -191,6 +191,12 @@ type AerospikeServiceSpec struct {
 	// Metadata defines custom annotations and labels for the service.
 	// +optional
 	Metadata *AerospikeObjectMeta `json:"metadata,omitempty"`
+
+	// ServiceType is the Kubernetes Service type for per-pod services.
+	// Defaults to ClusterIP. Set to NodePort or LoadBalancer for external access.
+	// +kubebuilder:validation:Enum=ClusterIP;NodePort;LoadBalancer
+	// +optional
+	ServiceType string `json:"serviceType,omitempty"`
 }
 
 // AerospikeClusterSpec defines the desired state of an Aerospike CE cluster.

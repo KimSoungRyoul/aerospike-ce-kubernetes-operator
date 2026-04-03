@@ -55,7 +55,11 @@ func (r *AerospikeClusterReconciler) reconcileConfigMap(
 	}
 
 	// Inject access-address placeholders based on network policy
-	configgen.InjectAccessAddressPlaceholders(effectiveConfig.Value, cluster.Spec.AerospikeNetworkPolicy)
+	var podSvcType string
+	if cluster.Spec.PodService != nil {
+		podSvcType = cluster.Spec.PodService.ServiceType
+	}
+	configgen.InjectAccessAddressPlaceholders(effectiveConfig.Value, cluster.Spec.AerospikeNetworkPolicy, podSvcType)
 
 	// Collect all pod names across all racks for mesh seed injection
 	racks := r.getRacks(cluster)

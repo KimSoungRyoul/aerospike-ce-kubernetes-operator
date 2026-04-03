@@ -145,6 +145,14 @@ func BuildPodTemplateSpec(
 		TerminationGracePeriodSeconds: &terminationGrace,
 	}
 
+	// Enable service account token mount when per-pod external services need
+	// the init container to query the Kubernetes API for LB IP / NodePort.
+	if cluster.Spec.PodService != nil && cluster.Spec.PodService.ServiceType != "" &&
+		cluster.Spec.PodService.ServiceType != "ClusterIP" {
+		automount := true
+		podSpec.AutomountServiceAccountToken = &automount
+	}
+
 	// Pod-level settings from cluster spec.
 	if cluster.Spec.PodSpec != nil {
 		applyPodSpecSettings(&podSpec, cluster.Spec.PodSpec)

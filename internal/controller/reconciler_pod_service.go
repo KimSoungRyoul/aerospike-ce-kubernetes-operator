@@ -39,6 +39,8 @@ func (r *AerospikeClusterReconciler) reconcilePodServices(
 		return fmt.Errorf("listing cluster pods for pod services: %w", err)
 	}
 
+	serviceType := podServiceType(cluster.Spec.PodService)
+
 	activePodNames := make(map[string]struct{}, len(pods.Items))
 	for i := range pods.Items {
 		pod := &pods.Items[i]
@@ -48,9 +50,7 @@ func (r *AerospikeClusterReconciler) reconcilePodServices(
 		labels := utils.LabelsForCluster(cluster.Name)
 		labels[podServiceLabel] = pod.Name
 
-		desiredPorts := []corev1.ServicePort{
-			{Name: "service", Port: podutil.ServicePort, TargetPort: intstr.FromInt32(podutil.ServicePort), Protocol: corev1.ProtocolTCP},
-		}
+		desiredPorts := podServicePorts(serviceType)
 
 		// Pod-specific selector
 		podSelector := map[string]string{
@@ -78,11 +78,7 @@ func (r *AerospikeClusterReconciler) reconcilePodServices(
 					Labels:      labels,
 					Annotations: desiredAnnotations,
 				},
-				Spec: corev1.ServiceSpec{
-					Type:     corev1.ServiceTypeClusterIP,
-					Selector: podSelector,
-					Ports:    desiredPorts,
-				},
+				Spec: podServiceSpec(serviceType, podSelector, desiredPorts),
 			}
 
 			if err := r.setOwnerRef(cluster, svc); err != nil {
@@ -100,12 +96,12 @@ func (r *AerospikeClusterReconciler) reconcilePodServices(
 		}
 
 		// Compare and update if needed.
-		needsUpdate := podServiceNeedsUpdate(existing, labels, desiredAnnotations, podSelector, desiredPorts)
+		needsUpdate := podServiceNeedsUpdate(existing, labels, desiredAnnotations, podSelector, desiredPorts, serviceType)
 
 		if needsUpdate {
 			existing.Labels = labels
 			existing.Annotations = reconcileAnnotations(existing.Annotations, desiredAnnotations)
-			existing.Spec.Type = corev1.ServiceTypeClusterIP
+			existing.Spec.Type = serviceType
 			existing.Spec.Selector = podSelector
 			existing.Spec.Ports = desiredPorts
 			log.Info("Updating per-pod service", "name", svcName)
@@ -167,10 +163,44 @@ func podServiceNeedsUpdate(
 	desiredAnnotations map[string]string,
 	desiredSelector map[string]string,
 	desiredPorts []corev1.ServicePort,
+	desiredType corev1.ServiceType,
 ) bool {
 	return !equalAnnotations(existing.Annotations, desiredAnnotations) ||
 		!maps.Equal(existing.Labels, desiredLabels) ||
-		existing.Spec.Type != corev1.ServiceTypeClusterIP ||
+		existing.Spec.Type != desiredType ||
 		!maps.Equal(existing.Spec.Selector, desiredSelector) ||
 		servicePortsChanged(existing.Spec.Ports, desiredPorts)
+}
+
+// podServiceType returns the desired service type from the PodService spec.
+func podServiceType(spec *ackov1alpha1.AerospikeServiceSpec) corev1.ServiceType {
+	if spec != nil && spec.ServiceType != "" {
+		return corev1.ServiceType(spec.ServiceType)
+	}
+	return corev1.ServiceTypeClusterIP
+}
+
+// podServicePorts returns the ports to expose on per-pod services.
+// For ClusterIP, only the service port is exposed.
+// For NodePort/LoadBalancer, all Aerospike ports are exposed for full external access.
+func podServicePorts(svcType corev1.ServiceType) []corev1.ServicePort {
+	servicePorts := []corev1.ServicePort{
+		{Name: "service", Port: podutil.ServicePort, TargetPort: intstr.FromInt32(podutil.ServicePort), Protocol: corev1.ProtocolTCP},
+	}
+	if svcType == corev1.ServiceTypeNodePort || svcType == corev1.ServiceTypeLoadBalancer {
+		servicePorts = append(servicePorts,
+			corev1.ServicePort{Name: "fabric", Port: podutil.FabricPort, TargetPort: intstr.FromInt32(podutil.FabricPort), Protocol: corev1.ProtocolTCP},
+			corev1.ServicePort{Name: "heartbeat", Port: podutil.HeartbeatPort, TargetPort: intstr.FromInt32(podutil.HeartbeatPort), Protocol: corev1.ProtocolTCP},
+		)
+	}
+	return servicePorts
+}
+
+// podServiceSpec builds the ServiceSpec for a per-pod service.
+func podServiceSpec(svcType corev1.ServiceType, selector map[string]string, ports []corev1.ServicePort) corev1.ServiceSpec {
+	return corev1.ServiceSpec{
+		Type:     svcType,
+		Selector: selector,
+		Ports:    ports,
+	}
 }

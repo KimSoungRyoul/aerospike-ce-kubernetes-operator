@@ -102,6 +102,7 @@ type AerospikeClusterReconciler struct {
 // +kubebuilder:rbac:groups=monitoring.coreos.com,resources=prometheusrules,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=cilium.io,resources=ciliumnetworkpolicies,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch;delete
 
 func (r *AerospikeClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	// Apply reconcile timeout to prevent infinite execution.
@@ -215,6 +216,19 @@ func (r *AerospikeClusterReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// 6b. Reconcile per-pod services
 	if err := r.reconcilePodServices(ctx, cluster); err != nil {
 		log.Error(err, "Failed to reconcile per-pod services", "cluster", cluster.Name)
+		metrics.ReconcileErrorsTotal.WithLabelValues(cluster.Namespace, cluster.Name, metrics.ReasonService).Inc()
+		return r.handleReconcileError(ctx, cluster, err)
+	}
+
+	// 6c. Reconcile RBAC for pod service init container
+	if err := r.reconcilePodServiceRBAC(ctx, cluster); err != nil {
+		log.Error(err, "Failed to reconcile pod service RBAC", "cluster", cluster.Name)
+		return r.handleReconcileError(ctx, cluster, err)
+	}
+
+	// 6d. Reconcile seeds finder service
+	if err := r.reconcileSeedsFinderService(ctx, cluster); err != nil {
+		log.Error(err, "Failed to reconcile seeds finder service", "cluster", cluster.Name)
 		metrics.ReconcileErrorsTotal.WithLabelValues(cluster.Namespace, cluster.Name, metrics.ReasonService).Inc()
 		return r.handleReconcileError(ctx, cluster, err)
 	}

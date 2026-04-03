@@ -99,7 +99,10 @@ func generateHeartbeatSubsection(
 // placeholders into the network config based on the AerospikeNetworkPolicy.
 // These placeholders (MY_POD_IP, MY_NODE_IP) are replaced by the init container
 // at pod startup using Downward API environment variables.
-func InjectAccessAddressPlaceholders(config map[string]any, policy *v1alpha1.AerospikeNetworkPolicy) {
+//
+// When podServiceType is LoadBalancer or NodePort, additional placeholders
+// (MY_EXTERNAL_ADDRESS, MY_EXTERNAL_PORT) are injected for external access.
+func InjectAccessAddressPlaceholders(config map[string]any, policy *v1alpha1.AerospikeNetworkPolicy, podServiceType string) {
 	if policy == nil {
 		return
 	}
@@ -126,6 +129,19 @@ func InjectAccessAddressPlaceholders(config map[string]any, policy *v1alpha1.Aer
 		if _, exists := svcSection["alternate-access-address"]; !exists {
 			svcSection["alternate-access-address"] = placeholder
 		}
+	}
+
+	// When per-pod services use LoadBalancer or NodePort, override the
+	// alternate-access-address/port with external placeholders that the init
+	// container resolves at startup by querying the pod's own Kubernetes Service.
+	// This takes precedence over the network policy's alternateAccessType because
+	// the per-pod LB/NodePort services provide the externally reachable endpoints.
+	if podServiceType == "LoadBalancer" {
+		svcSection["alternate-access-address"] = "MY_EXTERNAL_ADDRESS"
+	}
+	if podServiceType == "NodePort" {
+		svcSection["alternate-access-address"] = "MY_NODE_IP"
+		svcSection["alternate-access-port"] = "MY_EXTERNAL_PORT"
 	}
 
 	networkSection[SectionService] = svcSection

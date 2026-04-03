@@ -42,6 +42,7 @@ const (
 	// Service management
 	EventServiceCreated = "ServiceCreated"
 	EventServiceUpdated = "ServiceUpdated"
+	EventServiceDeleted = "ServiceDeleted"
 
 	// Pause/Resume lifecycle
 	EventPaused  = "ReconciliationPaused"

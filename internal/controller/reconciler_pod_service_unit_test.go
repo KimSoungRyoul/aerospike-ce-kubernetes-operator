@@ -73,7 +73,7 @@ func TestPodServiceNeedsUpdate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := base.DeepCopy()
 			tc.mutate(svc)
-			got := podServiceNeedsUpdate(svc, desiredLabels, desiredAnnotations, desiredSelector, desiredPorts)
+			got := podServiceNeedsUpdate(svc, desiredLabels, desiredAnnotations, desiredSelector, desiredPorts, corev1.ServiceTypeClusterIP)
 			if got != tc.expected {
 				t.Fatalf("podServiceNeedsUpdate()=%v, want %v", got, tc.expected)
 			}

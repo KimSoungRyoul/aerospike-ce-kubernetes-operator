@@ -253,6 +253,15 @@ spec:
                         description: Labels is a map of custom labels.
                         type: object
                     type: object
+                  serviceType:
+                    description: |-
+                      ServiceType is the Kubernetes Service type for per-pod services.
+                      Defaults to ClusterIP. Set to NodePort or LoadBalancer for external access.
+                    enum:
+                    - ClusterIP
+                    - NodePort
+                    - LoadBalancer
+                    type: string
                 type: object
               image:
                 description: |-
@@ -1606,6 +1615,15 @@ spec:
                         description: Labels is a map of custom labels.
                         type: object
                     type: object
+                  serviceType:
+                    description: |-
+                      ServiceType is the Kubernetes Service type for per-pod services.
+                      Defaults to ClusterIP. Set to NodePort or LoadBalancer for external access.
+                    enum:
+                    - ClusterIP
+                    - NodePort
+                    - LoadBalancer
+                    type: string
                 type: object
               podSpec:
                 description: PodSpec defines pod-level configuration (sidecars, resources,
@@ -8786,6 +8804,15 @@ spec:
                             description: Labels is a map of custom labels.
                             type: object
                         type: object
+                      serviceType:
+                        description: |-
+                          ServiceType is the Kubernetes Service type for per-pod services.
+                          Defaults to ClusterIP. Set to NodePort or LoadBalancer for external access.
+                        enum:
+                        - ClusterIP
+                        - NodePort
+                        - LoadBalancer
+                        type: string
                     type: object
                   image:
                     description: |-
@@ -10146,6 +10173,15 @@ spec:
                             description: Labels is a map of custom labels.
                             type: object
                         type: object
+                      serviceType:
+                        description: |-
+                          ServiceType is the Kubernetes Service type for per-pod services.
+                          Defaults to ClusterIP. Set to NodePort or LoadBalancer for external access.
+                        enum:
+                        - ClusterIP
+                        - NodePort
+                        - LoadBalancer
+                        type: string
                     type: object
                   podSpec:
                     description: PodSpec defines pod-level configuration (sidecars,
