@@ -3,6 +3,17 @@
 # =============================================================================
 
 # =============================================================================
+# Aerospike Images (used by default templates and UI wizard)
+# =============================================================================
+# Override these for air-gapped environments where Docker Hub is unreachable.
+# Example: aerospikeImages.aerospike: "internal-registry.example.com/aerospike:ce-8.1.1.1"
+aerospikeImages:
+  # -- Default Aerospike CE server image
+  aerospike: "aerospike:ce-8.1.1.1"
+  # -- Default Prometheus exporter sidecar image
+  exporter: "aerospike/aerospike-prometheus-exporter:1.16.1"
+
+# =============================================================================
 # CRD Management
 # =============================================================================
 crds:
@@ -612,7 +623,7 @@ defaultTemplates:
       description: >-
         개발 환경 추천. 단일 파드(1 Pod)로 구성되며 PVC와 네트워크 I/O 성능은 고려하지 않습니다.
         기능 동작 확인에만 집중하는 최소 구성 클러스터로, 빠른 이터레이션이 필요한 로컬·임시 개발 환경에 적합합니다.
-      image: aerospike:ce-8.1.1.1
+      # image is set from aerospikeImages.aerospike via template
       size: 1
       monitoring:
         enabled: false
@@ -668,11 +679,10 @@ defaultTemplates:
       description: >-
         프로덕션 환경 추천. 쿠버네티스 노드당 1개의 랙을 보장(required 안티어피니티)하고 로컬 PVC를 보장합니다.
         최소 3개 이상의 멀티 랙 구성을 권장하며, 완전한 데이터 로컬리티와 장애 도메인 격리를 제공합니다.
-      image: aerospike:ce-8.1.1.1
+      # image and exporterImage are set from aerospikeImages via template
       size: 6
       monitoring:
         enabled: true
-        exporterImage: aerospike/aerospike-prometheus-exporter:1.16.1
         port: 9145
         resources:
           requests:
