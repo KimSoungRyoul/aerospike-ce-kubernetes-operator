@@ -1,5 +1,17 @@
 {{- if .Values.defaultTemplates.enabled }}
 {{- range $name, $spec := $.Values.defaultTemplates.templates }}
+{{- $merged := deepCopy $spec }}
+{{- /* Inject aerospikeImages.aerospike as default image if not explicitly set */ -}}
+{{- if not (hasKey $merged "image") }}
+{{- $_ := set $merged "image" $.Values.aerospikeImages.aerospike }}
+{{- end }}
+{{- /* Inject aerospikeImages.exporter into monitoring.exporterImage if monitoring is enabled */ -}}
+{{- if and (hasKey $merged "monitoring") (index $merged "monitoring" | kindIs "map") }}
+{{- $mon := index $merged "monitoring" }}
+{{- if and (index $mon "enabled") (not (hasKey $mon "exporterImage")) }}
+{{- $_ := set $mon "exporterImage" $.Values.aerospikeImages.exporter }}
+{{- end }}
+{{- end }}
 ---
 apiVersion: acko.io/v1alpha1
 kind: AerospikeClusterTemplate
@@ -12,6 +24,6 @@ metadata:
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "10"
 spec:
-  {{- toYaml $spec | nindent 2 }}
+  {{- toYaml $merged | nindent 2 }}
 {{- end }}
 {{- end }}

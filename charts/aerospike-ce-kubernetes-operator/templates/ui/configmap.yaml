@@ -20,4 +20,6 @@ data:
   K8S_API_TIMEOUT: {{ .Values.ui.env.k8sApiTimeout | quote }}
   K8S_VERIFY_SSL: {{ .Values.ui.k8s.verifySsl | quote }}
   ENABLE_POSTGRES: {{ .Values.ui.postgresql.enabled | quote }}
+  DEFAULT_AEROSPIKE_IMAGE: {{ .Values.aerospikeImages.aerospike | quote }}
+  DEFAULT_EXPORTER_IMAGE: {{ .Values.aerospikeImages.exporter | quote }}
 {{- end }}
