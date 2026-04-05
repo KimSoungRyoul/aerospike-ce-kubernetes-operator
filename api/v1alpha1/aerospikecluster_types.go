@@ -488,6 +488,17 @@ type AerospikeClusterStatus struct {
 	// for partition migration statistics.
 	// +optional
 	MigrationStatus *MigrationStatus `json:"migrationStatus,omitempty"`
+
+	// Endpoints is a comma-separated list of externally reachable endpoints
+	// (host:port) for client access. Populated from per-pod LoadBalancer/NodePort
+	// services and the seeds finder service. Empty when no external services are configured.
+	// +optional
+	Endpoints string `json:"endpoints,omitempty"`
+
+	// SeedsEndpoint is the external endpoint (host:port) of the seeds finder
+	// LoadBalancer service. Clients use this as the initial seed address.
+	// +optional
+	SeedsEndpoint string `json:"seedsEndpoint,omitempty"`
 }
 
 // MigrationStatus represents the current data migration state of the cluster.
@@ -595,6 +606,8 @@ type AerospikePodStatus struct {
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 // +kubebuilder:printcolumn:name="Available",type=string,JSONPath=`.status.conditions[?(@.type=='Available')].status`
+// +kubebuilder:printcolumn:name="Seed",type=string,JSONPath=`.status.seedsEndpoint`,priority=0
+// +kubebuilder:printcolumn:name="Endpoints",type=string,JSONPath=`.status.endpoints`,priority=1
 // +kubebuilder:printcolumn:name="Image",type=string,JSONPath=`.spec.image`,priority=1
 // +kubebuilder:printcolumn:name="ObservedGen",type=integer,JSONPath=`.status.observedGeneration`,priority=1
 // +kubebuilder:printcolumn:name="PhaseReason",type=string,JSONPath=`.status.phaseReason`,priority=1

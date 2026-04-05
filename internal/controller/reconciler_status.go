@@ -108,6 +108,9 @@ func (r *AerospikeClusterReconciler) updateStatusAndPhase(
 
 		// Enrich status with Aerospike cluster info using a single client connection.
 		r.enrichStatusWithAerospikeInfo(ctx, latest)
+
+		// Populate external endpoints from per-pod and seeds finder LB services.
+		r.populateExternalEndpoints(ctx, latest)
 	}
 
 	// Update Prometheus metrics
@@ -705,6 +708,75 @@ func (r *AerospikeClusterReconciler) setConfigDegraded(
 
 	r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventDynamicConfigDegraded,
 		"Cluster entered ConfigDegraded phase: rollback failed on pods %s", strings.Join(failedPods, ", "))
+}
+
+// populateExternalEndpoints reads per-pod and seeds finder LoadBalancer/NodePort
+// services to populate status.Endpoints and status.SeedsEndpoint.
+func (r *AerospikeClusterReconciler) populateExternalEndpoints(
+	ctx context.Context,
+	cluster *ackov1alpha1.AerospikeCluster,
+) {
+	log := logf.FromContext(ctx)
+
+	// Collect per-pod external endpoints.
+	var endpoints []string
+	svcList := &corev1.ServiceList{}
+	matchLabels := utils.SelectorLabelsForCluster(cluster.Name)
+	if err := r.List(ctx, svcList,
+		client.InNamespace(cluster.Namespace),
+		client.MatchingLabels(matchLabels),
+		client.HasLabels{podServiceLabel},
+	); err != nil {
+		log.V(1).Info("Could not list pod services for endpoint status", "err", err)
+	} else {
+		for i := range svcList.Items {
+			svc := &svcList.Items[i]
+			if ep := externalEndpoint(svc); ep != "" {
+				endpoints = append(endpoints, ep)
+			}
+		}
+	}
+	slices.Sort(endpoints)
+	cluster.Status.Endpoints = strings.Join(endpoints, ",")
+
+	// Seeds finder LB endpoint.
+	seedsSvcName := seedsFinderServiceName(cluster.Name)
+	seedsSvc := &corev1.Service{}
+	if err := r.Get(ctx, types.NamespacedName{Name: seedsSvcName, Namespace: cluster.Namespace}, seedsSvc); err == nil {
+		cluster.Status.SeedsEndpoint = externalEndpoint(seedsSvc)
+	} else {
+		cluster.Status.SeedsEndpoint = ""
+	}
+}
+
+// externalEndpoint returns "host:port" from a LoadBalancer or NodePort service.
+// Returns empty string if no external endpoint is available.
+func externalEndpoint(svc *corev1.Service) string {
+	if len(svc.Spec.Ports) == 0 {
+		return ""
+	}
+	port := svc.Spec.Ports[0].Port
+
+	if svc.Spec.Type == corev1.ServiceTypeLoadBalancer {
+		for _, ing := range svc.Status.LoadBalancer.Ingress {
+			host := ing.IP
+			if host == "" {
+				host = ing.Hostname
+			}
+			if host != "" {
+				return fmt.Sprintf("%s:%d", host, port)
+			}
+		}
+	}
+
+	if svc.Spec.Type == corev1.ServiceTypeNodePort && len(svc.Spec.Ports) > 0 {
+		np := svc.Spec.Ports[0].NodePort
+		if np > 0 {
+			return fmt.Sprintf("<node-ip>:%d", np)
+		}
+	}
+
+	return ""
 }
 
 // parseServiceEndpoints splits the asinfo "service" response (semicolon-separated
