@@ -224,23 +224,119 @@ Operator-managed labels (e.g., `app.kubernetes.io/name`, `app.kubernetes.io/inst
 
 ## PodService
 
-`spec.podService` creates an individual ClusterIP Service for each Aerospike pod. This is useful when you need stable, per-pod DNS names or when integrating with service meshes that require individual service endpoints.
+`spec.podService` creates an individual Service for each Aerospike pod. This is useful when you need stable, per-pod DNS names, service mesh integration, or **external client access via LoadBalancer/NodePort**.
 
 When configured, the operator creates a Service named `<pod-name>-pod` for each pod, selecting that specific pod via `statefulset.kubernetes.io/pod-name`.
 
-### Example
+### Service Type
+
+| Value | Description |
+|---|---|
+| `ClusterIP` | Default. Internal access only. Exposes only the service port (3000). |
+| `NodePort` | Exposes the pod on each node's IP at a random port. All Aerospike ports (service, fabric, heartbeat) are exposed. |
+| `LoadBalancer` | Creates a cloud LoadBalancer with a unique external IP per pod. All Aerospike ports are exposed. |
+
+When `serviceType` is `LoadBalancer` or `NodePort`, the operator automatically:
+1. Creates a Role/RoleBinding granting the pod's service account permission to read its own Service
+2. Enables `automountServiceAccountToken` on the pod spec
+3. Injects `EXTERNAL_SERVICE_TYPE` and `POD_NAMESPACE` environment variables into the init container
+4. The init container queries the Kubernetes API at startup to discover its LoadBalancer external IP or NodePort, and injects it as `alternate-access-address` into `aerospike.conf`
+
+### Example: ClusterIP (Default)
 
 ```yaml
 spec:
   podService:
     metadata:
+      labels:
+        visibility: internal
+```
+
+### Example: LoadBalancer for External Access
+
+```yaml
+spec:
+  podService:
+    serviceType: LoadBalancer
+    metadata:
       annotations:
         service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
-      labels:
-        visibility: external
+```
+
+### Example: NodePort for External Access
+
+```yaml
+spec:
+  podService:
+    serviceType: NodePort
 ```
 
 The operator automatically cleans up stale pod services after scale-down or when `podService` is removed from the spec.
+
+## External Client Access
+
+To allow clients outside the Kubernetes cluster to connect to Aerospike, configure per-pod LoadBalancer services and a seeds finder LoadBalancer.
+
+### How It Works
+
+Aerospike uses a **smart client** protocol: the client connects to a seed node, receives the full cluster topology (all node addresses), and then connects directly to each node. For external access, every node must advertise an externally reachable address.
+
+```
+1. Client connects to Seeds LB (single entry point)
+2. Aerospike returns cluster topology with alternate-access-address (LB IPs)
+3. Client connects directly to each node via its per-pod LB IP
+```
+
+### Configuration
+
+```yaml
+spec:
+  # Per-pod LoadBalancer services — each pod gets a unique external IP
+  podService:
+    serviceType: LoadBalancer
+
+  # Seeds finder LB — single entry point for initial client connection
+  seedsFinderServices:
+    loadBalancer:
+      port: 3000
+```
+
+### Client Connection
+
+Use the Seeds LB IP with the `--services-alternate` flag:
+
+```bash
+# aql
+aql -h <seeds-lb-ip> -p 3000 --services-alternate
+
+# asinfo
+asinfo -h <seeds-lb-ip> -p 3000
+```
+
+```python
+# Python
+client = aerospike.client({
+    "hosts": [("<seeds-lb-ip>", 3000)],
+    "policies": {"use_services_alternate": True},
+}).connect()
+```
+
+### Discovering Endpoints
+
+```bash
+# Seeds LB endpoint (shown in default output)
+kubectl get asc
+# NAME           RACKSIZE   HEALTH   PHASE       SEED
+# my-aerospike   3          3/3      Completed   10.177.200.247:3000
+
+# All per-pod endpoints (shown in wide output)
+kubectl get asc -o wide
+# ENDPOINTS: 10.177.200.244:3000,10.177.200.245:3000,10.177.200.246:3000
+```
+
+:::warning
+The init container queries the Kubernetes API to resolve LoadBalancer IPs. If the LoadBalancer IP is not assigned within 120 seconds, the init container will fail and the pod will enter CrashLoopBackOff. Ensure your cloud provider or LB controller assigns IPs promptly.
+:::
 
 ## Full Networking Example
 
@@ -282,6 +378,7 @@ spec:
         external-dns.alpha.kubernetes.io/hostname: "aerospike-headless.example.com"
 
   podService:
+    serviceType: LoadBalancer
     metadata:
       labels:
         mesh.istio.io/managed: "true"

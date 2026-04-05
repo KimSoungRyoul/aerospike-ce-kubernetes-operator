@@ -224,23 +224,119 @@ spec:
 
 ## PodService
 
-`spec.podService`는 각 Aerospike 파드에 대해 개별 ClusterIP Service를 생성합니다. 안정적인 파드별 DNS 이름이 필요하거나 개별 서비스 엔드포인트가 필요한 서비스 메시와 통합할 때 유용합니다.
+`spec.podService`는 각 Aerospike 파드에 대해 개별 Service를 생성합니다. 안정적인 파드별 DNS 이름, 서비스 메시 통합, 또는 **LoadBalancer/NodePort를 통한 외부 클라이언트 접근**에 유용합니다.
 
 설정하면 오퍼레이터는 각 파드에 대해 `<pod-name>-pod`라는 이름의 Service를 생성하며, `statefulset.kubernetes.io/pod-name`을 통해 해당 특정 파드를 선택합니다.
 
-### 예제
+### 서비스 타입
+
+| 값 | 설명 |
+|---|---|
+| `ClusterIP` | 기본값. 내부 접근만 가능. 서비스 포트(3000)만 노출. |
+| `NodePort` | 각 노드 IP의 랜덤 포트로 파드를 노출. 모든 Aerospike 포트(service, fabric, heartbeat)가 노출됩니다. |
+| `LoadBalancer` | 파드별 고유 외부 IP를 가진 클라우드 LoadBalancer를 생성. 모든 Aerospike 포트가 노출됩니다. |
+
+`serviceType`이 `LoadBalancer` 또는 `NodePort`이면 오퍼레이터가 자동으로:
+1. 파드의 서비스 계정이 자신의 Service를 조회할 수 있도록 Role/RoleBinding 생성
+2. 파드 스펙에 `automountServiceAccountToken` 활성화
+3. Init 컨테이너에 `EXTERNAL_SERVICE_TYPE`, `POD_NAMESPACE` 환경변수 주입
+4. Init 컨테이너가 기동 시 Kubernetes API를 조회하여 LoadBalancer 외부 IP 또는 NodePort를 발견하고, `aerospike.conf`의 `alternate-access-address`에 자동 주입
+
+### 예제: ClusterIP (기본값)
 
 ```yaml
 spec:
   podService:
     metadata:
+      labels:
+        visibility: internal
+```
+
+### 예제: LoadBalancer로 외부 접근
+
+```yaml
+spec:
+  podService:
+    serviceType: LoadBalancer
+    metadata:
       annotations:
         service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
-      labels:
-        visibility: external
+```
+
+### 예제: NodePort로 외부 접근
+
+```yaml
+spec:
+  podService:
+    serviceType: NodePort
 ```
 
 오퍼레이터는 스케일 다운 후 또는 스펙에서 `podService`가 제거되면 불필요한 파드 서비스를 자동으로 정리합니다.
+
+## 외부 클라이언트 접근
+
+Kubernetes 클러스터 외부의 클라이언트가 Aerospike에 접속하려면 파드별 LoadBalancer 서비스와 Seeds Finder LoadBalancer를 설정합니다.
+
+### 동작 원리
+
+Aerospike는 **스마트 클라이언트** 프로토콜을 사용합니다: 클라이언트가 seed 노드에 접속하면 전체 클러스터 토폴로지(모든 노드 주소)를 받고, 각 노드에 직접 연결합니다. 외부 접근을 위해서는 모든 노드가 외부에서 도달 가능한 주소를 광고해야 합니다.
+
+```
+1. 클라이언트가 Seeds LB에 접속 (단일 진입점)
+2. Aerospike가 alternate-access-address (LB IP)가 포함된 클러스터 토폴로지 반환
+3. 클라이언트가 각 노드의 per-pod LB IP로 직접 연결
+```
+
+### 설정
+
+```yaml
+spec:
+  # 파드별 LoadBalancer 서비스 — 각 파드가 고유한 외부 IP를 할당받음
+  podService:
+    serviceType: LoadBalancer
+
+  # Seeds Finder LB — 클라이언트 초기 접속을 위한 단일 진입점
+  seedsFinderServices:
+    loadBalancer:
+      port: 3000
+```
+
+### 클라이언트 연결
+
+Seeds LB IP에 `--services-alternate` 플래그를 사용하여 접속합니다:
+
+```bash
+# aql
+aql -h <seeds-lb-ip> -p 3000 --services-alternate
+
+# asinfo
+asinfo -h <seeds-lb-ip> -p 3000
+```
+
+```python
+# Python
+client = aerospike.client({
+    "hosts": [("<seeds-lb-ip>", 3000)],
+    "policies": {"use_services_alternate": True},
+}).connect()
+```
+
+### 엔드포인트 확인
+
+```bash
+# Seeds LB 엔드포인트 (기본 출력에 표시)
+kubectl get asc
+# NAME           RACKSIZE   HEALTH   PHASE       SEED
+# my-aerospike   3          3/3      Completed   10.177.200.247:3000
+
+# 모든 파드별 엔드포인트 (wide 출력에 표시)
+kubectl get asc -o wide
+# ENDPOINTS: 10.177.200.244:3000,10.177.200.245:3000,10.177.200.246:3000
+```
+
+:::warning
+Init 컨테이너는 Kubernetes API를 조회하여 LoadBalancer IP를 확인합니다. 120초 내에 LoadBalancer IP가 할당되지 않으면 init 컨테이너가 실패하고 파드가 CrashLoopBackOff 상태가 됩니다. 클라우드 프로바이더 또는 LB 컨트롤러가 IP를 신속하게 할당하는지 확인하세요.
+:::
 
 ## 전체 네트워킹 예제
 
@@ -282,6 +378,7 @@ spec:
         external-dns.alpha.kubernetes.io/hostname: "aerospike-headless.example.com"
 
   podService:
+    serviceType: LoadBalancer
     metadata:
       labels:
         mesh.istio.io/managed: "true"
