@@ -1,11 +1,11 @@
 name: Daily Release
-# 매일 KST 09:00 (UTC 00:00)에 실행. 마지막 릴리스 이후 변경사항이 있으면 자동 릴리스.
-# Conventional Commits 기반 버전 범프: feat → minor, fix → patch, breaking → major
+# Runs daily at KST 09:00 (UTC 00:00). Automatically releases if there are changes since the last release.
+# Conventional Commits-based version bump: feat → minor, fix → patch, breaking → major
 
 on:
   schedule:
     - cron: "0 0 * * *" # UTC 00:00 = KST 09:00
-  workflow_dispatch: # 수동 실행 가능
+  workflow_dispatch: # can also be triggered manually
 
 jobs:
   release:

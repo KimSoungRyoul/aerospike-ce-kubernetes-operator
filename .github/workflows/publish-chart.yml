@@ -1,5 +1,5 @@
 name: Publish Helm Charts
-# Release 발행 시 Helm chart를 OCI 레지스트리 (GHCR)에 push
+# On release publish: push Helm chart to OCI registry (GHCR)
 
 on:
   push:

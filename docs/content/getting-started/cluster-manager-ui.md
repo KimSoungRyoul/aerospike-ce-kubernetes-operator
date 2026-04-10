@@ -5,7 +5,7 @@ title: Cluster Manager UI
 
 # Aerospike Cluster Manager UI
 
-[Aerospike Cluster Manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager)는 Aerospike CE 클러스터를 관리하는 웹 기반 GUI입니다. Operator Helm 차트에 포함되어 선택적으로 배포할 수 있습니다.
+[Aerospike Cluster Manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager) is a web-based GUI for managing Aerospike CE clusters. It is included in the Operator Helm chart and can be deployed optionally.
 
 ---
 
@@ -18,61 +18,61 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kuber
 ```
 
 :::note RBAC permissions
-`ui.rbac.create=true`(기본값)일 때, Helm 차트가 생성하는 ClusterRole에는 `autoscaling` API 그룹의 `horizontalpodautoscalers` 리소스에 대한 전체 접근 권한이 포함됩니다. 이 권한은 UI에서 HPA를 생성, 조회, 삭제하는 데 필요합니다.
+When `ui.rbac.create=true` (the default), the ClusterRole created by the Helm chart includes full access to `horizontalpodautoscalers` resources in the `autoscaling` API group. This permission is required for the UI to create, view, and delete HPAs.
 :::
 
-UI 파드 확인:
+Verify the UI pod:
 
 ```bash
 kubectl -n aerospike-operator get pods -l app.kubernetes.io/component=ui
 ```
 
-포트 포워딩으로 접속:
+Access via port-forwarding:
 
 ```bash
 kubectl -n aerospike-operator port-forward svc/acko-aerospike-ce-kubernetes-operator-ui 3000:3000
 ```
 
-브라우저에서 `http://localhost:3000` 접속.
+Open `http://localhost:3000` in your browser.
 
 ---
 
 ## Clusters
 
-사이드바의 연결 목록에서 클러스터를 선택하거나, 메인 화면에서 카드로 확인합니다. 각 카드에는 연결 상태, 노드 수, 네임스페이스 수, Aerospike 버전이 표시됩니다.
+Select a cluster from the connection list in the sidebar, or view clusters as cards on the main screen. Each card shows the connection status, node count, namespace count, and Aerospike version.
 
-![Clusters 홈 화면](/img/ui/clusters-home.png)
+![Clusters home screen](/img/ui/clusters-home.png)
 
 ---
 
 ## Create Cluster
 
-사이드바의 **Create Cluster** 또는 우상단 버튼으로 클러스터 생성 마법사를 시작합니다. 총 9단계로 구성됩니다:
+Start the cluster creation wizard from the sidebar **Create Cluster** button or the top-right button. The wizard has 9 steps:
 
-**Step 1 — Basic**: 클러스터 이름, K8s 네임스페이스, 노드 수(1-8), Aerospike 이미지를 설정합니다.
+**Step 1 — Basic**: Configure the cluster name, K8s namespace, node count (1–8), and Aerospike image.
 
 ![Create Cluster - Step 1 Basic](/img/ui/create-cluster-basic.png)
 
-**Step 3 — Monitoring & Options**: 아래 항목을 설정합니다:
+**Step 3 — Monitoring & Options**: Configure the following:
 
-- **Prometheus Monitoring** — 메트릭 exporter sidecar 활성화 및 포트 설정. 추가 구성: exporter 이미지, 메트릭 라벨, exporter 리소스(CPU/메모리), ServiceMonitor(enabled/interval/labels), PrometheusRule(enabled/labels/customRules). PrometheusRule에서 `customRules`를 지정하면 기본 알림(NodeDown, StopWrites, HighDiskUsage, HighMemoryUsage)을 사용자 정의 규칙으로 완전히 대체합니다. 자세한 내용은 [Monitoring guide](../operations/monitoring.md)를 참조하세요.
-- **Dynamic Config** — 재시작 없이 설정 변경 적용
-- **Network Access** — 클라이언트 접근 방식(Pod IP, Host Internal/External, Configured IP). `configuredIP` 선택 시 custom network names 입력 필드가 표시됩니다.
-- **Kubernetes NetworkPolicy** — K8s NetworkPolicy 자동 생성 (standard 또는 Cilium)
-- **Seeds Finder LoadBalancer** — 외부 시드 검색용 LoadBalancer 서비스 생성. 아래 필드를 UI에서 설정할 수 있습니다:
+- **Prometheus Monitoring** — Enable the metrics exporter sidecar and set the port. Additional configuration: exporter image, metric labels, exporter resources (CPU/memory), ServiceMonitor (enabled/interval/labels), PrometheusRule (enabled/labels/customRules). Specifying `customRules` in PrometheusRule fully replaces the default alerts (NodeDown, StopWrites, HighDiskUsage, HighMemoryUsage) with your custom rules. See the [Monitoring guide](../operations/monitoring.md) for details.
+- **Dynamic Config** — Apply configuration changes without restarting
+- **Network Access** — Client access method (Pod IP, Host Internal/External, Configured IP). When `configuredIP` is selected, a custom network names input field appears.
+- **Kubernetes NetworkPolicy** — Auto-generate K8s NetworkPolicy (standard or Cilium)
+- **Seeds Finder LoadBalancer** — Create a LoadBalancer service for external seed discovery. The following fields can be configured in the UI:
 
 | Field | Description |
 |-------|-------------|
-| **Port** | LoadBalancer 외부 포트 (기본값: 3000) |
-| **Target Port** | 트래픽을 전달할 컨테이너 포트 (기본값: 3000) |
-| **External Traffic Policy** | `Cluster` 또는 `Local`. `Local`로 설정하면 클라이언트 소스 IP가 보존됩니다. |
-| **Annotations** | 클라우드 프로바이더별 LoadBalancer 설정 (예: AWS NLB 타입, internal scheme) |
-| **Labels** | LoadBalancer 서비스에 추가할 커스텀 라벨 |
-| **Source Ranges** | 트래픽을 허용할 CIDR 목록 (보안을 위해 특정 IP 대역만 허용) |
+| **Port** | External LoadBalancer port (default: 3000) |
+| **Target Port** | Container port to forward traffic to (default: 3000) |
+| **External Traffic Policy** | `Cluster` or `Local`. Setting `Local` preserves the client source IP. |
+| **Annotations** | Cloud provider-specific LoadBalancer configuration (e.g., AWS NLB type, internal scheme) |
+| **Labels** | Custom labels to add to the LoadBalancer service |
+| **Source Ranges** | CIDR list of allowed traffic ranges (restrict to specific IP ranges for security) |
 
-이 설정은 `spec.seedsFinderServices.loadBalancer` 필드에 매핑됩니다. 자세한 내용은 [Networking — SeedsFinderServices](../configuration/networking.md#seedsfinderservices)를 참조하세요.
+This configuration maps to the `spec.seedsFinderServices.loadBalancer` field. See [Networking — SeedsFinderServices](../configuration/networking.md#seedsfinderservices) for details.
 
-**Step 8 — Review**: 모든 설정을 최종 확인한 후 **Create Cluster** 버튼으로 배포합니다.
+**Step 8 — Review**: Review all settings and click **Create Cluster** to deploy.
 
 ![Create Cluster - Step 8 Review](/img/ui/create-cluster-review.png)
 
@@ -80,238 +80,238 @@ kubectl -n aerospike-operator port-forward svc/acko-aerospike-ce-kubernetes-oper
 
 ## Cluster List
 
-K8s Clusters 페이지에서 모든 AerospikeCluster를 카드 형태로 조회합니다. 각 카드에는 다음 정보가 표시됩니다:
+The K8s Clusters page displays all AerospikeClusters as cards. Each card shows:
 
-- **Phase Badge** — 클러스터 상태 (Completed, InProgress, Error, ScalingUp 등)
-- **Node Count** — 현재 클러스터 노드 수
-- **Image** — 사용 중인 Aerospike 이미지
-- **Age** — 클러스터 생성 후 경과 시간
-- **Template Drift Badge** — 참조 중인 AerospikeClusterTemplate와 설정이 다를 때 경고 표시
-- **Failed Reconcile Count Badge** — 연속 Reconciliation 실패 횟수 (stuck 클러스터 식별용)
+- **Phase Badge** — Cluster state (Completed, InProgress, Error, ScalingUp, etc.)
+- **Node Count** — Current number of nodes in the cluster
+- **Image** — The Aerospike image in use
+- **Age** — Time elapsed since the cluster was created
+- **Template Drift Badge** — Warning indicator when the configuration differs from the referenced AerospikeClusterTemplate
+- **Failed Reconcile Count Badge** — Number of consecutive reconciliation failures (useful for identifying stuck clusters)
 
 ---
 
 ## Edit Cluster
 
-Edit 다이얼로그는 diff 기반 패치를 사용하여 변경된 필드만 적용합니다. 지원하는 편집 항목:
+The Edit dialog uses diff-based patching to apply only the changed fields. Supported edit items:
 
-- **Image / Size** — 이미지 변경 및 스케일링
-- **Resources** — CPU/Memory requests/limits 설정
-- **ACL (Access Control)** — ACL 활성화/비활성화, 역할 관리(권한, CIDR Whitelist), 사용자 관리(K8s Secret 비밀번호)
-- **Aerospike Config** — JSON 편집기로 Aerospike 설정 직접 수정
-- **Dynamic Config** — 재시작 없는 설정 변경 활성화
-- **Monitoring** — Prometheus exporter, ServiceMonitor, PrometheusRule 설정, Metric Labels, Exporter 환경 변수
-- **Network** — Access Type, Fabric Type, NetworkPolicy 자동 생성, Bandwidth 제한
-- **Storage** — 멀티 볼륨 관리 (PVC, EmptyDir, Secret, ConfigMap, HostPath)
+- **Image / Size** — Change the image and scale the cluster
+- **Resources** — Set CPU/Memory requests and limits
+- **ACL (Access Control)** — Enable/disable ACL, manage roles (privileges, CIDR Whitelist), manage users (K8s Secret passwords)
+- **Aerospike Config** — Directly edit Aerospike configuration via a JSON editor
+- **Dynamic Config** — Enable configuration changes without restart
+- **Monitoring** — Prometheus exporter, ServiceMonitor, PrometheusRule settings, Metric Labels, Exporter environment variables
+- **Network** — Access Type, Fabric Type, NetworkPolicy auto-generation, Bandwidth limits
+- **Storage** — Multi-volume management (PVC, EmptyDir, Secret, ConfigMap, HostPath)
 - **Pod Scheduling** — NodeSelector, Tolerations, Affinity, Host Network, Service Account, Priority Class Name
-- **Topology Spread** — Pod 분산 제약 조건
+- **Topology Spread** — Pod distribution constraints
 - **Security Context** — runAsUser, fsGroup, supplementalGroups
-- **Sidecars / Init Containers** — 커스텀 컨테이너 추가
-- **Service Metadata** — Pod Service, Headless Service 라벨/어노테이션
-- **Seeds Finder Services** — LoadBalancer 시드 검색 서비스
-- **Rack Topology** — 랙 추가/삭제, zone/region/nodeName/revision 할당, per-rack config/storage/scheduling 오버라이드
-- **Aerospike Container Security Context** — Aerospike 컨테이너 전용 보안 설정 (runAsUser, runAsGroup, privileged, runAsNonRoot, readOnlyRootFilesystem, allowPrivilegeEscalation)
-- **Node Block List** — K8s 노드 피커로 차단 노드 선택
+- **Sidecars / Init Containers** — Add custom containers
+- **Service Metadata** — Pod Service and Headless Service labels/annotations
+- **Seeds Finder Services** — LoadBalancer seed discovery service
+- **Rack Topology** — Add/remove racks, assign zone/region/nodeName/revision, per-rack config/storage/scheduling overrides
+- **Aerospike Container Security Context** — Container-level security settings for the Aerospike container (runAsUser, runAsGroup, privileged, runAsNonRoot, readOnlyRootFilesystem, allowPrivilegeEscalation)
+- **Node Block List** — Select blocked nodes using the K8s node picker
 
-**클라이언트 사이드 검증**: 편집 다이얼로그는 Operator webhook에 전송하기 전에 다음 검증을 수행합니다:
-- CE 8 미만 이미지 거부, Enterprise 에디션 이미지 거부 (CE operator는 Enterprise 이미지를 지원하지 않음), `xdr`/`tls` 금지 키 차단, 랙 동시 추가+삭제 방지, replication factor vs size 교차 검증, CE 네임스페이스 제한 (최대 2개, 오퍼레이터 webhook 검증과 일치)
+**Client-side validation**: The Edit dialog performs the following validations before sending to the Operator webhook:
+- Reject images below CE 8, reject Enterprise edition images (CE operator does not support Enterprise images), block `xdr`/`tls` forbidden keys, prevent simultaneous rack additions and deletions, cross-validate replication factor vs size, CE namespace limit (max 2, consistent with operator webhook validation)
 
 ### Rack Topology Editing
 
-Edit 다이얼로그의 **Rack Config** 탭에서 클러스터 생성 이후에도 랙 토폴로지를 변경할 수 있습니다. 지원하는 작업:
+The **Rack Config** tab in the Edit dialog allows you to modify the rack topology even after cluster creation. Supported operations:
 
-- **랙 추가** — 새로운 랙 ID와 함께 zone, region, nodeName을 지정하여 랙을 추가합니다.
-- **랙 삭제** — 기존 랙을 제거합니다. 해당 랙의 Pod는 순차적으로 축소됩니다.
-- **Zone / Region / NodeName 할당** — 각 랙의 토폴로지 제약 조건을 수정합니다. 드롭다운에서 기존 K8s 노드의 zone과 region 라벨 값을 선택하거나 직접 입력할 수 있습니다.
-- **Revision** — 각 랙에 버전 식별자를 부여합니다. Revision을 변경하면 해당 랙의 모든 Pod가 순차적으로 재시작됩니다. 설정 변경 없이 특정 랙만 재시작하고 싶을 때 유용합니다.
-- **Per-rack 오버라이드** — 랙별로 다음 항목을 클러스터 수준 설정과 다르게 구성할 수 있습니다:
-  - **Aerospike Config** — 랙별 네임스페이스 메모리 크기, storage-engine 설정 등
-  - **Storage** — 랙별 StorageClass, 볼륨 크기 변경 (예: 특정 AZ에서 io2 사용)
-  - **Scheduling** — 랙별 nodeSelector, tolerations, affinity 오버라이드
+- **Add rack** — Add a new rack by specifying a new rack ID along with zone, region, and nodeName.
+- **Remove rack** — Remove an existing rack. Pods in that rack are scaled down sequentially.
+- **Zone / Region / NodeName assignment** — Modify the topology constraints for each rack. You can select existing K8s node zone and region label values from a dropdown or enter them manually.
+- **Revision** — Assign a version identifier to each rack. Changing the revision causes all pods in that rack to restart sequentially. Useful when you want to restart a specific rack without any configuration changes.
+- **Per-rack overrides** — Configure the following items differently from the cluster-level settings on a per-rack basis:
+  - **Aerospike Config** — Per-rack namespace memory sizes, storage-engine settings, etc.
+  - **Storage** — Per-rack StorageClass, volume size changes (e.g., use io2 in a specific AZ)
+  - **Scheduling** — Per-rack nodeSelector, tolerations, affinity overrides
 
 :::warning
-랙 토폴로지 변경은 StatefulSet 재구성을 수반하며, Pod 재시작이 발생할 수 있습니다. 프로덕션 환경에서는 변경 전에 Review 단계에서 영향 범위를 확인하세요.
+Rack topology changes involve StatefulSet reconfiguration and may cause pod restarts. In production environments, review the scope of impact on the Review step before applying changes.
 :::
 
 ### Node Block List Picker
 
-Edit 다이얼로그의 **Pod Scheduling** 탭에서 Node Block List를 설정할 때, K8s 클러스터의 실제 노드 목록이 체크박스 형태로 표시됩니다. 텍스트를 직접 입력하는 대신 노드를 시각적으로 선택하여 차단할 수 있습니다.
+When configuring the Node Block List in the **Pod Scheduling** tab of the Edit dialog, the actual node list from the K8s cluster is displayed as checkboxes. You can visually select nodes to block instead of typing them manually.
 
-- **노드 목록 자동 조회** — K8s API에서 현재 클러스터의 노드를 가져와 표시합니다.
-- **체크박스 선택** — 차단할 노드를 체크박스로 선택/해제합니다.
-- **노드 정보 표시** — 각 노드의 이름, 상태(Ready/NotReady), zone, instance type 등 주요 라벨 정보가 함께 표시됩니다.
-- **검색 필터** — 노드 수가 많은 경우 이름으로 필터링하여 빠르게 찾을 수 있습니다.
+- **Auto-fetch node list** — Retrieves the current cluster's nodes from the K8s API and displays them.
+- **Checkbox selection** — Check or uncheck nodes to block.
+- **Node information display** — Each node's name, status (Ready/NotReady), zone, instance type, and other key label information are shown.
+- **Search filter** — Filter by name to quickly find a node when the list is large.
 
-이 설정은 `spec.podSpec.nodeBlockList`에 매핑되며, 선택된 노드에서는 Aerospike Pod가 스케줄링되지 않습니다.
+This configuration maps to `spec.podSpec.nodeBlockList`, and Aerospike Pods will not be scheduled on selected nodes.
 
 ### Container Security Context
 
-편집 다이얼로그의 **Security Context** 탭에서 Pod 수준 보안 컨텍스트 외에 **Container Security Context** 섹션을 통해 컨테이너 수준 보안을 설정할 수 있습니다. 다음 필드를 구성합니다:
+In the **Security Context** tab of the Edit dialog, you can configure container-level security via the **Container Security Context** section in addition to Pod-level security context. The following fields are available:
 
 | Field | Description |
 |-------|-------------|
-| **runAsUser** | 컨테이너 프로세스를 실행할 UID |
-| **runAsGroup** | 컨테이너 프로세스의 기본 GID |
-| **runAsNonRoot** | `true`로 설정하면 root(UID 0)로 실행되는 것을 방지합니다 |
-| **privileged** | 특권 모드 활성화 여부 |
-| **readOnlyRootFilesystem** | 루트 파일 시스템을 읽기 전용으로 마운트 |
-| **allowPrivilegeEscalation** | 자식 프로세스의 권한 상승 허용 여부 |
+| **runAsUser** | UID to run the container process as |
+| **runAsGroup** | Primary GID of the container process |
+| **runAsNonRoot** | When set to `true`, prevents the container from running as root (UID 0) |
+| **privileged** | Whether to enable privileged mode |
+| **readOnlyRootFilesystem** | Mount the root filesystem as read-only |
+| **allowPrivilegeEscalation** | Whether to allow child processes to gain elevated privileges |
 
-이 설정은 `spec.podSpec.aerospikeContainer.securityContext`에 매핑됩니다.
+This configuration maps to `spec.podSpec.aerospikeContainer.securityContext`.
 
 :::note
-Aerospike CE 공식 이미지는 root로 실행됩니다. `runAsNonRoot: true`를 설정하면 Pod가 시작되지 않을 수 있으므로 주의하세요.
+The official Aerospike CE image runs as root. Setting `runAsNonRoot: true` may prevent the Pod from starting.
 :::
 
 ---
 
 ## Cluster Overview
 
-클러스터를 선택하면 Overview 탭이 표시됩니다. 클러스터 Phase, Pod Ready 수, 헬스 조건(Stable / Config Applied / Available / ACL Synced), Pod 목록을 한눈에 확인합니다.
+Selecting a cluster displays the Overview tab. Get an at-a-glance view of the cluster Phase, Pod Ready count, health conditions (Stable / Config Applied / Available / ACL Synced), and the Pod list.
 
-상단 버튼으로 **Scale**, **Edit**, **Warm Restart**, **Pod Restart**, **Pause**, **Delete** 작업을 실행할 수 있습니다.
+Use the action buttons at the top to run **Scale**, **Edit**, **Warm Restart**, **Pod Restart**, **Pause**, and **Delete** operations.
 
-**Operation In-Progress Guard**: **Warm Restart**와 **Pod Restart** 버튼은 다른 Operation이 진행 중일 때 자동으로 비활성화됩니다. 이는 실수로 인한 이중 작업을 방지하여 클러스터 안정성을 보호합니다.
+**Operation In-Progress Guard**: The **Warm Restart** and **Pod Restart** buttons are automatically disabled when another operation is in progress. This prevents accidental duplicate operations and protects cluster stability.
 
-**Split-brain Detection**: Aerospike `asinfo`가 보고하는 클러스터 크기와 예상 K8s Pod 수가 다를 경우, 클러스터 상세 페이지에 경고 배너가 표시됩니다. 이는 모든 노드가 서로를 인식하지 못하는 네트워크 파티션 상황을 나타낼 수 있습니다.
+**Split-brain Detection**: If the cluster size reported by Aerospike `asinfo` differs from the expected K8s Pod count, a warning banner is displayed on the cluster detail page. This may indicate a network partition where not all nodes are aware of each other.
 
-Operation이 `InProgress` 상태에서 멈출 경우, Operation Status 카드의 **Clear** 버튼으로 `spec.operations`를 초기화하여 클러스터를 언블록할 수 있습니다.
+If an operation becomes stuck in `InProgress` state, use the **Clear** button on the Operation Status card to reset `spec.operations` and unblock the cluster.
 
 ![Cluster Overview](/img/ui/cluster-overview.png)
 
-**ACKO INFO** 탭에서는 Aerospike 노드 단위 상세 정보(Build, Edition, Uptime, Connections, Cluster Size)를 확인합니다.
+The **ACKO INFO** tab shows detailed per-node information (Build, Edition, Uptime, Connections, Cluster Size).
 
 ![Cluster ACKO INFO](/img/ui/cluster-acko-info.png)
 
 ### Migration Status Display
 
-클러스터가 스케일링이나 설정 변경 등으로 파티션 마이그레이션이 진행 중일 때, Overview 페이지에서 실시간 마이그레이션 상태를 확인할 수 있습니다.
+When partition migrations are in progress due to scaling or configuration changes, you can monitor the migration status in real time on the Overview page.
 
-- **실시간 진행률** — 남은 파티션 수와 프로그레스 바로 마이그레이션 진행 상황을 표시합니다.
-- **Pod별 마이그레이션 분석** — 각 Pod가 마이그레이션하고 있는 파티션 수를 Pod 테이블에서 확인할 수 있습니다.
-- **자동 새로고침** — 마이그레이션이 활성화된 동안 5초 간격으로 자동 갱신됩니다.
-- **시각적 표시** — 프로그레스 바와 상태 배지로 마이그레이션 상태를 직관적으로 표현합니다.
-- **랙 토폴로지 통합** — 랙 토폴로지 뷰에서 마이그레이션 중인 Pod가 하이라이트됩니다.
+- **Real-time progress** — Displays the remaining partition count and a progress bar.
+- **Per-pod migration breakdown** — View the number of partitions each Pod is migrating in the Pod table.
+- **Auto-refresh** — Automatically refreshes every 5 seconds while migration is active.
+- **Visual indicators** — Progress bar and status badges provide an intuitive view of migration state.
+- **Rack topology integration** — Pods currently migrating are highlighted in the rack topology view.
 
-마이그레이션이 완료되면 상태 표시가 자동으로 사라지며, 클러스터가 안정(Stable) 상태로 전환됩니다.
+When migration completes, the status display disappears automatically and the cluster transitions to the Stable state.
 
 ### Disconnected State
 
-Aerospike 연결이 끊어진 경우 Overview 및 Browser 페이지에서 스켈레톤 로딩 대신 연결 해제 상태 화면이 표시됩니다. `WifiOff` 아이콘과 함께 재연결을 안내하는 메시지가 나타납니다.
+When the Aerospike connection is lost, the Overview and Browser pages display a disconnected state screen instead of skeleton loading. A `WifiOff` icon appears along with a message guiding reconnection.
 
 ### Split-Brain Detection
 
-Overview 페이지에서 클러스터의 split-brain 상태를 자동으로 감지합니다. `status.aerospikeClusterSize`와 `status.size`가 불일치하면 경고 배지와 함께 상세 정보를 표시합니다:
+The Overview page automatically detects split-brain conditions. When `status.aerospikeClusterSize` and `status.size` are mismatched, a warning badge and details are shown:
 
-- **Cluster Size Mismatch** — Aerospike가 보고하는 클러스터 크기와 Kubernetes Pod 수의 차이
-- **노드별 클러스터 정보** — 각 노드가 보고하는 `cluster_key`와 `cluster_size`를 비교하여 분리된 파티션을 식별
-- **자동 감지** — 페이지 로드 시 및 자동 새로고침 중에 지속적으로 모니터링
+- **Cluster Size Mismatch** — Difference between the cluster size reported by Aerospike and the Kubernetes Pod count
+- **Per-node cluster information** — Compare the `cluster_key` and `cluster_size` reported by each node to identify isolated partitions
+- **Automatic detection** — Continuously monitored on page load and during auto-refresh
 
 ### Pod Volume Status Indicators
 
-Pod 테이블에서 각 Pod의 볼륨 상태를 시각적으로 확인할 수 있습니다:
+The Pod table provides a visual view of volume status for each Pod:
 
-- **Dirty Volumes** — `status.pods[].dirtyVolumes`에 값이 있으면 경고 아이콘과 함께 초기화가 필요한 볼륨 이름을 표시합니다.
-- **Initialized Volumes** — `status.pods[].initializedVolumes`에 기록된 초기화 완료 볼륨 목록을 표시합니다.
+- **Dirty Volumes** — If `status.pods[].dirtyVolumes` has values, a warning icon and the names of volumes that need initialization are displayed.
+- **Initialized Volumes** — Displays the list of volumes recorded in `status.pods[].initializedVolumes` as initialization-complete.
 
 ### Clone Cluster
 
-클러스터 상세 페이지의 작업 메뉴에서 **Clone** 을 선택하여 기존 클러스터의 설정을 복제한 새 클러스터를 생성할 수 있습니다. 복제 시 클러스터 이름과 네임스페이스를 변경하며, 나머지 설정(이미지, 크기, Aerospike 설정, 스토리지, 모니터링 등)은 원본 클러스터에서 가져옵니다.
+Select **Clone** from the action menu on the cluster detail page to create a new cluster by cloning the configuration of an existing cluster. You change the cluster name and namespace during cloning; the rest of the settings (image, size, Aerospike configuration, storage, monitoring, etc.) are copied from the source cluster.
 
 :::warning
-복제된 클러스터는 원본 클러스터의 데이터를 포함하지 않습니다. 설정만 복제되며, 데이터는 새로 초기화됩니다.
+The cloned cluster does not contain the source cluster's data. Only the configuration is cloned — data is freshly initialized.
 :::
 
 ### Events Timeline
 
-클러스터 상세 페이지의 **Events** 탭에서 Kubernetes 이벤트를 확인합니다. 각 이벤트에는 타입, 이유, 메시지, 발생 횟수, 그리고 상대적 시간(예: "2m ago")이 표시됩니다. Transitional Phase에서는 자동으로 새로고침됩니다.
+View Kubernetes events on the **Events** tab of the cluster detail page. Each event shows the type, reason, message, occurrence count, and relative time (e.g., "2m ago"). Auto-refresh is active during transitional phases.
 
 ### Event Category Filtering
 
-이벤트 타임라인에서 카테고리별 필터링이 가능합니다. 11개 카테고리로 자동 분류됩니다:
+Events in the timeline can be filtered by category. Events are automatically classified into 11 categories:
 
 | Category | Description | Example Events |
 |----------|-------------|----------------|
-| **Lifecycle** | 클러스터 생성/삭제 | ClusterCreated, ClusterDeletionStarted |
-| **Rolling Restart** | 롤링 리스타트 | RollingRestartStarted/Completed, PodRestarted |
-| **Configuration** | 설정 변경 | ConfigMapCreated, DynamicConfigApplied |
-| **ACL Security** | 접근 제어 | ACLSyncStarted/Completed/Failed |
-| **Scaling** | 스케일 업/다운 | RackScaled, PVCCleanupCompleted |
-| **Rack Management** | 랙 관리 | StatefulSetCreated, RackRemoved |
-| **Network** | 네트워크 리소스 | ServiceCreated, PDBCreated, NetworkPolicyCreated |
-| **Monitoring** | 모니터링 설정 | MonitoringConfigured |
-| **Template** | 템플릿 동기화 | TemplateApplied, TemplateOutOfSync |
-| **Circuit Breaker** | 서킷 브레이커 | CircuitBreakerActive/Reset |
+| **Lifecycle** | Cluster creation/deletion | ClusterCreated, ClusterDeletionStarted |
+| **Rolling Restart** | Rolling restarts | RollingRestartStarted/Completed, PodRestarted |
+| **Configuration** | Configuration changes | ConfigMapCreated, DynamicConfigApplied |
+| **ACL Security** | Access control | ACLSyncStarted/Completed/Failed |
+| **Scaling** | Scale up/down | RackScaled, PVCCleanupCompleted |
+| **Rack Management** | Rack management | StatefulSetCreated, RackRemoved |
+| **Network** | Network resources | ServiceCreated, PDBCreated, NetworkPolicyCreated |
+| **Monitoring** | Monitoring configuration | MonitoringConfigured |
+| **Template** | Template synchronization | TemplateApplied, TemplateOutOfSync |
+| **Circuit Breaker** | Circuit breaker | CircuitBreakerActive/Reset |
 
-카테고리 필터 칩을 클릭하여 특정 유형의 이벤트만 표시할 수 있습니다.
+Click a category filter chip to display only that type of event.
 
 ### Event Export
 
-이벤트 타임라인 헤더의 **JSON** 또는 **CSV** 다운로드 버튼을 클릭하여 이벤트를 내보낼 수 있습니다. 내보내기에는 이벤트 타입, 이유, 카테고리, 발생 횟수, 타임스탬프, 메시지가 포함됩니다. 카테고리 필터가 활성화된 경우 필터링된 이벤트만 내보내집니다.
+Click the **JSON** or **CSV** download button in the event timeline header to export events. Exports include event type, reason, category, occurrence count, timestamp, and message. If category filters are active, only the filtered events are exported.
 
 ### Configuration Drift Detection
 
-클러스터 상세 페이지에서 **Config Status** 카드가 현재 설정의 동기화 상태를 표시합니다:
+The **Config Status** card on the cluster detail page displays the synchronization state of the current configuration:
 
-- **In Sync** — 원하는 설정(spec)과 적용된 설정(appliedSpec)이 일치
-- **Config Drift Detected** — spec과 appliedSpec 사이에 차이 발견
+- **In Sync** — The desired configuration (spec) matches the applied configuration (appliedSpec)
+- **Config Drift Detected** — A difference has been found between spec and appliedSpec
 
-변경된 필드 목록과 Pod별 설정 해시 버전이 표시됩니다. 여러 해시 그룹이 있으면 일부 Pod가 아직 이전 설정으로 실행 중임을 의미합니다.
+The list of changed fields and the per-pod configuration hash version are shown. Multiple hash groups indicate that some pods are still running with an older configuration.
 
-Config Drift API는 `desiredConfig`과 `appliedConfig` 필드를 통해 실제 설정 값을 반환하므로, UI에서 상세한 diff 비교가 가능합니다. 두 가지 보기 모드를 지원합니다:
+The Config Drift API returns actual configuration values through `desiredConfig` and `appliedConfig` fields, enabling detailed diff comparison in the UI. Two view modes are supported:
 
-- **Fields 뷰** (기본) — 변경된 필드별로 원하는 값(`+`)과 적용된 값(`-`)을 색상 코딩(`added`, `removed`, `changed`)으로 표시합니다.
-- **Side-by-side 뷰** — 적용된 설정(왼쪽, 빨간색)과 원하는 설정(오른쪽, 녹색)을 라인별 JSON diff로 표시합니다. Git diff와 유사한 라인 번호와 색상 하이라이팅을 제공합니다.
+- **Fields view** (default) — Displays the desired value (`+`) and applied value (`-`) for each changed field with color coding (`added`, `removed`, `changed`).
+- **Side-by-side view** — Shows the applied configuration (left, red) and desired configuration (right, green) as a line-by-line JSON diff. Provides line numbers and color highlighting similar to a git diff.
 
-상단의 **Fields** / **Side-by-side** 토글 버튼으로 보기를 전환할 수 있습니다.
+Toggle between views using the **Fields** / **Side-by-side** toggle buttons at the top.
 
-Drift가 감지되면 **Force Reconcile** 버튼으로 오퍼레이터에 재조정을 요청할 수 있습니다. 이 버튼은 CR에 `acko.io/force-reconcile` 어노테이션을 추가하여 즉시 reconciliation을 트리거합니다.
+When drift is detected, click **Force Reconcile** to request re-reconciliation from the operator. This adds the `acko.io/force-reconcile` annotation to the CR to immediately trigger reconciliation.
 
 ### Reconciliation Health & Circuit Breaker
 
-Reconciliation 실패가 발생하면 **Reconciliation Health** 카드가 나타납니다:
+When reconciliation failures occur, the **Reconciliation Health** card appears:
 
-- **Progress Bar** — 서킷 브레이커 임계값(10회)까지의 실패 진행도
-- **Backoff Timer** — 서킷 브레이커 활성화 시 다음 재시도까지의 예상 시간
-- **Error Details** — 마지막 reconciliation 에러 메시지
-- **Reset Button** — Reconciliation Health 카드의 전용 **Reset** 버튼으로 서킷 브레이커를 원클릭으로 리셋합니다. 이전에는 `kubectl`로 수동 CR 패치가 필요했으나, 이제 `acko.io/reset-circuit-breaker` 어노테이션을 통한 즉시 리셋이 가능합니다.
+- **Progress Bar** — Progress toward the circuit breaker threshold (10 failures)
+- **Backoff Timer** — Estimated time until the next retry when the circuit breaker is active
+- **Error Details** — Last reconciliation error message
+- **Reset Button** — The dedicated **Reset** button on the Reconciliation Health card resets the circuit breaker in one click. Previously this required manually patching the CR with `kubectl`; now an immediate reset is available via the `acko.io/reset-circuit-breaker` annotation.
 
-서킷 브레이커는 연속 10회 실패 시 자동 활성화되며, 지수 백오프(30s × 2^n, 최대 300s)로 재시도합니다.
+The circuit breaker activates automatically after 10 consecutive failures and retries with exponential backoff (30s × 2^n, max 300s).
 
 ### PVC / Storage Status
 
-클러스터 상세 페이지에서 **Storage (PVCs)** 카드가 해당 클러스터의 PersistentVolumeClaim 상태를 표시합니다:
+The **Storage (PVCs)** card on the cluster detail page displays the PersistentVolumeClaim status for the cluster:
 
-- **Status Badge** — Bound (초록), Pending (노랑), Lost (빨강)
-- **Capacity** — 프로비저닝된 스토리지 용량
-- **Storage Class** — 사용된 Kubernetes StorageClass
-- **Access Modes** — ReadWriteOnce, ReadWriteMany 등
-- **Volume Name** — 바인딩된 PersistentVolume 이름
-- **Pod Binding** — 각 PVC가 마운트된 Pod를 표시하여 PVC-Pod 매핑을 시각적으로 확인
-- **Orphan Detection** — 실행 중인 Pod에 마운트되지 않은 PVC를 자동으로 감지하여 경고 표시
-- **PVC 삭제** — 고아 PVC(활성 Pod와 연결되지 않은 PVC)를 PVC 상태 목록에서 직접 삭제할 수 있습니다. 스케일다운이나 Pod 삭제 실패 후 남은 스토리지 리소스를 정리하는 데 유용합니다. 삭제 전 확인 다이얼로그가 표시됩니다.
+- **Status Badge** — Bound (green), Pending (yellow), Lost (red)
+- **Capacity** — Provisioned storage capacity
+- **Storage Class** — The Kubernetes StorageClass in use
+- **Access Modes** — ReadWriteOnce, ReadWriteMany, etc.
+- **Volume Name** — Name of the bound PersistentVolume
+- **Pod Binding** — Shows which Pod each PVC is mounted on, providing a visual PVC-to-Pod mapping
+- **Orphan Detection** — Automatically detects PVCs not mounted to any running Pod and displays a warning
+- **PVC deletion** — Orphaned PVCs (PVCs not associated with an active Pod) can be deleted directly from the PVC status list. Useful for cleaning up storage resources left over after a scale-down or failed Pod deletion. A confirmation dialog is shown before deletion.
 
 ### Export / Import
 
-**Export** — 클러스터 상세 페이지의 Spec 섹션에서 **Copy CR** 버튼으로 CR을 JSON 형식으로 클립보드에 복사합니다.
+**Export** — In the Spec section of the cluster detail page, click **Copy CR** to copy the CR to the clipboard in JSON format.
 
-**Import** — 클러스터 리스트 페이지에서 **Import CR** 버튼으로 기존 CR JSON을 붙여넣기하거나 파일을 업로드하여 클러스터를 생성합니다. 메타데이터 필드(`uid`, `resourceVersion`, `managedFields`)는 자동으로 제거됩니다.
+**Import** — On the cluster list page, click **Import CR** to paste existing CR JSON or upload a file to create a cluster. Metadata fields (`uid`, `resourceVersion`, `managedFields`) are automatically removed.
 
-**Clone** — 클러스터 상세 페이지에서 **Clone** 버튼으로 기존 클러스터의 spec을 복사하여 새 클러스터를 생성합니다. 새 이름과 네임스페이스를 지정하면 `operations`와 `paused` 상태를 제외한 전체 spec이 복제됩니다. 프로덕션 클러스터의 설정을 테스트 환경에 복제하거나, 검증된 설정을 다른 네임스페이스에 배포할 때 유용합니다.
+**Clone** — On the cluster detail page, click **Clone** to create a new cluster by copying the spec of an existing cluster. Specify a new name and namespace, and the entire spec is cloned excluding `operations` and `paused` state. Useful for replicating a production cluster's configuration to a test environment or deploying a validated configuration to another namespace.
 
-:::caution 다른 네임스페이스로 복제 시 ACL Secret
-다른 네임스페이스로 클러스터를 복제할 때, ACL 사용자의 비밀번호에 연결된 Kubernetes Secret(`spec.aerospikeAccessControl.users[].secretName`)은 자동으로 복사되지 않습니다. 복제된 클러스터가 ACL이 활성화된 상태로 정상 시작하려면, 대상 네임스페이스에 동일한 Secret이 미리 존재해야 합니다.
+:::caution ACL Secrets when cloning to a different namespace
+When cloning a cluster to a different namespace, the Kubernetes Secrets tied to ACL user passwords (`spec.aerospikeAccessControl.users[].secretName`) are not automatically copied. For the cloned cluster to start successfully with ACL enabled, the same Secrets must already exist in the target namespace.
 :::
 
 ---
 
 ## Namespaces
 
-**Namespaces** 탭에서 네임스페이스별 오브젝트 수, 스토리지 타입, 복제 계수, 메모리/디스크 HWM, TTL 설정을 확인합니다. 각 네임스페이스 하위 Set 목록도 표시됩니다.
+The **Namespaces** tab shows per-namespace object count, storage type, replication factor, memory/disk HWM, and TTL configuration. The Set list for each namespace is also displayed.
 
 ![Namespaces](/img/ui/namespaces.png)
 
-Set 행을 클릭하면 레코드 브라우저로 이동합니다. **Add filter**로 Secondary Index 기반 필터를 추가할 수 있습니다.
+Click a Set row to navigate to the record browser. Use **Add filter** to add Secondary Index-based filters.
 
 ![Namespaces Set Browser](/img/ui/namespaces-set-browser.png)
 
@@ -319,7 +319,7 @@ Set 행을 클릭하면 레코드 브라우저로 이동합니다. **Add filter*
 
 ## Indexes
 
-**Indexes** 탭에서 Secondary Index 목록(Name, Namespace, Set, Bin, Type, State)을 확인하고 **+ Create Index** 버튼으로 새 인덱스를 생성합니다.
+The **Indexes** tab shows the Secondary Index list (Name, Namespace, Set, Bin, Type, State) and lets you create new indexes with the **+ Create Index** button.
 
 ![Secondary Indexes](/img/ui/indexes.png)
 
@@ -327,193 +327,193 @@ Set 행을 클릭하면 레코드 브라우저로 이동합니다. **Add filter*
 
 ## Record Browser
 
-**Browser** 탭에서 Aerospike 레코드를 조회, 생성, 수정, 삭제할 수 있습니다.
+The **Browser** tab lets you query, create, update, and delete Aerospike records.
 
-- Namespace와 Set을 선택하여 레코드를 스캔
-- 페이지네이션을 통한 대량 레코드 탐색
-- 개별 레코드의 Bin 값을 인라인 편집
-- PK(Primary Key)로 레코드 직접 조회
-- Secondary Index 기반 필터를 추가하여 조건부 스캔
+- Select a namespace and set to scan records
+- Browse large record sets with pagination
+- Inline edit bin values for individual records
+- Look up records directly by PK (Primary Key)
+- Add Secondary Index-based filters for conditional scans
 
 ---
 
 ## AQL Terminal
 
-**Terminal** 탭에서 Monaco Editor 기반의 AQL(Aerospike Query Language) 터미널을 제공합니다.
+The **Terminal** tab provides an AQL (Aerospike Query Language) terminal built on Monaco Editor.
 
-- AQL 명령어 직접 입력 및 실행
-- 구문 하이라이팅 및 자동 완성
-- 실행 결과를 테이블/JSON 형식으로 표시
+- Enter and execute AQL commands directly
+- Syntax highlighting and auto-completion
+- Display query results in table or JSON format
 
 ---
 
 ## UDF Management
 
-**UDFs** 탭에서 Lua User-Defined Function을 관리합니다.
+The **UDFs** tab manages Lua User-Defined Functions.
 
-- 등록된 UDF 모듈 목록 확인
-- 새로운 Lua UDF 파일 업로드
-- UDF 모듈 삭제
+- View the list of registered UDF modules
+- Upload new Lua UDF files
+- Delete UDF modules
 
 ---
 
 ## User & Role Management
 
-**Admin** 탭에서 Aerospike 접근 제어(ACL)를 관리합니다.
+The **Admin** tab manages Aerospike access control (ACL).
 
-- 사용자 목록 조회, 생성, 삭제, 비밀번호 변경
-- 역할(Role) 목록 조회, 생성, 삭제
-- 역할별 권한(Privilege) 관리
-- 사용자-역할 매핑
+- View, create, delete, and change passwords for users
+- View, create, and delete roles
+- Manage privileges per role
+- Map users to roles
 
 ---
 
 ## Service Metadata
 
-클러스터 생성 마법사의 **Advanced** 단계와 클러스터 편집 다이얼로그에서 Kubernetes 서비스에 사용자 정의 메타데이터를 추가할 수 있습니다.
+The **Advanced** step in the cluster creation wizard and the cluster Edit dialog allow you to add custom metadata to Kubernetes services.
 
 ### Headless Service Metadata
 
-오퍼레이터가 생성하는 headless 서비스(`<cluster-name>-headless`)에 커스텀 annotations과 labels를 추가합니다. 이는 Prometheus 서비스 디스커버리, External DNS 통합, 또는 비용 추적에 유용합니다.
+Add custom annotations and labels to the headless service created by the operator (`<cluster-name>-headless`). Useful for Prometheus service discovery, External DNS integration, or cost tracking.
 
 ### Per-Pod Service Metadata
 
-`podService`를 설정하면 각 Pod마다 개별 ClusterIP Service가 생성됩니다. 커스텀 annotations과 labels를 추가하여 External DNS 통합, 서비스 메시 연동, 또는 Pod 수준의 로드 밸런싱에 활용할 수 있습니다.
+When `podService` is configured, an individual ClusterIP Service is created for each Pod. Add custom annotations and labels for External DNS integration, service mesh connectivity, or Pod-level load balancing.
 
 ### Pod Metadata
 
-Aerospike Pod 자체에 커스텀 labels와 annotations를 추가합니다. 서비스 메시 사이드카 주입(예: Istio), 모니터링 레이블 셀렉터, 비용 할당 태그에 활용됩니다.
+Add custom labels and annotations to the Aerospike Pods themselves. Useful for service mesh sidecar injection (e.g., Istio), monitoring label selectors, and cost allocation tags.
 
 ---
 ## HPA (Horizontal Pod Autoscaler) Management
 
-클러스터 상세 페이지에서 AerospikeCluster 리소스를 대상으로 하는 HorizontalPodAutoscaler(HPA)를 관리할 수 있습니다. HPA는 CPU 또는 메모리 사용량에 따라 클러스터 크기를 자동으로 조정합니다.
+The cluster detail page lets you manage HorizontalPodAutoscaler (HPA) resources targeting the AerospikeCluster resource. An HPA automatically adjusts the cluster size based on CPU or memory utilization.
 
-### HPA 생성
+### Creating an HPA
 
-클러스터 상세 페이지의 작업 메뉴에서 **HPA 관리**를 선택하여 새 HPA를 생성합니다. 다음 항목을 설정할 수 있습니다:
+Select **Manage HPA** from the action menu on the cluster detail page to create a new HPA. The following items can be configured:
 
-- **최소 레플리카(Min Replicas)** — 자동 스케일링 시 유지할 최소 Pod 수
-- **최대 레플리카(Max Replicas)** — 허용할 최대 Pod 수
-- **CPU 목표 사용률(CPU Target Utilization)** — 스케일 아웃을 트리거하는 평균 CPU 사용률(%)
-- **메모리 목표 사용률(Memory Target Utilization)** — 스케일 아웃을 트리거하는 평균 메모리 사용률(%)
+- **Min Replicas** — Minimum number of Pods to maintain during autoscaling
+- **Max Replicas** — Maximum number of Pods allowed
+- **CPU Target Utilization** — Average CPU utilization (%) that triggers scale-out
+- **Memory Target Utilization** — Average memory utilization (%) that triggers scale-out
 
-생성된 HPA는 해당 AerospikeCluster를 `scaleTargetRef`로 참조합니다.
+The created HPA references the AerospikeCluster as its `scaleTargetRef`.
 
-### HPA 조회
+### Viewing an HPA
 
-클러스터에 연결된 HPA가 존재하면 현재 레플리카 수, 목표 메트릭, 현재 메트릭 값을 확인할 수 있습니다.
+When an HPA is associated with a cluster, the current replica count, target metrics, and current metric values are displayed.
 
-### HPA 삭제
+### Deleting an HPA
 
-더 이상 자동 스케일링이 필요하지 않은 경우 UI에서 HPA를 삭제할 수 있습니다. 삭제 후에는 수동 스케일링으로 전환됩니다.
+If autoscaling is no longer needed, the HPA can be deleted from the UI. After deletion, manual scaling takes over.
 
 :::note
-HPA 관리 기능을 사용하려면 UI의 ClusterRole에 `autoscaling` API 그룹에 대한 권한이 필요합니다. `ui.rbac.create=true`(기본값)일 때 자동으로 설정됩니다.
+HPA management requires the UI ClusterRole to have permissions for the `autoscaling` API group. This is configured automatically when `ui.rbac.create=true` (the default).
 :::
 
 ---
 
 ## K8s Cluster Management
 
-`ui.k8s.enabled=true`일 때, **K8s Clusters** 페이지에서 `AerospikeCluster` CR을 GUI로 관리합니다.
+When `ui.k8s.enabled=true`, the **K8s Clusters** page lets you manage `AerospikeCluster` CRs through a GUI.
 
 ### Cluster List
 
-모든 네임스페이스의 AerospikeCluster를 카드 형식으로 표시합니다. 각 카드에 Phase, 노드 수, 이미지, 생성 시간이 표시됩니다.
+Displays all AerospikeClusters across all namespaces as cards. Each card shows Phase, node count, image, and creation time.
 
 ### Create Cluster Wizard
 
-**Scratch Mode** (9단계) 또는 **Template Mode** (3단계)로 클러스터를 생성합니다:
+Create clusters in **Scratch Mode** (9 steps) or **Template Mode** (3 steps):
 
-1. **Creation Mode** — Scratch 또는 Template 선택
-2. **Basic** — 이름, 네임스페이스, 이미지, 노드 수
-3. **Namespace & Storage** — Aerospike 네임스페이스 및 볼륨 구성
+1. **Creation Mode** — Select Scratch or Template
+2. **Basic** — Name, namespace, image, node count
+3. **Namespace & Storage** — Aerospike namespace and volume configuration
 4. **Monitoring & Options** — Prometheus, Dynamic Config, NetworkPolicy, Seeds Finder LB
 5. **Resources** — CPU/Memory requests/limits
-6. **Security & ACL** — 역할 및 사용자 구성
-7. **Rolling Update** — 배치 크기, PDB, Max Unavailable
-8. **Rack Config** — 랙별 zone/region 설정, rack revision (랙 단위 롤링 리스타트 트리거), per-rack storage overrides (다른 StorageClass/크기), per-rack tolerations/affinity/nodeSelector overrides
+6. **Security & ACL** — Role and user configuration
+7. **Rolling Update** — Batch size, PDB, Max Unavailable
+8. **Rack Config** — Per-rack zone/region settings, rack revision (triggers per-rack rolling restart), per-rack storage overrides (different StorageClass/size), per-rack tolerations/affinity/nodeSelector overrides
 9. **Advanced** — Node selector, tolerations, bandwidth, readiness gate, pod metadata (labels/annotations), headless service metadata (annotations/labels), per-pod service metadata (annotations/labels)
-10. **Review** — 전체 설정 확인 및 배포
+10. **Review** — Review all settings and deploy
 
 ### Cluster Detail
 
-클러스터 선택 시 다음 정보와 작업이 제공됩니다:
+Selecting a cluster provides the following information and actions:
 
-- **Overview** — Phase, Health, Conditions, Pod 목록
-- **Events Timeline** — 11개 카테고리별 필터링 가능한 K8s 이벤트, JSON/CSV 내보내기 지원
-- **Config Drift Detection** — spec vs appliedSpec 비교, Fields/Side-by-side diff 뷰, Pod별 config hash 그룹핑, Force Reconcile 버튼
-- **Reconciliation Health** — 서킷 브레이커 상태, 실패 횟수, 백오프 타이머
-- **PVC / Storage Status** — PersistentVolumeClaim 상태 표시 (Bound/Pending/Lost, 용량, StorageClass)
-- **Pod Logs** — 개별 Pod 로그 조회
-- **JSON Export / Import** — CR을 클린 JSON으로 내보내기 (Copy CR), JSON 파일로부터 클러스터 가져오기
-- **Operations** — Scale, Edit, Warm Restart, Pod Restart, Pause/Resume, Delete, HPA 관리, Template Resync
+- **Overview** — Phase, Health, Conditions, Pod list
+- **Events Timeline** — K8s events with filtering by 11 categories, JSON/CSV export support
+- **Config Drift Detection** — spec vs appliedSpec comparison, Fields/Side-by-side diff view, per-pod config hash grouping, Force Reconcile button
+- **Reconciliation Health** — Circuit breaker status, failure count, backoff timer
+- **PVC / Storage Status** — PersistentVolumeClaim status display (Bound/Pending/Lost, capacity, StorageClass)
+- **Pod Logs** — View individual Pod logs
+- **JSON Export / Import** — Export CR as clean JSON (Copy CR), import cluster from JSON file
+- **Operations** — Scale, Edit, Warm Restart, Pod Restart, Pause/Resume, Delete, Manage HPA, Template Resync
 
 ### Template Management
 
-**K8s Templates** 페이지에서 cluster-scoped `AerospikeClusterTemplate` 리소스의 전체 라이프사이클을 관리합니다.
+The **K8s Templates** page manages the full lifecycle of cluster-scoped `AerospikeClusterTemplate` resources.
 
 #### Creating Templates
 
-**+ Create Template** 버튼으로 새 템플릿을 생성합니다. 마법사에서 다음 항목을 설정할 수 있습니다:
+Click **+ Create Template** to create a new template. Configure the following in the wizard:
 
-- **Basic** — 템플릿 이름, 기본 Aerospike 이미지, 기본 클러스터 크기
-- **Resources** — CPU/Memory requests 및 limits
-- **Storage** — 스토리지 클래스, 볼륨 크기, 로컬 PV 옵션
-- **Scheduling** — Pod 스케줄링 제약 조건 (아래 참조)
-- **Monitoring** — Prometheus exporter 사이드카, ServiceMonitor, PrometheusRule
-- **Network** — 네트워크 접근 정책 (accessType, fabricType)
-- **Aerospike Config** — 서비스 설정, 네임스페이스 기본값
+- **Basic** — Template name, default Aerospike image, default cluster size
+- **Resources** — CPU/Memory requests and limits
+- **Storage** — Storage class, volume size, local PV options
+- **Scheduling** — Pod scheduling constraints (see below)
+- **Monitoring** — Prometheus exporter sidecar, ServiceMonitor, PrometheusRule
+- **Network** — Network access policy (accessType, fabricType)
+- **Aerospike Config** — Service settings, namespace defaults
 
 #### Viewing Templates
 
-템플릿 목록 페이지에서 각 템플릿 카드에 참조 클러스터 수(`usedBy` count)가 표시됩니다. 카드를 클릭하면 상세 페이지에서 전체 설정과 해당 템플릿을 참조하는 클러스터 목록을 확인할 수 있습니다.
+On the template list page, the reference cluster count (`usedBy` count) is displayed on each template card. Click a card to view the full configuration and the list of clusters referencing that template on the detail page.
 
 #### Editing Templates (Patch/Update)
 
-템플릿 상세 페이지에서 **Edit** 버튼으로 편집 다이얼로그를 열 수 있습니다. RBAC 수정을 통해 `AerospikeClusterTemplate` 리소스에 대한 `patch` 및 `update` 권한이 UI 서비스 어카운트에 부여되어, UI에서 직접 템플릿을 수정할 수 있습니다.
+Click the **Edit** button on the template detail page to open the Edit dialog. The RBAC configuration grants `patch` and `update` permissions on `AerospikeClusterTemplate` resources to the UI service account, so templates can be edited directly from the UI.
 
-편집 가능한 필드:
-- 기본 이미지 및 클러스터 크기
-- 리소스 requests/limits
-- 스토리지 설정
-- 스케줄링 설정
-- 모니터링 설정
-- 네트워크 정책
-- Aerospike 설정
+Editable fields:
+- Default image and cluster size
+- Resource requests/limits
+- Storage configuration
+- Scheduling configuration
+- Monitoring configuration
+- Network policy
+- Aerospike configuration
 
 #### Deleting Templates
 
-참조 클러스터가 없는 템플릿만 삭제할 수 있습니다. 클러스터가 아직 참조 중인 경우, 먼저 해당 클러스터의 `templateRef`를 제거하거나 다른 템플릿으로 변경해야 합니다.
+Only templates with no referencing clusters can be deleted. If clusters are still referencing a template, you must first remove or change their `templateRef` before deletion.
 
 #### Template Scheduling Configuration
 
-템플릿의 `scheduling` 섹션에서 다음 스케줄링 제약 조건을 설정할 수 있습니다:
+The `scheduling` section of a template supports the following scheduling constraints:
 
 | Field | Description |
 |-------|-------------|
-| `podAntiAffinityLevel` | Pod anti-affinity 수준: `none`, `preferred`, `required`. `required`이면 노드당 하나의 Aerospike Pod만 배치됩니다. |
-| `tolerations` | Kubernetes tolerations 배열. 테인트가 있는 노드에서도 Pod를 스케줄링할 수 있습니다. |
-| `nodeAffinity` | 노드 라벨 기반 스케줄링 제약 조건. 특정 노드 풀에 Pod를 배치합니다. |
-| `topologySpreadConstraints` | 토폴로지 도메인(zone, region 등)에 걸쳐 Pod를 균등 분배합니다. |
+| `podAntiAffinityLevel` | Pod anti-affinity level: `none`, `preferred`, `required`. When `required`, only one Aerospike Pod is placed per node. |
+| `tolerations` | Array of Kubernetes tolerations. Allows Pods to be scheduled on tainted nodes. |
+| `nodeAffinity` | Scheduling constraints based on node labels. Places Pods on specific node pools. |
+| `topologySpreadConstraints` | Distributes Pods evenly across topology domains (zone, region, etc.). |
 
 #### Template Topology Spread Constraints
 
-템플릿 생성/편집 마법사의 **Scheduling** 단계에서 `topologySpreadConstraints`를 설정하여 Pod를 토폴로지 도메인에 걸쳐 균등하게 분배할 수 있습니다. 각 제약 조건에 대해 다음 필드를 UI에서 구성합니다:
+In the **Scheduling** step of the template creation/edit wizard, configure `topologySpreadConstraints` to spread Pods evenly across topology domains. For each constraint, configure the following fields in the UI:
 
 | Field | Description |
 |-------|-------------|
-| **maxSkew** | 토폴로지 도메인 간 허용되는 최대 Pod 수 차이. 값이 작을수록 더 균등하게 분배됩니다. |
-| **topologyKey** | Pod를 분배할 기준이 되는 노드 라벨 키. 일반적인 값: `topology.kubernetes.io/zone` (가용 영역별), `kubernetes.io/hostname` (노드별). |
-| **whenUnsatisfiable** | 제약 조건을 만족할 수 없을 때의 동작: `DoNotSchedule` (스케줄링 거부) 또는 `ScheduleAnyway` (최선의 노력으로 스케줄링). |
-| **labelSelector** | 분배 대상 Pod를 선택하는 라벨 셀렉터. `matchLabels` 또는 `matchExpressions`로 지정합니다. |
+| **maxSkew** | Maximum allowed difference in Pod count between topology domains. A smaller value produces more even distribution. |
+| **topologyKey** | The node label key used as the basis for Pod distribution. Common values: `topology.kubernetes.io/zone` (by availability zone), `kubernetes.io/hostname` (by node). |
+| **whenUnsatisfiable** | Behavior when the constraint cannot be satisfied: `DoNotSchedule` (reject scheduling) or `ScheduleAnyway` (best-effort scheduling). |
+| **labelSelector** | Label selector to identify Pods subject to distribution. Specify with `matchLabels` or `matchExpressions`. |
 
-이 설정은 해당 템플릿을 참조하는 모든 클러스터에 기본값으로 적용됩니다. 클러스터별로 `spec.overrides.scheduling.topologySpreadConstraints`를 사용하여 재정의할 수도 있습니다. 자세한 내용은 [Advanced Configuration — topologySpreadConstraints](../configuration/advanced-configuration.md#topologyspreadconstraints)를 참조하세요.
+These settings apply as defaults to all clusters referencing this template. Individual clusters can override using `spec.overrides.scheduling.topologySpreadConstraints`. See [Advanced Configuration — topologySpreadConstraints](../configuration/advanced-configuration.md#topologyspreadconstraints) for details.
 
 #### Template Resync
 
-템플릿을 수정한 후, 이를 참조하는 기존 클러스터는 자동으로 업데이트되지 않습니다. 클러스터 상세 페이지의 **Template Resync** 버튼을 클릭하면 최신 템플릿 설정을 클러스터에 다시 적용합니다. 내부적으로 `acko.io/resync-template=true` 어노테이션을 추가하여 오퍼레이터가 템플릿을 다시 가져오도록 트리거합니다.
+After modifying a template, existing clusters that reference it are not automatically updated. Click the **Template Resync** button on the cluster detail page to re-apply the latest template configuration to the cluster. Internally, this adds the `acko.io/resync-template=true` annotation to trigger the operator to re-fetch the template.
 
 ---
 
@@ -521,39 +521,39 @@ HPA 관리 기능을 사용하려면 UI의 ClusterRole에 `autoscaling` API 그�
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `ui.enabled` | UI 활성화 | `false` |
-| `ui.replicaCount` | UI 레플리카 수 | `1` |
-| `ui.image.repository` | UI 컨테이너 이미지 | `ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager` |
-| `ui.image.tag` | 이미지 태그 | `latest` |
-| `ui.service.type` | 서비스 타입 | `ClusterIP` |
-| `ui.service.frontendPort` | 프론트엔드 (Next.js) 포트 | `3000` |
-| `ui.service.backendPort` | 백엔드 (FastAPI) 포트 | `8000` |
-| `ui.service.annotations` | 서비스 어노테이션 (클라우드 LB 설정 등) | `{}` |
-| `ui.ingress.enabled` | Ingress 생성 | `false` |
-| `ui.persistence.enabled` | PostgreSQL PVC 사용 | `true` |
-| `ui.persistence.size` | PVC 스토리지 크기 | `1Gi` |
-| `ui.k8s.enabled` | K8s 클러스터 관리 기능 | `true` |
-| `ui.rbac.create` | ClusterRole/Binding 자동 생성 (AerospikeCluster, Template, HPA 관리 권한 포함) | `true` |
-| `ui.resources.requests.cpu` | UI 컨테이너 CPU 요청 | `100m` |
-| `ui.resources.requests.memory` | UI 컨테이너 메모리 요청 | `256Mi` |
-| `ui.resources.limits.cpu` | UI 컨테이너 CPU 제한 | `200m` |
-| `ui.resources.limits.memory` | UI 컨테이너 메모리 제한 | `512Mi` |
-| `ui.postgresql.enabled` | 내장 PostgreSQL 사이드카 배포 | `true` |
-| `ui.env.databaseUrl` | 외부 PostgreSQL URL (`postgresql.enabled=false` 일 때) | `""` |
-| `ui.env.corsOrigins` | 백엔드 CORS origins (빈 문자열 = CORS 비활성화; 프론트엔드가 Next.js rewrites로 프록시) | `""` |
-| `ui.env.logLevel` | 로그 레벨 (`DEBUG`, `INFO`, `WARNING`, `ERROR`) | `"INFO"` |
-| `ui.env.logFormat` | 로그 포맷: `"text"` (사람 친화적), `"json"` (구조화 로깅) | `"text"` |
-| `ui.env.dbPoolSize` | DB 커넥션 풀 크기 | `5` |
-| `ui.env.dbPoolOverflow` | 풀 크기 초과 시 최대 추가 커넥션 수 | `10` |
-| `ui.env.dbPoolTimeout` | 풀에서 커넥션 획득 타임아웃 (초) | `30` |
-| `ui.env.k8sApiTimeout` | Kubernetes API 요청 타임아웃 (초) | `30` |
-| `ui.extraEnv` | UI 컨테이너에 추가할 환경 변수 목록 | `[]` |
-| `ui.metrics.serviceMonitor.enabled` | UI 백엔드 메트릭용 ServiceMonitor 생성 | `false` |
-| `ui.metrics.serviceMonitor.interval` | 메트릭 스크랩 주기 | `"30s"` |
-| `ui.metrics.serviceMonitor.scrapeTimeout` | 스크랩 타임아웃 | `"10s"` |
-| `ui.metrics.serviceMonitor.labels` | ServiceMonitor 추가 라벨 | `{}` |
+| `ui.enabled` | Enable the UI | `false` |
+| `ui.replicaCount` | UI replica count | `1` |
+| `ui.image.repository` | UI container image | `ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager` |
+| `ui.image.tag` | Image tag | `latest` |
+| `ui.service.type` | Service type | `ClusterIP` |
+| `ui.service.frontendPort` | Frontend (Next.js) port | `3000` |
+| `ui.service.backendPort` | Backend (FastAPI) port | `8000` |
+| `ui.service.annotations` | Service annotations (cloud LB configuration, etc.) | `{}` |
+| `ui.ingress.enabled` | Create Ingress | `false` |
+| `ui.persistence.enabled` | Use PostgreSQL PVC | `true` |
+| `ui.persistence.size` | PVC storage size | `1Gi` |
+| `ui.k8s.enabled` | K8s cluster management feature | `true` |
+| `ui.rbac.create` | Auto-create ClusterRole/Binding (includes permissions for AerospikeCluster, Template, and HPA management) | `true` |
+| `ui.resources.requests.cpu` | UI container CPU request | `100m` |
+| `ui.resources.requests.memory` | UI container memory request | `256Mi` |
+| `ui.resources.limits.cpu` | UI container CPU limit | `200m` |
+| `ui.resources.limits.memory` | UI container memory limit | `512Mi` |
+| `ui.postgresql.enabled` | Deploy embedded PostgreSQL sidecar | `true` |
+| `ui.env.databaseUrl` | External PostgreSQL URL (when `postgresql.enabled=false`) | `""` |
+| `ui.env.corsOrigins` | Backend CORS origins (empty string = disable CORS; frontend proxies via Next.js rewrites) | `""` |
+| `ui.env.logLevel` | Log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) | `"INFO"` |
+| `ui.env.logFormat` | Log format: `"text"` (human-readable), `"json"` (structured logging) | `"text"` |
+| `ui.env.dbPoolSize` | DB connection pool size | `5` |
+| `ui.env.dbPoolOverflow` | Maximum additional connections when pool is full | `10` |
+| `ui.env.dbPoolTimeout` | Timeout for acquiring a connection from the pool (seconds) | `30` |
+| `ui.env.k8sApiTimeout` | Kubernetes API request timeout (seconds) | `30` |
+| `ui.extraEnv` | Additional environment variables for the UI container | `[]` |
+| `ui.metrics.serviceMonitor.enabled` | Create ServiceMonitor for UI backend metrics | `false` |
+| `ui.metrics.serviceMonitor.interval` | Metrics scrape interval | `"30s"` |
+| `ui.metrics.serviceMonitor.scrapeTimeout` | Scrape timeout | `"10s"` |
+| `ui.metrics.serviceMonitor.labels` | Additional ServiceMonitor labels | `{}` |
 
-전체 옵션 확인:
+View all options:
 
 ```bash
 helm show values oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator | grep -A 500 "^ui:"
@@ -563,17 +563,17 @@ helm show values oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubern
 
 ## UI Environment Variables
 
-Helm 값으로 UI 백엔드의 환경 변수를 조정할 수 있습니다. 이 설정들은 `ui.env.*`로 노출됩니다.
+You can tune the UI backend's environment variables via Helm values. These settings are exposed under `ui.env.*`.
 
 ### Database Connection Pool
 
-내장 PostgreSQL 사이드카 또는 외부 PostgreSQL에 대한 커넥션 풀을 튜닝합니다:
+Tune the connection pool for the embedded PostgreSQL sidecar or an external PostgreSQL instance:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `ui.env.dbPoolSize` | `5` | 기본 커넥션 풀 크기. 동시 요청 수에 맞춰 조정합니다. |
-| `ui.env.dbPoolOverflow` | `10` | 풀이 가득 찼을 때 추가로 생성 가능한 최대 커넥션 수. 순간 트래픽 급증 시 유용합니다. |
-| `ui.env.dbPoolTimeout` | `30` | 풀에서 유휴 커넥션을 기다리는 최대 시간(초). 타임아웃 초과 시 에러를 반환합니다. |
+| `ui.env.dbPoolSize` | `5` | Base connection pool size. Adjust to match the number of concurrent requests. |
+| `ui.env.dbPoolOverflow` | `10` | Maximum additional connections that can be created when the pool is full. Useful for handling traffic spikes. |
+| `ui.env.dbPoolTimeout` | `30` | Maximum time (seconds) to wait for an idle connection from the pool. Returns an error if the timeout is exceeded. |
 
 ```bash
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
@@ -585,26 +585,26 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kuber
 ```
 
 :::tip
-동시 사용자가 많은 환경에서는 `dbPoolSize`를 늘려주세요. 일반적으로 `dbPoolSize`는 예상 동시 요청 수와 비슷하게, `dbPoolOverflow`는 그 2배 정도로 설정합니다.
+In environments with many concurrent users, increase `dbPoolSize`. A good rule of thumb is to set `dbPoolSize` close to the expected number of concurrent requests and `dbPoolOverflow` to roughly double that.
 :::
 
 ### Kubernetes API Timeout
 
-UI가 Kubernetes API 서버에 요청할 때의 타임아웃을 설정합니다:
+Configure the timeout for UI requests to the Kubernetes API server:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `ui.env.k8sApiTimeout` | `30` | K8s API 요청 타임아웃(초). 대규모 클러스터에서 리스트 조회가 느린 경우 늘려주세요. |
+| `ui.env.k8sApiTimeout` | `30` | K8s API request timeout (seconds). Increase this if list queries are slow on large clusters. |
 
 ### Logging
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `ui.env.logLevel` | `"INFO"` | 로그 레벨: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
-| `ui.env.logFormat` | `"text"` | `"text"`: 사람이 읽기 쉬운 형식, `"json"`: 구조화된 JSON 형식 (로그 수집 파이프라인과 연동 시 권장) |
+| `ui.env.logLevel` | `"INFO"` | Log level: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `ui.env.logFormat` | `"text"` | `"text"`: human-readable format, `"json"`: structured JSON format (recommended when integrating with a log collection pipeline) |
 
 ```bash
-# JSON 구조화 로깅 활성화 (Loki, Elasticsearch 등과 연동 시 권장)
+# Enable structured JSON logging (recommended when integrating with Loki, Elasticsearch, etc.)
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
   --namespace aerospike-operator --create-namespace \
   --set ui.enabled=true \
@@ -616,10 +616,10 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kuber
 
 ## UI Metrics & ServiceMonitor
 
-UI 백엔드는 `/metrics` 엔드포인트를 통해 Prometheus 메트릭을 노출합니다. Prometheus Operator를 사용하는 환경에서는 `ServiceMonitor`를 활성화하여 자동으로 메트릭을 수집할 수 있습니다.
+The UI backend exposes Prometheus metrics via the `/metrics` endpoint. In environments using the Prometheus Operator, you can enable a `ServiceMonitor` to collect metrics automatically.
 
 :::note
-ServiceMonitor는 Prometheus 기본 경로인 `/metrics`를 사용합니다. 별도의 `path` 설정은 필요하지 않습니다.
+The ServiceMonitor uses the default Prometheus path `/metrics`. No separate `path` configuration is required.
 :::
 
 ```bash
@@ -632,124 +632,14 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kuber
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `ui.metrics.serviceMonitor.enabled` | `false` | ServiceMonitor 리소스 생성 여부 |
-| `ui.metrics.serviceMonitor.interval` | `"30s"` | 메트릭 스크랩 주기 |
-| `ui.metrics.serviceMonitor.scrapeTimeout` | `"10s"` | 스크랩 타임아웃 |
-| `ui.metrics.serviceMonitor.labels` | `{}` | Prometheus 셀렉터 매칭을 위한 추가 라벨 |
+| `ui.metrics.serviceMonitor.enabled` | `false` | Whether to create the ServiceMonitor resource |
+| `ui.metrics.serviceMonitor.interval` | `"30s"` | Metrics scrape interval |
+| `ui.metrics.serviceMonitor.scrapeTimeout` | `"10s"` | Scrape timeout |
+| `ui.metrics.serviceMonitor.labels` | `{}` | Additional labels for matching the Prometheus selector |
 
 :::tip
-`labels.release=prometheus`는 Prometheus Operator의 `serviceMonitorSelector`와 일치해야 합니다. 다음 명령으로 확인하세요:
+`labels.release=prometheus` must match the Prometheus Operator's `serviceMonitorSelector`. Verify with:
 ```bash
 kubectl get prometheus -A -o jsonpath='{.items[*].spec.serviceMonitorSelector}'
 ```
 :::
-
----
-
-## Ingress (Production)
-
-```bash
-helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
-  --namespace aerospike-operator --create-namespace \
-  --set ui.enabled=true \
-  --set ui.ingress.enabled=true \
-  --set ui.ingress.className=nginx \
-  --set "ui.ingress.hosts[0].host=aerospike-admin.example.com" \
-  --set "ui.ingress.hosts[0].paths[0].path=/" \
-  --set "ui.ingress.hosts[0].paths[0].pathType=Prefix"
-```
-
----
-
-## Production Deployment Recommendations
-
-프로덕션 환경에서 UI를 안정적으로 운영하기 위한 권장 사항입니다.
-
-### External PostgreSQL
-
-내장 PostgreSQL 사이드카는 단일 인스턴스로만 동작하며 HPA와 호환되지 않습니다. 프로덕션에서는 관리형 PostgreSQL(AWS RDS, GCP Cloud SQL, Azure Database for PostgreSQL 등)을 사용하세요.
-
-```bash
-helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
-  --namespace aerospike-operator --create-namespace \
-  --set ui.enabled=true \
-  --set ui.postgresql.enabled=false \
-  --set ui.env.databaseUrl="postgresql://user:pass@rds-host:5432/aerospike_manager" \
-  --set ui.env.dbPoolSize=10 \
-  --set ui.env.dbPoolOverflow=20
-```
-
-:::warning
-외부 PostgreSQL 사용 시 `ui.postgresql.enabled=false`로 설정하지 않으면 사이드카와 외부 DB가 동시에 생성됩니다.
-:::
-
-:::tip Database credentials in production
-프로덕션 환경에서는 `--set ui.env.databaseUrl`에 평문 비밀번호를 넣는 대신, Kubernetes Secret을 사용하여 데이터베이스 자격 증명을 안전하게 관리하세요. `ui.extraEnv`를 활용하여 Secret에서 환경 변수를 주입할 수 있습니다:
-```yaml
-ui:
-  extraEnv:
-    - name: DATABASE_URL
-      valueFrom:
-        secretKeyRef:
-          name: ui-db-credentials
-          key: database-url
-```
-:::
-
-### Monitoring
-
-오퍼레이터와 UI 모두에 모니터링을 활성화하세요:
-
-```bash
-helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
-  --namespace aerospike-operator --create-namespace \
-  --set ui.enabled=true \
-  --set serviceMonitor.enabled=true \
-  --set serviceMonitor.additionalLabels.release=prometheus \
-  --set prometheusRule.enabled=true \
-  --set grafanaDashboard.enabled=true \
-  --set ui.metrics.serviceMonitor.enabled=true \
-  --set ui.metrics.serviceMonitor.labels.release=prometheus
-```
-
-### High Availability
-
-UI를 다중 레플리카로 운영하려면 반드시 외부 PostgreSQL을 사용해야 합니다:
-
-```bash
-helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
-  --namespace aerospike-operator --create-namespace \
-  --set ui.enabled=true \
-  --set ui.replicaCount=2 \
-  --set ui.postgresql.enabled=false \
-  --set ui.env.databaseUrl="postgresql://user:pass@rds-host:5432/aerospike_manager" \
-  --set ui.podDisruptionBudget.enabled=true \
-  --set ui.podDisruptionBudget.minAvailable=1
-```
-
-### Full Production Example
-
-```bash
-helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
-  --namespace aerospike-operator --create-namespace \
-  --set ui.enabled=true \
-  --set ui.replicaCount=2 \
-  --set ui.postgresql.enabled=false \
-  --set ui.env.databaseUrl="postgresql://user:pass@rds-host:5432/aerospike_manager" \
-  --set ui.env.dbPoolSize=10 \
-  --set ui.env.dbPoolOverflow=20 \
-  --set ui.env.logFormat=json \
-  --set ui.ingress.enabled=true \
-  --set ui.ingress.className=nginx \
-  --set "ui.ingress.hosts[0].host=aerospike-admin.example.com" \
-  --set "ui.ingress.hosts[0].paths[0].path=/" \
-  --set "ui.ingress.hosts[0].paths[0].pathType=Prefix" \
-  --set ui.podDisruptionBudget.enabled=true \
-  --set ui.podDisruptionBudget.minAvailable=1 \
-  --set ui.metrics.serviceMonitor.enabled=true \
-  --set ui.metrics.serviceMonitor.labels.release=prometheus \
-  --set serviceMonitor.enabled=true \
-  --set serviceMonitor.additionalLabels.release=prometheus \
-  --set prometheusRule.enabled=true \
-  --set grafanaDashboard.enabled=true
-```

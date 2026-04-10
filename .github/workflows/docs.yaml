@@ -1,5 +1,5 @@
 name: Deploy Docs to GitHub Pages
-# main push 시 Docusaurus 빌드 후 GitHub Pages에 배포
+# On push to main: build Docusaurus site and deploy to GitHub Pages
 
 on:
   push:

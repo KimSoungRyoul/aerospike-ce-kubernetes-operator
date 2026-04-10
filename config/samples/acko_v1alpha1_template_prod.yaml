@@ -6,11 +6,11 @@ metadata:
     app.kubernetes.io/profile: hard-rack
 spec:
   description: >-
-    프로덕션 환경 추천. 쿠버네티스 노드당 1개의 랙을 보장(required 안티어피니티)하고 로컬 PVC를 보장합니다.
-    최소 3개 이상의 멀티 랙 구성을 권장하며, 완전한 데이터 로컬리티와 장애 도메인 격리를 제공합니다.
+    Recommended for production. Guarantees one rack per Kubernetes node (required anti-affinity) with local PVC.
+    A minimum of 3 racks is recommended, providing full data locality and fault domain isolation.
 
   image: aerospike:ce-8.1.1.1   # Default image; clusters can override with spec.image
-  size: 3                         # Default cluster size; clusters can override with spec.size (로컬 테스트용; 프로덕션에서는 6 이상 권장)
+  size: 3                         # Default cluster size; clusters can override with spec.size (for local testing; use 6 or more in production)
 
   # Monitoring: Prometheus exporter sidecar with ServiceMonitor
   monitoring:

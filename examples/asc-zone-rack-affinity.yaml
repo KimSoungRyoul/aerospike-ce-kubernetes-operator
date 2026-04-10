@@ -1,20 +1,20 @@
-# Scenario E: Zone 기반 Rack Affinity
+# Scenario E: Zone-based Rack Affinity
 #
-# rack의 zone 필드가 노드의 topology.kubernetes.io/zone 라벨과 매칭되어
-# 해당 zone에 속한 노드에만 파드가 스케줄링되는지 검증.
+# Verifies that a rack's zone field matches the node's topology.kubernetes.io/zone label,
+# so pods are scheduled only on nodes belonging to the specified zone.
 #
-# 사전 조건:
-#   - soft-rack-test 템플릿
-#   - Kind 클러스터 노드에 zone 라벨 설정:
+# Preconditions:
+#   - soft-rack-test template
+#   - Kind cluster nodes labeled with zones:
 #       kind-worker:  zone-a
 #       kind-worker2: zone-b
 #       kind-worker3: zone-c
 #
-# 기대 결과:
-#   - 3파드 모두 Running
-#   - rack 1 -> zone-a 노드, rack 2 -> zone-b 노드, rack 3 -> zone-c 노드
+# Expected Results:
+#   - All 3 pods Running
+#   - rack 1 -> zone-a node, rack 2 -> zone-b node, rack 3 -> zone-c node
 #
-# 검증:
+# Verification:
 #   for pod in $(kubectl get pods -l app.kubernetes.io/instance=test-zone-racks -o jsonpath='{.items[*].metadata.name}'); do
 #     node=$(kubectl get pod $pod -o jsonpath='{.spec.nodeName}')
 #     zone=$(kubectl get node $node -o jsonpath='{.metadata.labels.topology\.kubernetes\.io/zone}')

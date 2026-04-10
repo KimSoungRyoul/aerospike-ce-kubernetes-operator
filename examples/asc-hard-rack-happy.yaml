@@ -1,17 +1,17 @@
 # Scenario C: HardRack Happy Path
 #
-# 템플릿의 required anti-affinity가 노드당 정확히 1파드만 배치하는지 검증.
-# nodeName으로 각 rack을 다른 노드에 고정하여 1:1 매핑 확인.
+# Verifies that the template's required anti-affinity places exactly 1 pod per node.
+# Each rack is pinned to a different node via nodeName to confirm 1:1 mapping.
 #
-# 사전 조건:
-#   - hard-rack-test 템플릿 (podAntiAffinityLevel: required, maxRacksPerNode: 1)
-#   - Kind 클러스터: kind-worker, kind-worker2, kind-worker3
+# Preconditions:
+#   - hard-rack-test template (podAntiAffinityLevel: required, maxRacksPerNode: 1)
+#   - Kind cluster: kind-worker, kind-worker2, kind-worker3
 #
-# 기대 결과:
-#   - 3파드 모두 Running
+# Expected Results:
+#   - All 3 pods Running
 #   - rack 1 -> kind-worker, rack 2 -> kind-worker2, rack 3 -> kind-worker3
 #
-# 검증:
+# Verification:
 #   kubectl get pods -l app.kubernetes.io/instance=test-hard-happy -o wide
 #   kubectl get pods -l app.kubernetes.io/instance=test-hard-happy \
 #     -o jsonpath='{range .items[*]}{.metadata.name} -> {.spec.nodeName}{"\n"}{end}'

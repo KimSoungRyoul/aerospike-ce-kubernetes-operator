@@ -1,13 +1,13 @@
-# HardRack 테스트용 템플릿 (Kind 환경 경량화)
+# HardRack test template (lightweight for Kind environment)
 #
 # podAntiAffinityLevel: required
 #   -> RequiredDuringSchedulingIgnoredDuringExecution
-#   -> 동일 노드 공존 불가, 노드당 최대 1파드 강제
+#   -> Colocation on the same node is prohibited; maximum 1 pod per node enforced
 #
-# maxRacksPerNode: 1 — 노드당 1 rack 보장 (required anti-affinity와 조합)
+# maxRacksPerNode: 1 — guarantees 1 rack per node (combined with required anti-affinity)
 #
-# 프로덕션 hard-rack 템플릿(config/samples/acko_v1alpha1_template_prod.yaml) 대비
-# CPU/Memory/Storage를 Kind 로컬 환경에 맞게 줄임.
+# Compared to the production hard-rack template (config/samples/acko_v1alpha1_template_prod.yaml),
+# CPU/Memory/Storage are reduced to fit the Kind local environment.
 ---
 apiVersion: acko.io/v1alpha1
 kind: AerospikeClusterTemplate

@@ -141,8 +141,8 @@ type TemplateRackConfig struct {
 
 // AerospikeClusterTemplateSpec defines the reusable configuration profile.
 type AerospikeClusterTemplateSpec struct {
-	// Description은 이 템플릿의 용도와 권장 환경을 설명합니다.
-	// 예: "개발 환경용 단일 노드 클러스터" 또는 "프로덕션 멀티 랙 클러스터"
+	// Description describes the intended purpose and recommended environment for this template.
+	// E.g., "Single-node cluster for development" or "Production multi-rack cluster"
 	// +kubebuilder:validation:MaxLength=500
 	// +optional
 	Description string `json:"description,omitempty"`
