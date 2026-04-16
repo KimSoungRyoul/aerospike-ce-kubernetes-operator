@@ -7,6 +7,13 @@ title: Helm Values Reference
 
 This page documents all configurable values for the `aerospike-ce-kubernetes-operator` Helm chart.
 
+## Aerospike Images
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `aerospikeImages.aerospike` | string | `aerospike:ce-8.1.1.1` | Default Aerospike CE server image. Used by default templates and UI wizard. Override for air-gapped environments. |
+| `aerospikeImages.exporter` | string | `aerospike/aerospike-prometheus-exporter:1.16.1` | Default Prometheus exporter sidecar image. |
+
 ## CRD Management
 
 | Key | Type | Default | Description |
@@ -20,7 +27,7 @@ This page documents all configurable values for the `aerospike-ce-kubernetes-ope
 |-----|------|---------|-------------|
 | `replicaCount` | int | `1` | Number of operator replicas. Typically 1 is sufficient as leader election handles HA. |
 | `image.repository` | string | `ghcr.io/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator` | Operator container image repository. |
-| `image.tag` | string | `""` | Container image tag. Defaults to `Chart.appVersion` when empty. |
+| `image.tag` | string | `"latest"` | Container image tag. |
 | `image.pullPolicy` | string | `IfNotPresent` | Image pull policy: `Always`, `IfNotPresent`, or `Never`. |
 | `imagePullSecrets` | list | `[]` | Image pull secrets for private registries. |
 | `nameOverride` | string | `""` | Override the chart name used in resource names. |
@@ -218,7 +225,7 @@ The embedded PostgreSQL sidecar includes a **startup probe** that runs `pg_isrea
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `ui.persistence.enabled` | bool | `true` | Enable persistent storage for the embedded PostgreSQL database. |
-| `ui.persistence.storageClassName` | string | `""` | Storage class name (empty = default). |
+| `ui.persistence.storageClassName` | string | `null` | Storage class name. `null` = use cluster default StorageClass, `""` = disable dynamic provisioning, `"name"` = use specified StorageClass. |
 | `ui.persistence.accessMode` | string | `ReadWriteOnce` | Access mode. |
 | `ui.persistence.size` | string | `1Gi` | Volume size. |
 
@@ -236,6 +243,7 @@ The UI container includes a **preStop lifecycle hook** (`sleep 5`) to allow in-f
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `ui.k8s.enabled` | bool | `true` | Enable Kubernetes cluster management features (Create Cluster). |
+| `ui.k8s.verifySsl` | bool | `true` | Verify TLS certificates when connecting to the Kubernetes API server. Set to `false` for clusters with self-signed or non-standard CA certificates. |
 
 ### UI Resources
 
@@ -315,6 +323,14 @@ The UI ServiceMonitor scrapes the backend metrics endpoint at `/api/metrics`. Th
 | `ui.podAnnotations` | object | `{}` | Additional annotations for UI pods. |
 | `ui.podLabels` | object | `{}` | Additional labels for UI pods. |
 | `ui.terminationGracePeriodSeconds` | int | `45` | Termination grace period in seconds. |
+
+### UI Host Network
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `ui.hostNetwork` | bool | `false` | Run the UI pod in the host network namespace. Useful for local/dev clusters (e.g., Kind) that need to reach corporate Aerospike hosts via the host's VPN/DNS resolver. Do not enable in production. |
+| `ui.dnsPolicy` | string | `""` | Override the pod dnsPolicy. When `hostNetwork` is `true` and this is empty, defaults to `ClusterFirstWithHostNet`. |
+| `ui.dnsConfig` | object | `{}` | Additional Pod DNS configuration (searches, nameservers, options). Useful for adding corporate search domains. |
 
 ### UI Aerospike Ports
 

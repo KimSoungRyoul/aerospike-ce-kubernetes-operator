@@ -66,130 +66,51 @@ helm show values oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubern
 ```
 
 </TabItem>
-<TabItem value="helm-gitops" label="Helm + GitOps (ArgoCD / Flux)">
-
-For GitOps environments, install CRDs separately so they can be managed independently
-of the operator lifecycle.
-
-**Step 1: Install CRDs once per cluster**
-
-```bash
-helm install aerospike-ce-kubernetes-operator-crds oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator-crds \
-  --version 0.1.0
-```
-
-CRDs carry the `helm.sh/resource-policy: keep` annotation — they are **not** deleted
-on `helm uninstall`, protecting your cluster data.
-
-**Step 2: Install the operator (skip CRD installation)**
-
-```bash
-helm install aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
-  --version 0.1.0 \
-  --set crds.install=false \
-  -n aerospike-operator --create-namespace
-```
-
-**ArgoCD example (sync-wave)**
-
-```yaml
-# Application 1: CRDs — never auto-prune
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: aerospike-ce-kubernetes-operator-crds
-  annotations:
-    argocd.argoproj.io/sync-options: Replace=true
-spec:
-  source:
-    repoURL: ghcr.io/aerospike-ce-ecosystem/charts
-    chart: aerospike-ce-kubernetes-operator-crds
-    targetRevision: "0.1.0"
-  syncPolicy:
-    automated:
-      prune: false
-      selfHeal: true
----
-# Application 2: Operator
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: aerospike-ce-kubernetes-operator
-spec:
-  source:
-    repoURL: ghcr.io/aerospike-ce-ecosystem/charts
-    chart: aerospike-ce-kubernetes-operator
-    targetRevision: "0.1.0"
-    helm:
-      values: |
-        crds:
-          install: false
-  destination:
-    namespace: aerospike-operator
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
-```
-
-**Flux example**
-
-```yaml
-# HelmRepository (OCI) — shared by both HelmReleases
-apiVersion: source.toolkit.fluxcd.io/v1
-kind: HelmRepository
-metadata:
-  name: aerospike-ce-kubernetes-operator
-  namespace: flux-system
-spec:
-  type: oci
-  url: oci://ghcr.io/aerospike-ce-ecosystem/charts
----
-apiVersion: helm.toolkit.fluxcd.io/v2
-kind: HelmRelease
-metadata:
-  name: aerospike-ce-kubernetes-operator-crds
-  namespace: flux-system
-spec:
-  chart:
-    spec:
-      chart: aerospike-ce-kubernetes-operator-crds
-      version: "0.1.0"
-      sourceRef:
-        kind: HelmRepository
-        name: aerospike-ce-kubernetes-operator
-  install:
-    crds: CreateReplace
-  upgrade:
-    crds: CreateReplace
----
-apiVersion: helm.toolkit.fluxcd.io/v2
-kind: HelmRelease
-metadata:
-  name: aerospike-ce-kubernetes-operator
-  namespace: flux-system
-spec:
-  dependsOn:
-    - name: aerospike-ce-kubernetes-operator-crds
-  targetNamespace: aerospike-operator
-  chart:
-    spec:
-      chart: aerospike-ce-kubernetes-operator
-      version: "0.1.0"
-      sourceRef:
-        kind: HelmRepository
-        name: aerospike-ce-kubernetes-operator
-  values:
-    crds:
-      install: false
-```
-
-</TabItem>
 <TabItem value="local-build" label="Local Build">
 
 For developers and contributors building from source.
+
+#### Quick Start with `make run-local`
+
+The easiest way to get a full local development stack running. This single command handles everything — Kind cluster creation, image builds, cert-manager installation, and Helm deployment (operator + Cluster Manager UI).
+
+```bash
+git clone --recursive https://github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator.git
+cd aerospike-ce-kubernetes-operator
+make run-local
+```
+
+`make run-local` performs the following steps automatically:
+1. Refresh Helm sub-chart dependency (CRD bundle)
+2. Create a fresh Kind cluster (`kind-config.yaml` — 3 worker nodes with zone labels)
+3. Build operator image
+4. Build Cluster Manager image
+5. Load both images into the Kind cluster
+6. Install cert-manager
+7. Deploy operator + UI via `helm upgrade -i` with `ui.enabled=true`
+
+Once complete, access the UI:
+
+```bash
+kubectl port-forward -n aerospike-operator svc/aerospike-ce-kubernetes-operator-ui 3000:3000
+```
+
+Other useful local development commands:
+
+| Command | Description |
+|---------|-------------|
+| `make stop-local` | Delete the Kind cluster |
+| `make reload-cluster-manager` | Rebuild images, reload into Kind, and redeploy (for iterative development) |
+
+:::info Prerequisites
+- [Kind](https://kind.sigs.k8s.io/) installed
+- [Helm](https://helm.sh/) v3 installed
+- [Podman](https://podman.io/) installed (or set `CONTAINER_TOOL=docker`)
+:::
+
+#### Manual Deployment (Custom Registry)
+
+If you need to push images to a custom registry instead of loading into Kind:
 
 ```bash
 git clone https://github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator.git
@@ -374,39 +295,6 @@ helm install aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosyst
   --set grafanaDashboard.folder=Aerospike
 ```
 
-## Cluster Manager UI (Optional)
-
-[Aerospike Cluster Manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager) is a web-based GUI for managing Aerospike CE clusters — record browsing, query building, index management, K8s cluster lifecycle, and more.
-
-### Relationship Between Operator and Cluster Manager
-
-The Aerospike CE Kubernetes Operator and the Aerospike Cluster Manager are two separate components that work together:
-
-- **Operator** (`aerospike-ce-kubernetes-operator`): A Kubernetes controller that watches `AerospikeCluster` and `AerospikeClusterTemplate` custom resources and reconciles the desired state — creating StatefulSets, Services, ConfigMaps, and performing rolling updates, scaling, and rack management.
-- **Cluster Manager** (`aerospike-cluster-manager`): A web application (Next.js frontend + FastAPI backend) that provides a GUI for interacting with both Aerospike clusters (data operations, monitoring) and the Kubernetes API (cluster lifecycle via CRDs).
-
-When `ui.enabled=true` is set in the Helm chart, the Cluster Manager is deployed as a separate Deployment in the same namespace as the operator. It communicates with:
-1. **Aerospike clusters** directly via the Aerospike wire protocol for data operations (record browsing, AQL, index management, UDF management).
-2. **Kubernetes API** for cluster lifecycle operations (create, scale, edit, delete `AerospikeCluster` CRs), which the operator then reconciles.
-
-The operator functions independently of the Cluster Manager — you can manage clusters entirely via `kubectl` and YAML manifests. The Cluster Manager simply provides a convenient GUI layer on top.
-
-### Enabling the Cluster Manager
-
-```bash
-helm install aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
-  -n aerospike-operator --create-namespace \
-  --set ui.enabled=true
-```
-
-Access via port-forward:
-
-```bash
-kubectl -n aerospike-operator port-forward svc/aerospike-ce-kubernetes-operator-ui 3000:3000
-```
-
-See the [Cluster Manager UI](./cluster-manager-ui) guide for full configuration options, Ingress setup, security, and feature documentation.
-
 ## Verify Installation
 
 Check the operator pod is running:
@@ -428,22 +316,59 @@ Check the CRD is registered:
 kubectl get crd aerospikeclusters.acko.io
 ```
 
-## Quick Start: Full Installation Script
-
-A single copy-paste script that sets up everything from scratch on a Kind cluster — cert-manager, Prometheus, the operator (with all monitoring enabled), Grafana, a sample Aerospike cluster, and verification.
+## Quick Start
 
 :::info Prerequisites
 - [Kind](https://kind.sigs.k8s.io/) installed
 - [Helm](https://helm.sh/) v3 installed
 - [kubectl](https://kubernetes.io/docs/tasks/tools/) installed
-
-Create a Kind cluster first:
-```bash
-kind create cluster --config kind-config.yaml --name kind
-```
 :::
 
+<Tabs groupId="quickstart">
+<TabItem value="simple" label="Simple" default>
+
+Operator + Cluster Manager UI on a Kind cluster.
+
 ```bash
+# Create Kind cluster
+kind create cluster
+
+# Install cert-manager
+helm repo add jetstack https://charts.jetstack.io
+helm repo update jetstack
+helm install cert-manager jetstack/cert-manager \
+  --namespace cert-manager \
+  --create-namespace \
+  --set crds.enabled=true \
+  --wait
+
+# Install Aerospike Operator + UI
+helm install aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  -n aerospike-operator --create-namespace \
+  --set ui.enabled=true \
+  --wait
+
+# Deploy a sample Aerospike cluster
+kubectl create namespace aerospike --dry-run=client -o yaml | kubectl apply -f -
+kubectl apply -f config/samples/acko_v1alpha1_aerospikecluster.yaml
+
+# Verify
+kubectl -n aerospike wait --for=condition=Ready pod/aerospike-basic-0-0 --timeout=120s
+kubectl -n aerospike exec -it aerospike-basic-0-0 -- asinfo -v status
+
+# Access the UI
+kubectl -n aerospike-operator port-forward svc/aerospike-ce-kubernetes-operator-ui 3000:3000
+```
+
+</TabItem>
+<TabItem value="full-monitoring" label="Full Monitoring">
+
+Operator + UI + Prometheus + Grafana dashboard on a Kind cluster.
+
+```bash
+# Create Kind cluster
+kind create cluster
+
 # =============================================================================
 # 1. Install cert-manager
 # =============================================================================
@@ -467,10 +392,11 @@ helm install prometheus prometheus-community/kube-prometheus-stack \
   --wait
 
 # =============================================================================
-# 3. Install Aerospike Operator (all monitoring enabled)
+# 3. Install Aerospike Operator + UI (all monitoring enabled)
 # =============================================================================
 helm install aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
   -n aerospike-operator --create-namespace \
+  --set ui.enabled=true \
   --set serviceMonitor.enabled=true \
   --set serviceMonitor.additionalLabels.release=prometheus \
   --set prometheusRule.enabled=true \
@@ -493,7 +419,7 @@ helm install grafana grafana/grafana \
   --wait
 
 # =============================================================================
-# 5. Deploy an Aerospike CE cluster
+# 5. Deploy a sample Aerospike cluster
 # =============================================================================
 kubectl create namespace aerospike --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply -f config/samples/acko_v1alpha1_aerospikecluster.yaml
@@ -502,29 +428,32 @@ echo "Waiting for Aerospike pod to be ready..."
 kubectl -n aerospike wait --for=condition=Ready pod/aerospike-basic-0-0 --timeout=120s
 
 # =============================================================================
-# 6. Verify: run asinfo inside the Aerospike pod
+# 6. Verify
 # =============================================================================
 echo "=== Aerospike cluster info ==="
 kubectl -n aerospike exec -it aerospike-basic-0-0 -- asinfo -v status
 kubectl -n aerospike exec -it aerospike-basic-0-0 -- asinfo -v build
 
 # =============================================================================
-# 7. Port-forward Grafana (access at http://localhost:3000)
+# 7. Access
 # =============================================================================
+# UI
+kubectl -n aerospike-operator port-forward svc/aerospike-ce-kubernetes-operator-ui 3000:3000 &
+
+# Grafana
 GRAFANA_PASSWORD=$(kubectl -n monitoring get secret grafana \
   -o jsonpath="{.data.admin-password}" | base64 -d)
 echo ""
 echo "=== Grafana ==="
-echo "URL:      http://localhost:3000"
+echo "URL:      http://localhost:3001"
 echo "Username: admin"
 echo "Password: ${GRAFANA_PASSWORD}"
 echo ""
-kubectl -n monitoring port-forward svc/grafana 3000:80
+kubectl -n monitoring port-forward svc/grafana 3001:80
 ```
 
-:::tip
-The script uses `--wait` on each Helm install so subsequent steps don't start until the previous component is fully ready. If you want to run this in CI without the final `port-forward`, remove the last command.
-:::
+</TabItem>
+</Tabs>
 
 ## Uninstall
 
@@ -551,6 +480,14 @@ kubectl delete namespace aerospike-operator
 
 </TabItem>
 <TabItem value="local-build" label="Local Build">
+
+If you used `make run-local`, simply delete the Kind cluster:
+
+```bash
+make stop-local
+```
+
+If you deployed manually to an existing cluster:
 
 ```bash
 # Delete all Aerospike clusters first
