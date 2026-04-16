@@ -342,10 +342,9 @@ helm install cert-manager jetstack/cert-manager \
   --set crds.enabled=true \
   --wait
 
-# Install Aerospike Operator + UI
+# Install Aerospike Operator (UI enabled by default)
 helm install aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
   -n aerospike-operator --create-namespace \
-  --set ui.enabled=true \
   --wait
 
 # Deploy a sample Aerospike cluster
@@ -392,11 +391,10 @@ helm install prometheus prometheus-community/kube-prometheus-stack \
   --wait
 
 # =============================================================================
-# 3. Install Aerospike Operator + UI (all monitoring enabled)
+# 3. Install Aerospike Operator (UI enabled by default, all monitoring enabled)
 # =============================================================================
 helm install aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
   -n aerospike-operator --create-namespace \
-  --set ui.enabled=true \
   --set serviceMonitor.enabled=true \
   --set serviceMonitor.additionalLabels.release=prometheus \
   --set prometheusRule.enabled=true \

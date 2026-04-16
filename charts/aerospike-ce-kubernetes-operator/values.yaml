@@ -275,7 +275,7 @@ ui:
   # -- Enable the Aerospike Cluster Manager web UI.
   # Deploys a full-stack management dashboard alongside the operator.
   # Access via: kubectl port-forward svc/<release>-aerospike-ce-kubernetes-operator-ui 3000:3000
-  enabled: false
+  enabled: true
 
   # -- Number of UI replicas
   replicaCount: 1
