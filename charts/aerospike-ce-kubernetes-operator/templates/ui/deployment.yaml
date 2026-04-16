@@ -40,6 +40,16 @@ spec:
       {{- end }}
     spec:
       serviceAccountName: {{ include "aerospike-ce-kubernetes-operator.ui.serviceAccountName" . }}
+      {{- if .Values.ui.hostNetwork }}
+      hostNetwork: true
+      dnsPolicy: {{ .Values.ui.dnsPolicy | default "ClusterFirstWithHostNet" }}
+      {{- else if .Values.ui.dnsPolicy }}
+      dnsPolicy: {{ .Values.ui.dnsPolicy }}
+      {{- end }}
+      {{- with .Values.ui.dnsConfig }}
+      dnsConfig:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.ui.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}

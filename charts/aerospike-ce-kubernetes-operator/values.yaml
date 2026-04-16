@@ -538,6 +538,32 @@ ui:
   terminationGracePeriodSeconds: 45
 
   # =============================================================================
+  # Host Network
+  # =============================================================================
+  # Use the node's network namespace for the UI pod. Useful for local/dev
+  # clusters (e.g., Kind) that need to reach corporate Aerospike hosts via the
+  # host's VPN/DNS resolver. When enabled, dnsPolicy defaults to
+  # ClusterFirstWithHostNet so in-cluster DNS still works alongside host DNS.
+  # WARNING: hostNetwork bypasses K8s network isolation and binds container
+  # ports directly on the node. Do not enable in production.
+  # -- Run the UI pod in the host network namespace
+  hostNetwork: false
+
+  # -- Override the pod dnsPolicy. When hostNetwork is true and this is empty,
+  # defaults to ClusterFirstWithHostNet. Common values: ClusterFirst,
+  # ClusterFirstWithHostNet, Default, None.
+  dnsPolicy: ""
+
+  # -- Additional Pod DNS configuration (searches, nameservers, options).
+  # Useful for adding corporate search domains when connecting to internal
+  # Aerospike clusters via short hostnames. Example:
+  #   dnsConfig:
+  #     searches:
+  #       - nfra.io
+  #       - navercorp.com
+  dnsConfig: {}
+
+  # =============================================================================
   # Aerospike Ports
   # =============================================================================
   aerospikePorts:
