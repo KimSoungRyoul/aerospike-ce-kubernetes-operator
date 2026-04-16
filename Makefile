@@ -81,10 +81,6 @@ clean: ## Remove build artifacts, coverage files, and tool binaries.
 	rm -f cover*.out
 	rm -f cover.html
 
-# TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
-# The default setup assumes Kind is pre-installed and builds/loads the manager container image locally.
-# CertManager is installed by default; skip with:
-# - CERT_MANAGER_INSTALL_SKIP=true
 KIND_CLUSTER ?= aerospike-ce-kubernetes-operator-test-e2e
 
 .PHONY: setup-kind
