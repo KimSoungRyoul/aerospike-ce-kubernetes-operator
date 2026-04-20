@@ -1,4 +1,4 @@
-{{- if .Values.ui.enabled }}
+{{- if and .Values.ui.enabled .Values.ui.frontendRenewal.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:

@@ -99,10 +99,17 @@ Access the UI via port-forward:
   # Legacy frontend (port {{ .Values.ui.frontend.service.port }})
   kubectl port-forward svc/{{ include "aerospike-ce-kubernetes-operator.ui.frontend.fullname" . }} {{ .Values.ui.frontend.service.port }}:{{ .Values.ui.frontend.service.port }} -n {{ .Release.Namespace }}
 
+{{- if .Values.ui.frontendRenewal.enabled }}
+
   # Frontend renewal (port {{ .Values.ui.frontendRenewal.service.port }})
   kubectl port-forward svc/{{ include "aerospike-ce-kubernetes-operator.ui.frontendRenewal.fullname" . }} {{ .Values.ui.frontendRenewal.service.port }}:{{ .Values.ui.frontendRenewal.service.port }} -n {{ .Release.Namespace }}
 
 Then open http://localhost:{{ .Values.ui.frontend.service.port }} (or http://localhost:{{ .Values.ui.frontendRenewal.service.port }}) in your browser.
+{{- else }}
+
+Then open http://localhost:{{ .Values.ui.frontend.service.port }} in your browser.
+(`ui.frontendRenewal.enabled=false` — renewal UI is not deployed.)
+{{- end }}
 
 {{- end }}
 

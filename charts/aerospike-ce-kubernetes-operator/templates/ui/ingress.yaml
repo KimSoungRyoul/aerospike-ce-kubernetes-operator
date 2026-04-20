@@ -1,5 +1,8 @@
 {{- if and .Values.ui.enabled .Values.ui.ingress.enabled }}
 {{- $target := .Values.ui.ingress.target | default "frontend" -}}
+{{- if and (eq $target "frontendRenewal") (not .Values.ui.frontendRenewal.enabled) -}}
+{{- fail "ui.ingress.target is 'frontendRenewal' but ui.frontendRenewal.enabled=false. Enable the renewal frontend or switch the ingress target to 'frontend' or 'backend'." -}}
+{{- end -}}
 {{- $targetServiceName := "" -}}
 {{- if eq $target "backend" -}}
 {{- $targetServiceName = include "aerospike-ce-kubernetes-operator.ui.backend.fullname" . -}}

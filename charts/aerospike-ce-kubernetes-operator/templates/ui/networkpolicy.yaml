@@ -19,8 +19,10 @@ spec:
           protocol: TCP
         - port: {{ .Values.ui.frontend.service.port }}
           protocol: TCP
+        {{- if .Values.ui.frontendRenewal.enabled }}
         - port: {{ .Values.ui.frontendRenewal.service.port }}
           protocol: TCP
+        {{- end }}
       {{- with .Values.ui.networkPolicy.ingressFrom }}
       from:
         {{- toYaml . | nindent 8 }}

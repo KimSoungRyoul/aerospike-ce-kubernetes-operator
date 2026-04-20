@@ -351,7 +351,14 @@ ui:
   # =============================================================================
   # Frontend Renewal (Next.js 14 Tremor rewrite) — port 3100
   # =============================================================================
+  # The renewal frontend is a parallel rewrite that runs alongside the legacy
+  # `frontend/` image. It's enabled by default so both are reachable during the
+  # migration, but can be turned off to ship only the legacy UI (or the other
+  # way around while the rewrite stabilizes). `ui.enabled=false` still disables
+  # the whole UI stack regardless of this flag.
   frontendRenewal:
+    # -- Deploy the renewal (Tremor-based) frontend alongside the legacy one.
+    enabled: true
     image:
       repository: ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-frontend-renewal
       tag: "latest"
