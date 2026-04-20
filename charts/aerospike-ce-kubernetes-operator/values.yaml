@@ -262,7 +262,7 @@ podLabels: {}
 ui:
   # -- Enable the Aerospike Cluster Manager web UI.
   # Deploys the 3-Deployment dashboard (backend + legacy frontend + renewal frontend).
-  enabled: false
+  enabled: true
 
   # -- Number of replicas for each UI Deployment (backend / frontend / frontend-renewal)
   replicaCount: 1
