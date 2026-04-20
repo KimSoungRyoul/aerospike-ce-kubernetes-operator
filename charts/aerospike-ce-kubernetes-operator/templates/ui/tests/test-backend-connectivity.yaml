@@ -26,7 +26,7 @@ spec:
           echo "Testing backend health endpoint..."
           HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
             --max-time 10 \
-            http://{{ include "aerospike-ce-kubernetes-operator.ui.fullname" . }}:{{ .Values.ui.service.backendPort }}/api/health)
+            http://{{ include "aerospike-ce-kubernetes-operator.ui.backend.fullname" . }}:{{ .Values.ui.backend.service.port }}/api/health)
           echo "HTTP status code: $HTTP_CODE"
           if [ "$HTTP_CODE" = "200" ]; then
             echo "Backend health check passed!"

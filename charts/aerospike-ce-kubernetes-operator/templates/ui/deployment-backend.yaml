@@ -5,10 +5,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "aerospike-ce-kubernetes-operator.ui.fullname" . }}
+  name: {{ include "aerospike-ce-kubernetes-operator.ui.backend.fullname" . }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "aerospike-ce-kubernetes-operator.ui.labels" . | nindent 4 }}
+    {{- include "aerospike-ce-kubernetes-operator.ui.backend.labels" . | nindent 4 }}
 spec:
   {{- if not .Values.ui.autoscaling.enabled }}
   replicas: {{ .Values.ui.replicaCount }}
@@ -24,11 +24,11 @@ spec:
     {{- end }}
   selector:
     matchLabels:
-      {{- include "aerospike-ce-kubernetes-operator.ui.selectorLabels" . | nindent 6 }}
+      {{- include "aerospike-ce-kubernetes-operator.ui.backend.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "aerospike-ce-kubernetes-operator.ui.selectorLabels" . | nindent 8 }}
+        {{- include "aerospike-ce-kubernetes-operator.ui.backend.selectorLabels" . | nindent 8 }}
       {{- with .Values.ui.podLabels }}
         {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -50,15 +50,12 @@ spec:
       {{- end }}
       terminationGracePeriodSeconds: {{ .Values.ui.terminationGracePeriodSeconds | default 45 }}
       containers:
-        - name: aerospike-cluster-manager
-          image: {{ include "aerospike-ce-kubernetes-operator.ui.image" . }}
-          imagePullPolicy: {{ .Values.ui.image.pullPolicy }}
+        - name: backend
+          image: {{ include "aerospike-ce-kubernetes-operator.ui.backend.image" . }}
+          imagePullPolicy: {{ .Values.ui.backend.image.pullPolicy }}
           ports:
-            - name: frontend
-              containerPort: {{ .Values.ui.service.frontendPort }}
-              protocol: TCP
             - name: backend
-              containerPort: {{ .Values.ui.service.backendPort }}
+              containerPort: {{ .Values.ui.backend.service.targetPort }}
               protocol: TCP
           envFrom:
             - configMapRef:
@@ -73,15 +70,15 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.ui.livenessProbe }}
+          {{- with .Values.ui.backend.livenessProbe }}
           livenessProbe:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.ui.readinessProbe }}
+          {{- with .Values.ui.backend.readinessProbe }}
           readinessProbe:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.ui.startupProbe }}
+          {{- with .Values.ui.backend.startupProbe }}
           startupProbe:
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -89,7 +86,7 @@ spec:
             preStop:
               exec:
                 command: ["sh", "-c", "sleep 5"]
-          {{- with .Values.ui.resources }}
+          {{- with .Values.ui.backend.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}

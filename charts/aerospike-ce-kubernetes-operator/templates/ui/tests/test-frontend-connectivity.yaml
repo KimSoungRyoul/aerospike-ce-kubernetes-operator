@@ -26,7 +26,7 @@ spec:
           echo "Testing frontend endpoint..."
           HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
             --max-time 10 \
-            http://{{ include "aerospike-ce-kubernetes-operator.ui.fullname" . }}:{{ .Values.ui.service.frontendPort }}/)
+            http://{{ include "aerospike-ce-kubernetes-operator.ui.frontend.fullname" . }}:{{ .Values.ui.frontend.service.port }}/)
           echo "HTTP status code: $HTTP_CODE"
           if [ "$HTTP_CODE" = "200" ]; then
             echo "Frontend connectivity check passed!"

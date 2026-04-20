@@ -1,4 +1,15 @@
 {{- if and .Values.ui.enabled .Values.ui.ingress.enabled }}
+{{- $target := .Values.ui.ingress.target | default "frontend" -}}
+{{- $targetServiceName := "" -}}
+{{- if eq $target "backend" -}}
+{{- $targetServiceName = include "aerospike-ce-kubernetes-operator.ui.backend.fullname" . -}}
+{{- else if eq $target "frontendRenewal" -}}
+{{- $targetServiceName = include "aerospike-ce-kubernetes-operator.ui.frontendRenewal.fullname" . -}}
+{{- else if eq $target "frontend" -}}
+{{- $targetServiceName = include "aerospike-ce-kubernetes-operator.ui.frontend.fullname" . -}}
+{{- else -}}
+{{- fail (printf "ui.ingress.target must be one of: frontend, frontendRenewal, backend (got %q)" $target) -}}
+{{- end -}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -34,9 +45,13 @@ spec:
             pathType: {{ .pathType }}
             backend:
               service:
-                name: {{ include "aerospike-ce-kubernetes-operator.ui.fullname" $ }}
+                name: {{ $targetServiceName }}
                 port:
+                  {{- if eq $target "backend" }}
+                  name: backend
+                  {{- else }}
                   name: frontend
+                  {{- end }}
           {{- end }}
     {{- end }}
 {{- end }}

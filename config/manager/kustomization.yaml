@@ -5,4 +5,4 @@ kind: Kustomization
 images:
 - name: controller
   newName: ghcr.io/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator
-  newTag: latest
+  newTag: v0.0.1

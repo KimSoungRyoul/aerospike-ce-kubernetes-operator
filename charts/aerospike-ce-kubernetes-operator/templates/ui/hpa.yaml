@@ -2,15 +2,15 @@
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: {{ include "aerospike-ce-kubernetes-operator.ui.fullname" . }}
+  name: {{ include "aerospike-ce-kubernetes-operator.ui.frontend.fullname" . }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "aerospike-ce-kubernetes-operator.ui.labels" . | nindent 4 }}
+    {{- include "aerospike-ce-kubernetes-operator.ui.frontend.labels" . | nindent 4 }}
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: {{ include "aerospike-ce-kubernetes-operator.ui.fullname" . }}
+    name: {{ include "aerospike-ce-kubernetes-operator.ui.frontend.fullname" . }}
   minReplicas: {{ .Values.ui.autoscaling.minReplicas }}
   maxReplicas: {{ .Values.ui.autoscaling.maxReplicas }}
   metrics:
