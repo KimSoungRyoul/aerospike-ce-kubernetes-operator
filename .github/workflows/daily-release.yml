@@ -1,0 +1,148 @@
+name: Daily Release
+# Runs daily at KST 09:00 (UTC 00:00). Automatically releases if there are changes since the last release.
+# Conventional Commits-based version bump: feat → minor, fix → patch, breaking → major
+
+on:
+  schedule:
+    - cron: "0 0 * * *" # UTC 00:00 = KST 09:00
+  workflow_dispatch: # can also be triggered manually
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check for changes since last release
+        id: changes
+        run: |
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$LATEST_TAG" ]; then
+            echo "No previous release found. Checking all commits."
+            COMMIT_COUNT=$(git rev-list --count HEAD)
+          else
+            COMMIT_COUNT=$(git rev-list --count "${LATEST_TAG}..HEAD")
+          fi
+          echo "latest_tag=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
+          echo "commit_count=${COMMIT_COUNT}" >> "$GITHUB_OUTPUT"
+          if [ "$COMMIT_COUNT" -eq 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "No changes since ${LATEST_TAG}. Skipping release."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "${COMMIT_COUNT} commits since ${LATEST_TAG}."
+          fi
+
+      - name: Determine next version
+        if: steps.changes.outputs.skip == 'false'
+        id: version
+        run: |
+          LATEST_TAG="${{ steps.changes.outputs.latest_tag }}"
+          if [ -z "$LATEST_TAG" ]; then
+            echo "next_version=v0.0.1" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Strip 'v' prefix for parsing
+          VERSION="${LATEST_TAG#v}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+
+          # Analyze commits for conventional commit types
+          COMMITS=$(git log "${LATEST_TAG}..HEAD" --pretty=format:"%s")
+          HAS_BREAKING=$(echo "$COMMITS" | grep -cE '^[a-z]+(\(.+\))?!:|BREAKING CHANGE' || true)
+          HAS_FEAT=$(echo "$COMMITS" | grep -cE '^feat(\(.+\))?:' || true)
+
+          if [ "$HAS_BREAKING" -gt 0 ]; then
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+          elif [ "$HAS_FEAT" -gt 0 ]; then
+            MINOR=$((MINOR + 1))
+            PATCH=0
+          else
+            PATCH=$((PATCH + 1))
+          fi
+
+          NEXT="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "next_version=${NEXT}" >> "$GITHUB_OUTPUT"
+          echo "Bumping ${LATEST_TAG} → ${NEXT}"
+
+      - name: Generate release notes with Claude
+        if: steps.changes.outputs.skip == 'false'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GH_AW_GITHUB_TOKEN }}
+          bot_id: '${{ vars.CLAUDE_BOT_ID }}'
+          bot_name: '${{ vars.CLAUDE_BOT_NAME }}'
+          prompt: |
+            You are a release manager for the **aerospike-ce-kubernetes-operator** (ACKO) project.
+
+            ## Task
+            Create a GitHub release for version **${{ steps.version.outputs.next_version }}**.
+            Previous version: **${{ steps.changes.outputs.latest_tag }}** (${{ steps.changes.outputs.commit_count }} commits)
+
+            ### Step 1: Analyze Changes
+            Run `git log ${{ steps.changes.outputs.latest_tag }}..HEAD --pretty=format:"%h %s" --no-merges` to see all commits.
+
+            ### Step 2: Write Release Notes
+            Write release notes in this exact format (Korean descriptions, English technical terms):
+
+            ```
+            ## What's Changed
+
+            ### Features
+            - **feature name**: description (#PR)
+
+            ### Bug Fixes
+            - **fix name**: description (#PR)
+
+            ### Improvements
+            - **improvement name**: description (#PR)
+
+            ### E2E Tests
+            - description
+
+            ### Documentation
+            - description
+
+            ### CI/CD
+            - description
+
+            ### Dependencies
+            - description
+
+            **Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ steps.changes.outputs.latest_tag }}...${{ steps.version.outputs.next_version }}
+            ```
+
+            Only include sections that have entries. Skip empty sections.
+
+            ### Step 3: Create the Release
+            Save the release notes to a file and create the release:
+            ```bash
+            gh release create "${{ steps.version.outputs.next_version }}" \
+              --title "release ${{ steps.version.outputs.next_version }}" \
+              --notes-file /tmp/release-notes.md \
+              --target main
+            ```
+
+            ### Step 4: Verify
+            Run `gh release view ${{ steps.version.outputs.next_version }}` to confirm the release was created.
+
+            ## Constraints
+            - Use Korean for descriptions, English for technical terms
+            - Group by Conventional Commit type (feat → Features, fix → Bug Fixes, etc.)
+            - Include PR numbers where available (extract from commit messages)
+            - Do NOT include merge commits or trivial changes (typos, formatting)
+          claude_args: |
+            --max-turns ${{ vars.CLAUDE_MAX_TURNS }}
+            --model ${{ vars.CLAUDE_MODEL }}
+            --dangerously-skip-permissions
+          settings: '${{ vars.CLAUDE_SETTINGS }}'

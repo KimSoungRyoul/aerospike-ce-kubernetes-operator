@@ -43,8 +43,6 @@ const (
 	defaultProtoFdMax    = 15000
 	defaultHeartbeatMode = "mesh"
 
-	defaultExporterImage  = "aerospike/aerospike-prometheus-exporter:1.16.1"
-	defaultExporterPort   = int32(9145)
 	defaultScrapeInterval = "30s"
 )
 
@@ -152,10 +150,10 @@ func (d *AerospikeClusterDefaulter) defaultMonitoring(cluster *AerospikeCluster)
 
 	m := cluster.Spec.Monitoring
 	if m.ExporterImage == "" {
-		m.ExporterImage = defaultExporterImage
+		m.ExporterImage = DefaultExporterImage
 	}
 	if m.Port == 0 {
-		m.Port = defaultExporterPort
+		m.Port = DefaultExporterPort
 	}
 	if m.ServiceMonitor != nil && m.ServiceMonitor.Enabled && m.ServiceMonitor.Interval == "" {
 		m.ServiceMonitor.Interval = defaultScrapeInterval
@@ -329,11 +327,18 @@ func (v *AerospikeClusterValidator) validate(cluster *AerospikeCluster) (admissi
 		warnings = append(warnings, storageWarnings...)
 	}
 
+	// Validate network port uniqueness
+	if cluster.Spec.AerospikeConfig != nil {
+		portErrors := v.validateNetworkPortUniqueness(cluster)
+		allErrors = append(allErrors, portErrors...)
+	}
+
 	// Validate replication-factor, work directory, batch size, max unavailable, and operations
 	rfErrors := v.validateReplicationFactor(cluster)
 	allErrors = append(allErrors, rfErrors...)
 	warnings = append(warnings, v.validateWorkDirectory(cluster)...)
 	warnings = append(warnings, v.validateBatchSize(cluster)...)
+	warnings = append(warnings, v.validateRackBatchSize(cluster)...)
 	warnings = append(warnings, v.validateMaxUnavailable(cluster)...)
 	if len(cluster.Spec.Operations) > 0 {
 		allErrors = append(allErrors, v.validateOperations(cluster.Spec.Operations)...)
@@ -375,11 +380,17 @@ func (v *AerospikeClusterValidator) validateAerospikeConfig(config map[string]an
 			}
 			// Validate each namespace's config
 			for i, nsEntry := range ns {
-				if nsMap, ok := nsEntry.(map[string]any); ok {
-					nsErrors, nsWarnings := v.validateNamespaceConfig(nsMap, i)
-					errors = append(errors, nsErrors...)
-					warnings = append(warnings, nsWarnings...)
+				nsMap, ok := nsEntry.(map[string]any)
+				if !ok {
+					errors = append(errors, fmt.Sprintf("aerospikeConfig.namespaces[%d] must be a map, got %T", i, nsEntry))
+					continue
 				}
+				if _, hasName := nsMap["name"]; !hasName {
+					errors = append(errors, fmt.Sprintf("aerospikeConfig.namespaces[%d] is missing required 'name' key", i))
+				}
+				nsErrors, nsWarnings := v.validateNamespaceConfig(nsMap, i)
+				errors = append(errors, nsErrors...)
+				warnings = append(warnings, nsWarnings...)
 			}
 		case map[string]any:
 			if len(ns) > maxCENamespaces {
@@ -401,6 +412,24 @@ func (v *AerospikeClusterValidator) validateAerospikeConfig(config map[string]an
 						"aerospikeConfig.security.%s is not allowed in CE edition (%s)", enterpriseKey, reason))
 				}
 			}
+		}
+	}
+
+	// Validate top-level section types to catch config errors at admission time
+	// rather than at runtime (where they would cause permanent configgen failures).
+	if svc, exists := config["service"]; exists {
+		if _, ok := svc.(map[string]any); !ok {
+			errors = append(errors, fmt.Sprintf("aerospikeConfig.service must be a map, got %T", svc))
+		}
+	}
+	if net, exists := config["network"]; exists {
+		if _, ok := net.(map[string]any); !ok {
+			errors = append(errors, fmt.Sprintf("aerospikeConfig.network must be a map, got %T", net))
+		}
+	}
+	if logging, exists := config["logging"]; exists {
+		if _, ok := logging.([]any); !ok {
+			errors = append(errors, fmt.Sprintf("aerospikeConfig.logging must be a list, got %T", logging))
 		}
 	}
 
@@ -1086,4 +1115,83 @@ func (v *AerospikeClusterValidator) validateMonitoring(m *AerospikeMonitoringSpe
 	}
 
 	return errors, warnings
+}
+
+// validateNetworkPortUniqueness checks that service, heartbeat, and fabric ports are distinct.
+func (v *AerospikeClusterValidator) validateNetworkPortUniqueness(cluster *AerospikeCluster) []string {
+	netCfg, ok := cluster.Spec.AerospikeConfig.Value["network"].(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	type portEntry struct {
+		name string
+		port int
+	}
+
+	extractPort := func(section map[string]any) (int, bool) {
+		raw, exists := section["port"]
+		if !exists {
+			return 0, false
+		}
+		switch v := raw.(type) {
+		case int:
+			return v, true
+		case float64:
+			return int(v), true
+		case int64:
+			return int(v), true
+		}
+		return 0, false
+	}
+
+	var ports []portEntry
+	for _, sub := range []string{"service", "heartbeat", "fabric"} {
+		subCfg, ok := netCfg[sub].(map[string]any)
+		if !ok {
+			continue
+		}
+		if port, ok := extractPort(subCfg); ok {
+			ports = append(ports, portEntry{name: sub, port: port})
+		}
+	}
+
+	var errors []string
+	for i := 0; i < len(ports); i++ {
+		for j := i + 1; j < len(ports); j++ {
+			if ports[i].port == ports[j].port {
+				errors = append(errors, fmt.Sprintf(
+					"network port conflict: %s.port and %s.port are both %d",
+					ports[i].name, ports[j].name, ports[i].port))
+			}
+		}
+	}
+	return errors
+}
+
+// validateRackBatchSize warns when a rack-level percentage batch size resolves to 0 pods.
+func (v *AerospikeClusterValidator) validateRackBatchSize(cluster *AerospikeCluster) admission.Warnings {
+	if cluster.Spec.RackConfig == nil || cluster.Spec.RackConfig.RollingUpdateBatchSize == nil {
+		return nil
+	}
+	bs := cluster.Spec.RackConfig.RollingUpdateBatchSize
+	if bs.Type != intstr.String {
+		return nil
+	}
+	s := bs.StrVal
+	numStr, ok := strings.CutSuffix(s, "%")
+	if !ok {
+		return nil
+	}
+	num, err := strconv.Atoi(numStr)
+	if err != nil {
+		return nil
+	}
+	resolved := int(cluster.Spec.Size) * num / 100
+	if resolved == 0 {
+		return admission.Warnings{fmt.Sprintf(
+			"rackConfig.rollingUpdateBatchSize %q resolves to 0 pods for cluster size %d; effective batch size will be clamped to 1",
+			s, cluster.Spec.Size)}
+	}
+	return nil
 }

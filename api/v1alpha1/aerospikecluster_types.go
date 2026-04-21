@@ -191,6 +191,12 @@ type AerospikeServiceSpec struct {
 	// Metadata defines custom annotations and labels for the service.
 	// +optional
 	Metadata *AerospikeObjectMeta `json:"metadata,omitempty"`
+
+	// ServiceType is the Kubernetes Service type for per-pod services.
+	// Defaults to ClusterIP. Set to NodePort or LoadBalancer for external access.
+	// +kubebuilder:validation:Enum=ClusterIP;NodePort;LoadBalancer
+	// +optional
+	ServiceType string `json:"serviceType,omitempty"`
 }
 
 // AerospikeClusterSpec defines the desired state of an Aerospike CE cluster.
@@ -329,10 +335,18 @@ const (
 	ConditionMigrationComplete = "MigrationComplete"
 	// ConditionReconciliationPaused indicates reconciliation is paused by the user.
 	ConditionReconciliationPaused = "ReconciliationPaused"
+	// ConditionReconcileHealthy indicates whether reconciliation is healthy (no permanent errors).
+	// Set to False with reason "PermanentError" when a ValidationError is detected.
+	// Set to True with reason "ReconcileSucceeded" when the circuit breaker resets.
+	ConditionReconcileHealthy = "ReconcileHealthy"
+	// ConditionDynamicConfigDegraded indicates that a dynamic config rollback failed,
+	// leaving some pods with inconsistent configuration. Set to True when rollback
+	// fails and cleared when the cluster returns to a healthy state.
+	ConditionDynamicConfigDegraded = "DynamicConfigDegraded"
 )
 
 // AerospikePhase represents the current phase of the cluster.
-// +kubebuilder:validation:Enum=InProgress;Completed;Error;ScalingUp;ScalingDown;WaitingForMigration;RollingRestart;ACLSync;Paused;Deleting
+// +kubebuilder:validation:Enum=InProgress;Completed;Error;ScalingUp;ScalingDown;WaitingForMigration;RollingRestart;ACLSync;Paused;Deleting;ConfigDegraded
 type AerospikePhase string
 
 const (
@@ -358,6 +372,10 @@ const (
 	AerospikePhasePaused AerospikePhase = "Paused"
 	// AerospikePhaseDeleting indicates the cluster is being deleted.
 	AerospikePhaseDeleting AerospikePhase = "Deleting"
+	// AerospikePhaseConfigDegraded indicates that a dynamic config rollback failed,
+	// leaving some pods with inconsistent configuration. The operator will attempt
+	// cold restart recovery on the next reconcile.
+	AerospikePhaseConfigDegraded AerospikePhase = "ConfigDegraded"
 )
 
 // RestartReason describes why a pod was restarted by the operator.
@@ -470,6 +488,17 @@ type AerospikeClusterStatus struct {
 	// for partition migration statistics.
 	// +optional
 	MigrationStatus *MigrationStatus `json:"migrationStatus,omitempty"`
+
+	// Endpoints is a comma-separated list of externally reachable endpoints
+	// (host:port) for client access. Populated from per-pod LoadBalancer/NodePort
+	// services and the seeds finder service. Empty when no external services are configured.
+	// +optional
+	Endpoints string `json:"endpoints,omitempty"`
+
+	// SeedsEndpoint is the external endpoint (host:port) of the seeds finder
+	// LoadBalancer service. Clients use this as the initial seed address.
+	// +optional
+	SeedsEndpoint string `json:"seedsEndpoint,omitempty"`
 }
 
 // MigrationStatus represents the current data migration state of the cluster.
@@ -481,6 +510,20 @@ type MigrationStatus struct {
 	RemainingPartitions int64 `json:"remainingPartitions"`
 	// LastChecked is the timestamp of the last migration check.
 	LastChecked metav1.Time `json:"lastChecked"`
+}
+
+// DynamicConfigChangeStatus records the result of a single dynamic config change on a pod.
+type DynamicConfigChangeStatus struct {
+	// Path is the config parameter path (e.g., "service.proto-fd-max").
+	Path string `json:"path"`
+	// OldValue is the previous value before the change (empty for new keys).
+	// +optional
+	OldValue string `json:"oldValue,omitempty"`
+	// NewValue is the value that was applied or attempted.
+	NewValue string `json:"newValue"`
+	// Result indicates whether the change succeeded or failed.
+	// Possible values: "Applied", "Failed", "RolledBack", "RollbackFailed".
+	Result string `json:"result"`
 }
 
 // AerospikePodStatus holds per-pod status information.
@@ -508,6 +551,9 @@ type AerospikePodStatus struct {
 	// DynamicConfigStatus indicates the last dynamic config update result.
 	// Possible values: "", "Applied", "Failed", "Pending".
 	DynamicConfigStatus string `json:"dynamicConfigStatus,omitempty"`
+	// DynamicConfigChanges records per-change details from the last dynamic config update.
+	// +optional
+	DynamicConfigChanges []DynamicConfigChangeStatus `json:"dynamicConfigChanges,omitempty"`
 	// DirtyVolumes lists volumes that need initialization or cleanup.
 	DirtyVolumes []string `json:"dirtyVolumes,omitempty"`
 
@@ -560,6 +606,8 @@ type AerospikePodStatus struct {
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 // +kubebuilder:printcolumn:name="Available",type=string,JSONPath=`.status.conditions[?(@.type=='Available')].status`
+// +kubebuilder:printcolumn:name="Seed",type=string,JSONPath=`.status.seedsEndpoint`,priority=0
+// +kubebuilder:printcolumn:name="Endpoints",type=string,JSONPath=`.status.endpoints`,priority=1
 // +kubebuilder:printcolumn:name="Image",type=string,JSONPath=`.spec.image`,priority=1
 // +kubebuilder:printcolumn:name="ObservedGen",type=integer,JSONPath=`.status.observedGeneration`,priority=1
 // +kubebuilder:printcolumn:name="PhaseReason",type=string,JSONPath=`.status.phaseReason`,priority=1

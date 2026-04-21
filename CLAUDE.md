@@ -75,10 +75,10 @@ Converts unstructured `map[string]interface{}` to aerospike.conf text format. Ha
 
 ## Aerospike Configuration Guide
 
-Aerospike CE 8.1 파라미터, CRD 설정, Day-2 운영 가이드는 ecosystem plugin에서 제공:
-- `acko-config-reference` — CE 8.1 파라미터, breaking changes, CRD 매핑, Webhook 검증
-- `acko-deploy` — K8s 배포 가이드, CR 예제 (8개 시나리오)
-- `acko-operations` — Day-2 운영, 트러블슈팅, 진단 커맨드
+Aerospike CE 8.1 parameters, CRD configuration, and Day-2 operations guide are provided by the ecosystem plugin:
+- `acko-config-reference` — CE 8.1 parameters, breaking changes, CRD mapping, Webhook validation
+- `acko-deploy` — K8s deployment guide, CR examples (8 scenarios)
+- `acko-operations` — Day-2 operations, troubleshooting, diagnostic commands
 
 ## Sample CRs
 

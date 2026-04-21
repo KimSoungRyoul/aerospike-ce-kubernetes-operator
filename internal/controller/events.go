@@ -21,6 +21,8 @@ const (
 	EventConfigMapUpdated          = "ConfigMapUpdated"
 	EventDynamicConfigApplied      = "DynamicConfigApplied"
 	EventDynamicConfigStatusFailed = "DynamicConfigStatusFailed"
+	EventDynamicConfigDegraded     = "DynamicConfigDegraded"
+	EventDynamicConfigRollback     = "DynamicConfigRollback"
 
 	// StatefulSet / Rack management
 	EventStatefulSetCreated = "StatefulSetCreated"
@@ -40,6 +42,11 @@ const (
 	// Service management
 	EventServiceCreated = "ServiceCreated"
 	EventServiceUpdated = "ServiceUpdated"
+	EventServiceDeleted = "ServiceDeleted"
+
+	// Pause/Resume lifecycle
+	EventPaused  = "ReconciliationPaused"
+	EventResumed = "ReconciliationResumed"
 
 	// Cluster lifecycle
 	EventClusterDeletionStarted = "ClusterDeletionStarted"
@@ -64,6 +71,9 @@ const (
 	// Circuit breaker
 	EventCircuitBreakerActive = "CircuitBreakerActive"
 	EventCircuitBreakerReset  = "CircuitBreakerReset"
+
+	// Permanent error
+	EventPermanentError = "PermanentError"
 
 	// Miscellaneous
 	EventValidationWarning = "ValidationWarning"

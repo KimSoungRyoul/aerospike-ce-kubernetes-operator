@@ -1,5 +1,5 @@
 name: E2E Tests
-# Kind 클러스터에서 operator + Aerospike CE 배포 후 E2E 테스트 실행 (Podman 자동 감지)
+# Deploy operator + Aerospike CE on Kind cluster, then run E2E tests (Podman auto-detected)
 
 on:
   workflow_dispatch:

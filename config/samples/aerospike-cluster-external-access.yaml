@@ -1,0 +1,44 @@
+# Aerospike cluster with external client access via per-pod LoadBalancer services.
+#
+# Each pod gets a unique LoadBalancer IP. The seeds finder LB provides a single
+# entry point for client connections. Clients connect using:
+#   aql -h <seeds-lb-ip> -p 3000 --services-alternate
+#
+# To check endpoints:
+#   kubectl get asc              # Shows Seeds LB endpoint
+#   kubectl get asc -o wide      # Shows all per-pod endpoints
+apiVersion: acko.io/v1alpha1
+kind: AerospikeCluster
+metadata:
+  name: external-cluster
+  namespace: aerospike
+spec:
+  size: 3
+  image: aerospike:ce-8.1.1.1
+
+  # Per-pod LoadBalancer services for external access
+  podService:
+    serviceType: LoadBalancer
+
+  # Seeds finder LB for initial client connection
+  seedsFinderServices:
+    loadBalancer:
+      port: 3000
+
+  aerospikeConfig:
+    service:
+      proto-fd-max: 15000
+    namespaces:
+      - name: test
+        replication-factor: 2
+        storage-engine:
+          type: memory
+          data-size: 1073741824
+    network:
+      service:
+        port: 3000
+      fabric:
+        port: 3001
+      heartbeat:
+        mode: mesh
+        port: 3002

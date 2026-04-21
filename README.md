@@ -307,33 +307,33 @@ make run            # Run controller locally against current kubeconfig
 
 ### Local deployment with Kind
 
-로컬 빌드 후 Kind 클러스터에 배포할 때:
+When deploying to a Kind cluster after a local build:
 
 ```sh
-# 1. Kind 클러스터 생성
+# 1. Create Kind cluster
 make setup-test-e2e
 
-# 2. 이미지 로컬 빌드
+# 2. Build image locally
 make docker-build
 
-# 3. Kind 클러스터에 이미지 로드
+# 3. Load image into Kind cluster
 kind load docker-image ghcr.io/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator:latest \
   --name aerospike-ce-kubernetes-operator-test-e2e
 
-# 4. CRD 설치 및 오퍼레이터 배포
+# 4. Install CRDs and deploy the operator
 make install
 make deploy
 ```
 
-> `config/manager/manager.yaml`에 `imagePullPolicy: IfNotPresent`가 설정되어 있어, Kind에 로드된 로컬 이미지를 그대로 사용합니다.
+> `config/manager/manager.yaml` has `imagePullPolicy: IfNotPresent` configured, so the locally loaded image in Kind is used as-is.
 
 ## Claude Code
 
-이 프로젝트는 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 자동화가 설정되어 있습니다.
+This project has [Claude Code](https://docs.anthropic.com/en/docs/claude-code) automation configured.
 
-### Ecosystem Plugin 설치
+### Ecosystem Plugin Installation
 
-[aerospike-ce-ecosystem-plugins](https://github.com/aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins)를 설치하면 Aerospike CE 8.1 설정 레퍼런스, K8s 배포 가이드, Day-2 운영 가이드 등 ecosystem 전체 스킬을 사용할 수 있습니다.
+Installing [aerospike-ce-ecosystem-plugins](https://github.com/aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins) gives you access to the full ecosystem skill set, including the Aerospike CE 8.1 configuration reference, K8s deployment guide, and Day-2 operations guide.
 
 ```bash
 claude plugin marketplace add aerospike-ce-ecosystem/aerospike-ce-ecosystem-plugins

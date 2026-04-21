@@ -1,5 +1,5 @@
 name: Build and Push Image
-# Release 발행 시 multi-arch (amd64/arm64) 컨테이너 이미지 빌드 후 GHCR에 push
+# On release publish: build multi-arch (amd64/arm64) container image and push to GHCR
 
 on:
   push:

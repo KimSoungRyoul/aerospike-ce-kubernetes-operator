@@ -145,6 +145,14 @@ func BuildPodTemplateSpec(
 		TerminationGracePeriodSeconds: &terminationGrace,
 	}
 
+	// Enable service account token mount when per-pod external services need
+	// the init container to query the Kubernetes API for LB IP / NodePort.
+	if cluster.Spec.PodService != nil && cluster.Spec.PodService.ServiceType != "" &&
+		cluster.Spec.PodService.ServiceType != "ClusterIP" {
+		automount := true
+		podSpec.AutomountServiceAccountToken = &automount
+	}
+
 	// Pod-level settings from cluster spec.
 	if cluster.Spec.PodSpec != nil {
 		applyPodSpecSettings(&podSpec, cluster.Spec.PodSpec)
@@ -340,7 +348,8 @@ func buildExporterSidecar(
 	acl *v1alpha1.AerospikeAccessControlSpec,
 ) corev1.Container {
 	envVars := []corev1.EnvVar{
-		{Name: "AS_HOST", Value: "localhost"},
+		// Use explicit IPv4; "localhost" may resolve to [::1] in IPv6-enabled pods
+		{Name: "AS_HOST", Value: "127.0.0.1"},
 		{Name: "AS_PORT", Value: fmt.Sprintf("%d", ServicePort)},
 	}
 

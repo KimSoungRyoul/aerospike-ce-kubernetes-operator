@@ -1,22 +1,22 @@
-# Scenario D: HardRack Oversubscribed (핵심 차이 테스트)
+# Scenario D: HardRack Oversubscribed (key difference test)
 #
-# required anti-affinity는 "hard" 제약이므로, 동일 노드에 이미 Aerospike 파드가
-# 있으면 스케줄링이 거부되어 Pending 상태가 됨을 검증.
-# rack 1과 rack 4가 같은 nodeName(kind-worker)을 지정하여 충돌 유발.
+# required anti-affinity is a "hard" constraint, so if an Aerospike pod already exists
+# on the same node, scheduling is rejected and the pod becomes Pending.
+# rack 1 and rack 4 share the same nodeName (kind-worker) to intentionally trigger a conflict.
 #
-# SoftRack(Scenario B)와 동일 조건이지만 결과가 다름:
-#   - SoftRack: 4파드 모두 Running (colocation 허용)
-#   - HardRack: 3파드 Running + 1파드 Pending (colocation 거부)
+# Same conditions as SoftRack (Scenario B) but with different outcomes:
+#   - SoftRack: all 4 pods Running (colocation allowed)
+#   - HardRack: 3 pods Running + 1 pod Pending (colocation rejected)
 #
-# 사전 조건:
-#   - hard-rack-test 템플릿 (podAntiAffinityLevel: required, maxRacksPerNode: 1)
-#   - Kind 클러스터: kind-worker, kind-worker2, kind-worker3
+# Preconditions:
+#   - hard-rack-test template (podAntiAffinityLevel: required, maxRacksPerNode: 1)
+#   - Kind cluster: kind-worker, kind-worker2, kind-worker3
 #
-# 기대 결과:
-#   - 3파드 Running, 1파드 Pending (rack 4)
-#   - Pending 사유: "didn't match pod anti-affinity rules"
+# Expected Results:
+#   - 3 pods Running, 1 pod Pending (rack 4)
+#   - Pending reason: "didn't match pod anti-affinity rules"
 #
-# 검증:
+# Verification:
 #   kubectl get pods -l app.kubernetes.io/instance=test-hard-oversub -o wide
 #   kubectl describe pod test-hard-oversub-4-0 | grep -A2 "Events:"
 #   # Expected: FailedScheduling — pod anti-affinity rules
@@ -42,7 +42,7 @@ spec:
       - id: 3
         nodeName: kind-worker3
       - id: 4
-        nodeName: kind-worker    # rack 1과 같은 노드 — HardRack이므로 Pending
+        nodeName: kind-worker    # same node as rack 1 — Pending because HardRack
   aerospikeConfig:
     namespaces:
       - name: data

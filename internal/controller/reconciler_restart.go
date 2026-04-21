@@ -211,32 +211,57 @@ func (r *AerospikeClusterReconciler) restartPodBatch(
 	attempted := int32(0)
 	var dynamicUpdated []podDynamicUpdate
 
+	// Determine the batch of pods to process
+	var batchPods []*corev1.Pod
 	for _, pod := range podsToRestart {
-		if attempted >= batchSize {
+		if int32(len(batchPods)) >= batchSize {
 			break
+		}
+		batchPods = append(batchPods, pod)
+	}
+
+	// 1. Try 2PC batch dynamic config update for all pods in the batch
+	if oldConfig != nil && newConfig != nil {
+		if *aeroClient == nil {
+			var clientErr error
+			*aeroClient, clientErr = r.getAerospikeClient(ctx, cluster)
+			if clientErr != nil {
+				log.V(1).Info("Could not create Aerospike client for dynamic config, will fall back to restart", "error", clientErr)
+			}
+		}
+		if *aeroClient != nil {
+			allOk, updates, rbResult := r.tryDynamicConfigUpdateBatch(ctx, cluster, batchPods, oldConfig, newConfig, *aeroClient)
+			if allOk {
+				log.Info("2PC batch dynamic config update succeeded for all pods", "podCount", len(batchPods))
+				return int32(len(batchPods)), nil
+			}
+
+			// If rollback failed, set ConfigDegraded phase
+			if rbResult != nil && rbResult.HasFailures() {
+				log.Info("2PC batch rollback had failures, setting ConfigDegraded",
+					"failedPods", rbResult.FailedPods, "successCount", rbResult.SuccessCount)
+				r.setConfigDegraded(ctx, cluster, rbResult.FailedPods)
+			}
+
+			// Track any dynamic updates that were NOT rolled back (shouldn't happen
+			// in normal 2PC flow, but defensive)
+			dynamicUpdated = updates
+		}
+	}
+
+	// 2. Fall back to per-pod restart (warm or cold) for pods not dynamically updated
+	dynamicSet := make(map[string]bool, len(dynamicUpdated))
+	for _, du := range dynamicUpdated {
+		dynamicSet[du.podName] = true
+	}
+	restarted += int32(len(dynamicUpdated))
+
+	for _, pod := range batchPods {
+		if dynamicSet[pod.Name] {
+			continue // Already handled by dynamic update
 		}
 		attempted++
 
-		// 1. Try dynamic config update first (no restart needed)
-		if oldConfig != nil && newConfig != nil {
-			if *aeroClient == nil {
-				var clientErr error
-				*aeroClient, clientErr = r.getAerospikeClient(ctx, cluster)
-				if clientErr != nil {
-					log.V(1).Info("Could not create Aerospike client for dynamic config, will fall back to restart", "error", clientErr)
-				}
-			}
-			if *aeroClient != nil {
-				if ok, node, applied := r.tryDynamicConfigUpdate(ctx, cluster, pod, oldConfig, newConfig, *aeroClient); ok {
-					log.Info("Dynamic config update succeeded, no restart needed", "pod", pod.Name)
-					dynamicUpdated = append(dynamicUpdated, podDynamicUpdate{podName: pod.Name, node: node, applied: applied})
-					restarted++
-					continue
-				}
-			}
-		}
-
-		// 2. Restart pod (warm or cold)
 		if err := r.restartPod(ctx, cluster, pod, sts, desiredHash); err != nil {
 			r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventRestartFailed,
 				"Failed to restart pod %s: %v", pod.Name, err)
@@ -249,13 +274,12 @@ func (r *AerospikeClusterReconciler) restartPodBatch(
 
 	// Cross-pod rollback: if any cold/warm restart failed AND dynamic updates were
 	// applied in this batch, roll back those dynamic changes for consistency.
-	// The failed pods will be retried in the next reconcile and get the correct
-	// config via cold restart.
 	if len(failedPods) > 0 && len(dynamicUpdated) > 0 {
 		log.Info("Rolling back dynamic config updates due to batch restart failures",
 			"dynamicUpdated", len(dynamicUpdated), "failedPods", len(failedPods))
-		for _, du := range dynamicUpdated {
-			r.rollbackDynamicChanges(log, du.node, du.applied)
+		rbResult := r.rollbackDynamicChangesBatch(log, cluster, dynamicUpdated)
+		if rbResult.HasFailures() {
+			r.setConfigDegraded(ctx, cluster, rbResult.FailedPods)
 		}
 	}
 

@@ -1,18 +1,18 @@
-# Scenario B: SoftRack Oversubscribed (핵심 차이 테스트)
+# Scenario B: SoftRack Oversubscribed (key difference test)
 #
-# preferred anti-affinity는 "soft" 제약이므로, 노드 수 < 파드 수일 때
-# 동일 노드에 여러 파드가 공존(colocation)할 수 있음을 검증.
-# rack 1과 rack 4가 같은 nodeName(kind-worker)을 지정하여 강제로 oversubscribe.
+# preferred anti-affinity is a "soft" constraint, so when node count < pod count,
+# multiple pods can colocate on the same node.
+# rack 1 and rack 4 share the same nodeName (kind-worker) to force oversubscription.
 #
-# 사전 조건:
-#   - soft-rack-test 템플릿 (podAntiAffinityLevel: preferred)
-#   - Kind 클러스터: kind-worker, kind-worker2, kind-worker3
+# Preconditions:
+#   - soft-rack-test template (podAntiAffinityLevel: preferred)
+#   - Kind cluster: kind-worker, kind-worker2, kind-worker3
 #
-# 기대 결과:
-#   - 4파드 **모두 Running** (soft이므로 colocation 허용)
-#   - kind-worker에 2파드 공존, 나머지 노드에 1파드씩
+# Expected Results:
+#   - **All 4 pods Running** (colocation allowed because soft constraint)
+#   - 2 pods colocated on kind-worker, 1 pod on each remaining node
 #
-# 검증:
+# Verification:
 #   kubectl get pods -l app.kubernetes.io/instance=test-soft-oversub -o wide
 #   kubectl get pods -l app.kubernetes.io/instance=test-soft-oversub \
 #     -o jsonpath='{range .items[*]}{.spec.nodeName}{"\n"}{end}' | sort | uniq -c
@@ -39,7 +39,7 @@ spec:
       - id: 3
         nodeName: kind-worker3
       - id: 4
-        nodeName: kind-worker    # rack 1과 같은 노드 — SoftRack이므로 공존 가능
+        nodeName: kind-worker    # same node as rack 1 — colocation allowed because SoftRack
   aerospikeConfig:
     namespaces:
       - name: data

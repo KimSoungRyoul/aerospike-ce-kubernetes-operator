@@ -13,6 +13,7 @@ import (
 
 	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
 	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/configgen"
+	ackoerrors "github.com/ksr/aerospike-ce-kubernetes-operator/internal/errors"
 	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/initcontainer"
 	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/podutil"
 	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/utils"
@@ -54,7 +55,11 @@ func (r *AerospikeClusterReconciler) reconcileConfigMap(
 	}
 
 	// Inject access-address placeholders based on network policy
-	configgen.InjectAccessAddressPlaceholders(effectiveConfig.Value, cluster.Spec.AerospikeNetworkPolicy)
+	var podSvcType string
+	if cluster.Spec.PodService != nil {
+		podSvcType = cluster.Spec.PodService.ServiceType
+	}
+	configgen.InjectAccessAddressPlaceholders(effectiveConfig.Value, cluster.Spec.AerospikeNetworkPolicy, podSvcType)
 
 	// Collect all pod names across all racks for mesh seed injection
 	racks := r.getRacks(cluster)
@@ -93,7 +98,7 @@ func (r *AerospikeClusterReconciler) reconcileConfigMap(
 		heartbeatPort,
 	)
 	if err != nil {
-		return fmt.Errorf("generating aerospike.conf: %w", err)
+		return ackoerrors.NewValidationf("generating aerospike.conf: %v", err)
 	}
 
 	// Build ConfigMap data

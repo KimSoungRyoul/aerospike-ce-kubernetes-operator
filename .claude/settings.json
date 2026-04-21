@@ -20,7 +20,7 @@
             "type": "command",
             "command": "INPUT=$(cat); f=$(echo \"$INPUT\" | jq -r '.tool_input.file_path // \"\"'); case \"$f\" in *.go) dir=$(dirname \"$f\"); cd \"$CLAUDE_PROJECT_DIR\" && bin/golangci-lint run --new-from-rev=HEAD --timeout 30s \"$dir\" 2>&1 | head -20 ;; esac",
             "timeout": 35,
-            "statusMessage": "golangci-lint 실행 중..."
+            "statusMessage": "Running golangci-lint..."
           }
         ]
       }

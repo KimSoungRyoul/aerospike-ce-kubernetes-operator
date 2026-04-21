@@ -108,7 +108,7 @@ spec:
       - data
     racks:
       - id: 1
-        nodeName: kind-worker    # hard-rack: 각 rack을 특정 노드에 고정
+        nodeName: kind-worker    # hard-rack: pin each rack to a specific node
       - id: 2
         nodeName: kind-worker2
       - id: 3

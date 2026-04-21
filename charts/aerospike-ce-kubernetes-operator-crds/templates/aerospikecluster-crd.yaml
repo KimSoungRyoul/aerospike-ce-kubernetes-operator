@@ -33,6 +33,13 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Available')].status
       name: Available
       type: string
+    - jsonPath: .status.seedsEndpoint
+      name: Seed
+      type: string
+    - jsonPath: .status.endpoints
+      name: Endpoints
+      priority: 1
+      type: string
     - jsonPath: .spec.image
       name: Image
       priority: 1
@@ -254,6 +261,15 @@ spec:
                         description: Labels is a map of custom labels.
                         type: object
                     type: object
+                  serviceType:
+                    description: |-
+                      ServiceType is the Kubernetes Service type for per-pod services.
+                      Defaults to ClusterIP. Set to NodePort or LoadBalancer for external access.
+                    enum:
+                    - ClusterIP
+                    - NodePort
+                    - LoadBalancer
+                    type: string
                 type: object
               image:
                 description: |-
@@ -718,8 +734,8 @@ spec:
                     type: object
                   description:
                     description: |-
-                      Description은 이 템플릿의 용도와 권장 환경을 설명합니다.
-                      예: "개발 환경용 단일 노드 클러스터" 또는 "프로덕션 멀티 랙 클러스터"
+                      Description describes the intended purpose and recommended environment for this template.
+                      E.g., "Single-node cluster for development" or "Production multi-rack cluster"
                     maxLength: 500
                     type: string
                   image:
@@ -1607,6 +1623,15 @@ spec:
                         description: Labels is a map of custom labels.
                         type: object
                     type: object
+                  serviceType:
+                    description: |-
+                      ServiceType is the Kubernetes Service type for per-pod services.
+                      Defaults to ClusterIP. Set to NodePort or LoadBalancer for external access.
+                    enum:
+                    - ClusterIP
+                    - NodePort
+                    - LoadBalancer
+                    type: string
                 type: object
               podSpec:
                 description: PodSpec defines pod-level configuration (sidecars, resources,
@@ -8787,6 +8812,15 @@ spec:
                             description: Labels is a map of custom labels.
                             type: object
                         type: object
+                      serviceType:
+                        description: |-
+                          ServiceType is the Kubernetes Service type for per-pod services.
+                          Defaults to ClusterIP. Set to NodePort or LoadBalancer for external access.
+                        enum:
+                        - ClusterIP
+                        - NodePort
+                        - LoadBalancer
+                        type: string
                     type: object
                   image:
                     description: |-
@@ -9254,8 +9288,8 @@ spec:
                         type: object
                       description:
                         description: |-
-                          Description은 이 템플릿의 용도와 권장 환경을 설명합니다.
-                          예: "개발 환경용 단일 노드 클러스터" 또는 "프로덕션 멀티 랙 클러스터"
+                          Description describes the intended purpose and recommended environment for this template.
+                          E.g., "Single-node cluster for development" or "Production multi-rack cluster"
                         maxLength: 500
                         type: string
                       image:
@@ -10147,6 +10181,15 @@ spec:
                             description: Labels is a map of custom labels.
                             type: object
                         type: object
+                      serviceType:
+                        description: |-
+                          ServiceType is the Kubernetes Service type for per-pod services.
+                          Defaults to ClusterIP. Set to NodePort or LoadBalancer for external access.
+                        enum:
+                        - ClusterIP
+                        - NodePort
+                        - LoadBalancer
+                        type: string
                     type: object
                   podSpec:
                     description: PodSpec defines pod-level configuration (sidecars,
@@ -17236,6 +17279,12 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              endpoints:
+                description: |-
+                  Endpoints is a comma-separated list of externally reachable endpoints
+                  (host:port) for client access. Populated from per-pod LoadBalancer/NodePort
+                  services and the seeds finder service. Empty when no external services are configured.
+                type: string
               failedReconcileCount:
                 description: |-
                   FailedReconcileCount is the number of consecutive failed reconciliations.
@@ -17327,6 +17376,7 @@ spec:
                     - ACLSync
                     - Paused
                     - Deleting
+                    - ConfigDegraded
                     type: string
                 type: object
               operatorVersion:
@@ -17354,6 +17404,7 @@ spec:
                 - ACLSync
                 - Paused
                 - Deleting
+                - ConfigDegraded
                 type: string
               phaseReason:
                 description: |-
@@ -17384,6 +17435,36 @@ spec:
                         or cleanup.
                       items:
                         type: string
+                      type: array
+                    dynamicConfigChanges:
+                      description: DynamicConfigChanges records per-change details
+                        from the last dynamic config update.
+                      items:
+                        description: DynamicConfigChangeStatus records the result
+                          of a single dynamic config change on a pod.
+                        properties:
+                          newValue:
+                            description: NewValue is the value that was applied or
+                              attempted.
+                            type: string
+                          oldValue:
+                            description: OldValue is the previous value before the
+                              change (empty for new keys).
+                            type: string
+                          path:
+                            description: Path is the config parameter path (e.g.,
+                              "service.proto-fd-max").
+                            type: string
+                          result:
+                            description: |-
+                              Result indicates whether the change succeeded or failed.
+                              Possible values: "Applied", "Failed", "RolledBack", "RollbackFailed".
+                            type: string
+                        required:
+                        - newValue
+                        - path
+                        - result
+                        type: object
                       type: array
                     dynamicConfigStatus:
                       description: |-
@@ -17468,6 +17549,11 @@ spec:
                 description: Pods contains status information for each pod in the
                   cluster.
                 type: object
+              seedsEndpoint:
+                description: |-
+                  SeedsEndpoint is the external endpoint (host:port) of the seeds finder
+                  LoadBalancer service. Clients use this as the initial seed address.
+                type: string
               selector:
                 description: Selector is the label selector for HPA compatibility.
                 type: string
@@ -17593,8 +17679,8 @@ spec:
                         type: object
                       description:
                         description: |-
-                          Description은 이 템플릿의 용도와 권장 환경을 설명합니다.
-                          예: "개발 환경용 단일 노드 클러스터" 또는 "프로덕션 멀티 랙 클러스터"
+                          Description describes the intended purpose and recommended environment for this template.
+                          E.g., "Single-node cluster for development" or "Production multi-rack cluster"
                         maxLength: 500
                         type: string
                       image:

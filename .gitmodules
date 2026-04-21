@@ -1,0 +1,3 @@
+[submodule "aerospike-cluster-manager"]
+	path = aerospike-cluster-manager
+	url = https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager.git

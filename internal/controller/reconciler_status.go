@@ -8,12 +8,15 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	aero "github.com/aerospike/aerospike-client-go/v8"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
@@ -105,6 +108,9 @@ func (r *AerospikeClusterReconciler) updateStatusAndPhase(
 
 		// Enrich status with Aerospike cluster info using a single client connection.
 		r.enrichStatusWithAerospikeInfo(ctx, latest)
+
+		// Populate external endpoints from per-pod and seeds finder LB services.
+		r.populateExternalEndpoints(ctx, latest)
 	}
 
 	// Update Prometheus metrics
@@ -118,7 +124,22 @@ func (r *AerospikeClusterReconciler) updateStatusAndPhase(
 		metrics.ClusterMigratingPartitions.WithLabelValues(latest.Namespace, latest.Name).Set(float64(latest.Status.MigrationStatus.RemainingPartitions))
 	}
 
-	return r.Status().Update(ctx, latest)
+	// Use RetryOnConflict for the final status write. On conflict, re-fetch the
+	// object and re-apply the computed status to avoid a full requeue cycle.
+	computedStatus := latest.Status.DeepCopy()
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		if err := r.Status().Update(ctx, latest); err != nil {
+			// Re-fetch on conflict and re-apply computed status.
+			refetched, fetchErr := r.refetchCluster(ctx, namespacedName)
+			if fetchErr != nil {
+				return fetchErr
+			}
+			refetched.Status = *computedStatus
+			latest = refetched
+			return err
+		}
+		return nil
+	})
 }
 
 // enrichStatusWithAerospikeInfo creates a single Aerospike client connection and uses it
@@ -318,6 +339,7 @@ func buildPodStatus(
 	lastRestartTime := prev.LastRestartTime
 	migratingPartitions := prev.MigratingPartitions
 	dynamicConfigStatus := prev.DynamicConfigStatus
+	dynamicConfigChanges := prev.DynamicConfigChanges
 	initializedVolumes := prev.InitializedVolumes
 
 	// Track pod instability: set UnstableSince on first NotReady, preserve it
@@ -354,6 +376,7 @@ func buildPodStatus(
 		UnstableSince:          unstableSince,
 		MigratingPartitions:    migratingPartitions,
 		DynamicConfigStatus:    dynamicConfigStatus,
+		DynamicConfigChanges:   dynamicConfigChanges,
 		InitializedVolumes:     initializedVolumes,
 	}
 }
@@ -477,6 +500,13 @@ func setFineGrainedConditions(cluster *ackov1alpha1.AerospikeCluster, o StatusUp
 		removeCondition(cluster, ackov1alpha1.ConditionACLSynced)
 	}
 
+	// DynamicConfigDegraded — clear when the cluster reaches a healthy phase.
+	// The condition is set by setConfigDegraded() when rollback fails; once the
+	// operator recovers (e.g., via cold restart), it is removed.
+	if cluster.Status.Phase != ackov1alpha1.AerospikePhaseConfigDegraded {
+		removeCondition(cluster, ackov1alpha1.ConditionDynamicConfigDegraded)
+	}
+
 	// MigrationComplete — set to False while rolling restart is in progress,
 	// True otherwise as a default. When phase == Completed, enrichStatusWithAerospikeInfo
 	// → applyMigrationStats will overwrite this with the actual cluster migration state.
@@ -562,8 +592,13 @@ type aeroPodInfo struct {
 	AccessEndpoints []string
 }
 
+// maxParallelInfoQueries limits the number of concurrent per-node info queries
+// to prevent connection storms on large clusters.
+const maxParallelInfoQueries = 8
+
 // collectAerospikeInfo collects per-node information (NodeID, ClusterName,
 // AccessEndpoints) keyed by pod name using the provided Aerospike client.
+// Queries are executed concurrently (bounded by maxParallelInfoQueries).
 // Errors are logged at V(1) and the function returns nil rather than failing
 // so that status updates are never blocked by an unreachable cluster.
 func collectAerospikeInfo(
@@ -579,9 +614,19 @@ func collectAerospikeInfo(
 		}
 	}
 
-	result := make(map[string]aeroPodInfo)
+	nodes := aeroClient.GetNodes()
+	if len(nodes) == 0 {
+		return nil
+	}
 
-	for _, node := range aeroClient.GetNodes() {
+	var (
+		mu     sync.Mutex
+		wg     sync.WaitGroup
+		sem    = make(chan struct{}, maxParallelInfoQueries)
+		result = make(map[string]aeroPodInfo, len(nodes))
+	)
+
+	for _, node := range nodes {
 		nodeHost := node.GetHost()
 		if nodeHost == nil {
 			log.V(1).Info("Skipping Aerospike node with nil host info")
@@ -593,30 +638,145 @@ func collectAerospikeInfo(
 			continue
 		}
 
-		info := aeroPodInfo{}
+		wg.Add(1)
+		sem <- struct{}{} // acquire semaphore slot
 
-		if nodeID, err := asinfoCommandOnNode(node, "node"); err == nil {
-			info.NodeID = strings.TrimSpace(nodeID)
-		} else {
-			log.V(1).Info("Failed to get nodeID", "pod", podName, "error", err)
-		}
+		go func(node *aero.Node, podName string) {
+			defer wg.Done()
+			defer func() { <-sem }() // release semaphore slot
 
-		if clusterName, err := asinfoCommandOnNode(node, "cluster-name"); err == nil {
-			info.ClusterName = strings.TrimSpace(clusterName)
-		} else {
-			log.V(1).Info("Failed to get cluster-name", "pod", podName, "error", err)
-		}
+			info := aeroPodInfo{}
 
-		if serviceStr, err := asinfoCommandOnNode(node, "service"); err == nil {
-			info.AccessEndpoints = parseServiceEndpoints(serviceStr)
-		} else {
-			log.V(1).Info("Failed to get service endpoints", "pod", podName, "error", err)
-		}
+			if nodeID, err := asinfoCommandOnNode(node, "node"); err == nil {
+				info.NodeID = strings.TrimSpace(nodeID)
+			} else {
+				log.V(1).Info("Failed to get nodeID", "pod", podName, "error", err)
+			}
 
-		result[podName] = info
+			if clusterName, err := asinfoCommandOnNode(node, "cluster-name"); err == nil {
+				info.ClusterName = strings.TrimSpace(clusterName)
+			} else {
+				log.V(1).Info("Failed to get cluster-name", "pod", podName, "error", err)
+			}
+
+			if serviceStr, err := asinfoCommandOnNode(node, "service"); err == nil {
+				info.AccessEndpoints = parseServiceEndpoints(serviceStr)
+			} else {
+				log.V(1).Info("Failed to get service endpoints", "pod", podName, "error", err)
+			}
+
+			mu.Lock()
+			result[podName] = info
+			mu.Unlock()
+		}(node, podName)
 	}
 
+	wg.Wait()
+
 	return result
+}
+
+// setConfigDegraded transitions the cluster to ConfigDegraded phase and sets
+// the DynamicConfigDegraded condition with details about which pods have
+// inconsistent configuration. This is called when a dynamic config rollback fails.
+func (r *AerospikeClusterReconciler) setConfigDegraded(
+	ctx context.Context,
+	cluster *ackov1alpha1.AerospikeCluster,
+	failedPods []string,
+) {
+	log := logf.FromContext(ctx)
+
+	latest, err := r.refetchCluster(ctx, types.NamespacedName{Name: cluster.Name, Namespace: cluster.Namespace})
+	if err != nil {
+		log.Error(err, "Failed to re-fetch cluster for ConfigDegraded status update")
+		return
+	}
+
+	base := latest.DeepCopy()
+	latest.Status.Phase = ackov1alpha1.AerospikePhaseConfigDegraded
+	latest.Status.PhaseReason = fmt.Sprintf("Dynamic config rollback failed on pods: %s", strings.Join(failedPods, ", "))
+
+	setCondition(latest, ackov1alpha1.ConditionDynamicConfigDegraded, true,
+		"RollbackFailed",
+		fmt.Sprintf("Dynamic config rollback failed on %d pod(s): %s. Cold restart required.",
+			len(failedPods), strings.Join(failedPods, ", ")))
+
+	if err := r.Status().Patch(ctx, latest, client.MergeFrom(base)); err != nil {
+		log.Error(err, "Failed to set ConfigDegraded status")
+		return
+	}
+
+	r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventDynamicConfigDegraded,
+		"Cluster entered ConfigDegraded phase: rollback failed on pods %s", strings.Join(failedPods, ", "))
+}
+
+// populateExternalEndpoints reads per-pod and seeds finder LoadBalancer/NodePort
+// services to populate status.Endpoints and status.SeedsEndpoint.
+func (r *AerospikeClusterReconciler) populateExternalEndpoints(
+	ctx context.Context,
+	cluster *ackov1alpha1.AerospikeCluster,
+) {
+	log := logf.FromContext(ctx)
+
+	// Collect per-pod external endpoints.
+	var endpoints []string
+	svcList := &corev1.ServiceList{}
+	matchLabels := utils.SelectorLabelsForCluster(cluster.Name)
+	if err := r.List(ctx, svcList,
+		client.InNamespace(cluster.Namespace),
+		client.MatchingLabels(matchLabels),
+		client.HasLabels{podServiceLabel},
+	); err != nil {
+		log.V(1).Info("Could not list pod services for endpoint status", "err", err)
+	} else {
+		for i := range svcList.Items {
+			svc := &svcList.Items[i]
+			if ep := externalEndpoint(svc); ep != "" {
+				endpoints = append(endpoints, ep)
+			}
+		}
+	}
+	slices.Sort(endpoints)
+	cluster.Status.Endpoints = strings.Join(endpoints, ",")
+
+	// Seeds finder LB endpoint.
+	seedsSvcName := seedsFinderServiceName(cluster.Name)
+	seedsSvc := &corev1.Service{}
+	if err := r.Get(ctx, types.NamespacedName{Name: seedsSvcName, Namespace: cluster.Namespace}, seedsSvc); err == nil {
+		cluster.Status.SeedsEndpoint = externalEndpoint(seedsSvc)
+	} else {
+		cluster.Status.SeedsEndpoint = ""
+	}
+}
+
+// externalEndpoint returns "host:port" from a LoadBalancer or NodePort service.
+// Returns empty string if no external endpoint is available.
+func externalEndpoint(svc *corev1.Service) string {
+	if len(svc.Spec.Ports) == 0 {
+		return ""
+	}
+	port := svc.Spec.Ports[0].Port
+
+	if svc.Spec.Type == corev1.ServiceTypeLoadBalancer {
+		for _, ing := range svc.Status.LoadBalancer.Ingress {
+			host := ing.IP
+			if host == "" {
+				host = ing.Hostname
+			}
+			if host != "" {
+				return fmt.Sprintf("%s:%d", host, port)
+			}
+		}
+	}
+
+	if svc.Spec.Type == corev1.ServiceTypeNodePort && len(svc.Spec.Ports) > 0 {
+		np := svc.Spec.Ports[0].NodePort
+		if np > 0 {
+			return fmt.Sprintf("<node-ip>:%d", np)
+		}
+	}
+
+	return ""
 }
 
 // parseServiceEndpoints splits the asinfo "service" response (semicolon-separated

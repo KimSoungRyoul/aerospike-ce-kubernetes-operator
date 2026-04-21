@@ -19,6 +19,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -50,12 +51,11 @@ const (
 	// take minutes to hours, so polling every 5s creates unnecessary API server load.
 	migrationRequeueInterval = 30 * time.Second
 
-	// podReadyPollInterval is the requeue interval used when reconciliation
-	// completes successfully but not all pods are ready yet. The controller
-	// does not watch pod readiness events directly, so periodic polling is
-	// required to detect when pods transition to Ready and update status
-	// conditions (Available, Ready).
-	podReadyPollInterval = 10 * time.Second
+	// podReadyPollInterval is the fallback requeue interval used when
+	// reconciliation completes but not all pods are ready yet. The controller
+	// watches pod readiness events directly via podReadyPredicate, so this
+	// longer interval serves only as a safety net for missed watch events.
+	podReadyPollInterval = 60 * time.Second
 
 	// reconcileTimeout is the maximum duration for a single reconciliation loop.
 	// If the context deadline is exceeded, the reconcile will be retried with backoff.
@@ -102,6 +102,7 @@ type AerospikeClusterReconciler struct {
 // +kubebuilder:rbac:groups=monitoring.coreos.com,resources=prometheusrules,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=cilium.io,resources=ciliumnetworkpolicies,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch;delete
 
 func (r *AerospikeClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	// Apply reconcile timeout to prevent infinite execution.
@@ -150,15 +151,20 @@ func (r *AerospikeClusterReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	// 4. Check if paused
-	if cluster.Spec.Paused != nil && *cluster.Spec.Paused {
-		log.Info("Reconciliation paused")
-		if err := r.setPhase(ctx, cluster, ackov1alpha1.AerospikePhasePaused, "Reconciliation paused by user"); err != nil {
-			if errors.IsConflict(err) {
-				return ctrl.Result{Requeue: true}, nil
-			}
+	wasPaused := cluster.Status.Phase == ackov1alpha1.AerospikePhasePaused
+	isPaused := cluster.Spec.Paused != nil && *cluster.Spec.Paused
+
+	if isPaused {
+		if err := r.HandlePause(ctx, cluster); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
+	}
+	if wasPaused && !isPaused {
+		if err := r.HandleResume(ctx, cluster); err != nil {
+			log.Error(err, "Failed to handle resume from paused state")
+			return ctrl.Result{Requeue: true}, nil
+		}
 	}
 
 	// Circuit breaker: if consecutive failures exceed threshold, back off exponentially.
@@ -210,6 +216,19 @@ func (r *AerospikeClusterReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// 6b. Reconcile per-pod services
 	if err := r.reconcilePodServices(ctx, cluster); err != nil {
 		log.Error(err, "Failed to reconcile per-pod services", "cluster", cluster.Name)
+		metrics.ReconcileErrorsTotal.WithLabelValues(cluster.Namespace, cluster.Name, metrics.ReasonService).Inc()
+		return r.handleReconcileError(ctx, cluster, err)
+	}
+
+	// 6c. Reconcile RBAC for pod service init container
+	if err := r.reconcilePodServiceRBAC(ctx, cluster); err != nil {
+		log.Error(err, "Failed to reconcile pod service RBAC", "cluster", cluster.Name)
+		return r.handleReconcileError(ctx, cluster, err)
+	}
+
+	// 6d. Reconcile seeds finder service
+	if err := r.reconcileSeedsFinderService(ctx, cluster); err != nil {
+		log.Error(err, "Failed to reconcile seeds finder service", "cluster", cluster.Name)
 		metrics.ReconcileErrorsTotal.WithLabelValues(cluster.Namespace, cluster.Name, metrics.ReasonService).Inc()
 		return r.handleReconcileError(ctx, cluster, err)
 	}
@@ -319,16 +338,24 @@ func (r *AerospikeClusterReconciler) handleReconcileError(
 	errMsg := truncateUTF8(reconcileErr.Error(), 256)
 
 	// Validation errors are permanent and will never self-heal.
-	// Don't increment the circuit breaker counter for these.
+	// Immediately activate the circuit breaker to prevent wasteful retries.
 	if ackoerrors.IsValidation(reconcileErr) {
-		log.Info("Validation error detected, not incrementing circuit breaker",
+		log.Info("Permanent validation error detected, activating circuit breaker immediately",
 			"error", reconcileErr)
-		// Still update the error message for visibility.
+		latest.Status.FailedReconcileCount = maxFailedReconciles
 		latest.Status.LastReconcileError = errMsg
+		setCondition(latest, ackov1alpha1.ConditionReconcileHealthy, false,
+			"PermanentError", errMsg)
 		if err := r.Status().Update(updateCtx, latest); err != nil {
 			log.Error(err, "Failed to update validation error in status")
+			return ctrl.Result{}, reconcileErr
 		}
-		return ctrl.Result{}, reconcileErr
+		cluster.Status.FailedReconcileCount = latest.Status.FailedReconcileCount
+		cluster.Status.LastReconcileError = latest.Status.LastReconcileError
+		r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventPermanentError,
+			"Permanent validation error, automatic retries halted: %s", errMsg)
+		backoff := calculateBackoff(maxFailedReconciles)
+		return ctrl.Result{RequeueAfter: backoff}, nil
 	}
 
 	latest.Status.FailedReconcileCount++
@@ -371,6 +398,8 @@ func (r *AerospikeClusterReconciler) resetFailedReconcileCount(
 	prevCount := latest.Status.FailedReconcileCount
 	latest.Status.FailedReconcileCount = 0
 	latest.Status.LastReconcileError = ""
+	setCondition(latest, ackov1alpha1.ConditionReconcileHealthy, true,
+		"ReconcileSucceeded", "Reconciliation succeeded")
 
 	if err := r.Status().Update(ctx, latest); err != nil {
 		return err
@@ -544,10 +573,9 @@ func (r *AerospikeClusterReconciler) reconcileCluster(
 
 	log.Info("Reconciliation completed successfully")
 
-	// The controller does not watch pod readiness events directly (StatefulSet
-	// Owns() uses GenerationChangedPredicate which ignores status-only updates).
-	// If not all pods are ready yet, poll periodically so that the Available and
-	// Ready conditions are updated once the pods finish starting up.
+	// The controller watches pod Ready condition transitions via podReadyPredicate,
+	// but as a safety net for missed watch events, requeue with a longer fallback
+	// interval if not all pods are ready yet.
 	latest, err := r.refetchCluster(ctx, namespacedName)
 	if err == nil && latest.Status.Size < latest.Spec.Size {
 		log.Info("Not all pods ready yet, requeuing for status update",
@@ -618,38 +646,42 @@ func (r *AerospikeClusterReconciler) getRackSize(cluster *ackov1alpha1.Aerospike
 }
 
 // setPhase re-fetches the latest cluster object and updates its phase and reason.
-// It handles conflict errors by returning a requeue result (nil error)
-// so the caller can decide to requeue without logging a spurious error.
+// Uses RetryOnConflict to handle transient conflict errors without requiring
+// a full requeue cycle.
 func (r *AerospikeClusterReconciler) setPhase(ctx context.Context, cluster *ackov1alpha1.AerospikeCluster, phase ackov1alpha1.AerospikePhase, reason string) error {
-	log := logf.FromContext(ctx)
 	desiredPendingRestartPods := slices.Clone(cluster.Status.PendingRestartPods)
+	nn := types.NamespacedName{Name: cluster.Name, Namespace: cluster.Namespace}
 
-	// Re-fetch the latest version to avoid "object has been modified" conflicts.
-	latest, err := r.refetchCluster(ctx, types.NamespacedName{Name: cluster.Name, Namespace: cluster.Namespace})
-	if err != nil {
-		return err
-	}
+	var latestRV string
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		latest, fetchErr := r.refetchCluster(ctx, nn)
+		if fetchErr != nil {
+			return fetchErr
+		}
 
-	if latest.Status.Phase == phase &&
-		latest.Status.PhaseReason == reason &&
-		slices.Equal(latest.Status.PendingRestartPods, desiredPendingRestartPods) {
-		return nil
-	}
+		if latest.Status.Phase == phase &&
+			latest.Status.PhaseReason == reason &&
+			slices.Equal(latest.Status.PendingRestartPods, desiredPendingRestartPods) {
+			latestRV = latest.ResourceVersion
+			return nil
+		}
 
-	latest.Status.Phase = phase
-	latest.Status.PhaseReason = reason
-	latest.Status.PendingRestartPods = desiredPendingRestartPods
-	if err := r.Status().Update(ctx, latest); err != nil {
-		if errors.IsConflict(err) {
-			log.V(1).Info("Conflict updating phase, will requeue", "phase", phase)
+		latest.Status.Phase = phase
+		latest.Status.PhaseReason = reason
+		latest.Status.PendingRestartPods = desiredPendingRestartPods
+		if err := r.Status().Update(ctx, latest); err != nil {
 			return err
 		}
+		latestRV = latest.ResourceVersion
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 
 	// Propagate the updated resource version back to the caller's object
 	// so subsequent operations in the same reconcile loop use fresh data.
-	cluster.ResourceVersion = latest.ResourceVersion
+	cluster.ResourceVersion = latestRV
 	cluster.Status.Phase = phase
 	cluster.Status.PhaseReason = reason
 	cluster.Status.PendingRestartPods = slices.Clone(desiredPendingRestartPods)
@@ -695,6 +727,14 @@ func (r *AerospikeClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			&ackov1alpha1.AerospikeClusterTemplate{},
 			handler.EnqueueRequestsFromMapFunc(r.mapTemplateToCluster),
 			builder.WithPredicates(predicate.GenerationChangedPredicate{}),
+		).
+		// Watch Pods for Ready condition transitions. When a pod becomes ready
+		// (or loses readiness), the owning AerospikeCluster is reconciled to
+		// update Available/Ready conditions without relying solely on polling.
+		Watches(
+			&corev1.Pod{},
+			handler.EnqueueRequestsFromMapFunc(r.mapPodToCluster),
+			builder.WithPredicates(podReadyPredicate{}),
 		).
 		// Watch Secrets referenced by AerospikeCluster ACL users.
 		// Secret data changes (e.g., password rotation) don't increment the CR's
@@ -841,6 +881,69 @@ func (secretDataChangedPredicate) Update(e event.UpdateEvent) bool {
 	// Compare actual Data content to avoid unnecessary reconciliation on
 	// metadata-only changes (e.g., label updates that bump ResourceVersion).
 	return !reflect.DeepEqual(oldSecret.Data, newSecret.Data)
+}
+
+// podReadyPredicate fires only when a pod's Ready condition status changes
+// (false→true or true→false). This avoids reconciliation on unrelated pod
+// updates (e.g., label changes, resource version bumps).
+type podReadyPredicate struct {
+	predicate.Funcs
+}
+
+func (podReadyPredicate) Create(_ event.CreateEvent) bool   { return false }
+func (podReadyPredicate) Generic(_ event.GenericEvent) bool { return false }
+func (podReadyPredicate) Delete(e event.DeleteEvent) bool   { return true }
+
+func (podReadyPredicate) Update(e event.UpdateEvent) bool {
+	oldPod, ok := e.ObjectOld.(*corev1.Pod)
+	if !ok {
+		return false
+	}
+	newPod, ok := e.ObjectNew.(*corev1.Pod)
+	if !ok {
+		return false
+	}
+	return podReadyConditionStatus(oldPod) != podReadyConditionStatus(newPod)
+}
+
+// podReadyConditionStatus returns the status of the PodReady condition,
+// or ConditionUnknown if not present.
+func podReadyConditionStatus(pod *corev1.Pod) corev1.ConditionStatus {
+	for _, c := range pod.Status.Conditions {
+		if c.Type == corev1.PodReady {
+			return c.Status
+		}
+	}
+	return corev1.ConditionUnknown
+}
+
+// mapPodToCluster maps a Pod event to the owning AerospikeCluster via
+// standard labels (app.kubernetes.io/name, app.kubernetes.io/instance).
+// Only pods managed by ACKO (identified by the app.kubernetes.io/name label)
+// are considered.
+func (r *AerospikeClusterReconciler) mapPodToCluster(_ context.Context, obj client.Object) []reconcile.Request {
+	pod, ok := obj.(*corev1.Pod)
+	if !ok {
+		return nil
+	}
+
+	// Fast-path: skip pods not managed by ACKO.
+	labels := pod.GetLabels()
+	if labels[utils.AppLabel] != "aerospike-cluster" {
+		return nil
+	}
+
+	clusterName, ok := labels[utils.InstanceLabel]
+	if !ok {
+		return nil
+	}
+
+	return []reconcile.Request{{
+		NamespacedName: types.NamespacedName{
+			Namespace: pod.Namespace,
+			Name:      clusterName,
+		},
+	}}
 }
 
 // truncateUTF8 truncates s to at most maxBytes bytes without splitting

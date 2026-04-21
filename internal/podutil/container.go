@@ -142,6 +142,27 @@ func BuildInitContainer(
 	initMounts = append(initMounts, volumeMounts...)
 
 	env := buildInitEnvVars()
+
+	// Inject external service type and namespace for init container to resolve
+	// external addresses from per-pod LoadBalancer/NodePort services.
+	if cluster.Spec.PodService != nil && cluster.Spec.PodService.ServiceType != "" &&
+		cluster.Spec.PodService.ServiceType != "ClusterIP" {
+		env = append(env,
+			corev1.EnvVar{
+				Name:  "EXTERNAL_SERVICE_TYPE",
+				Value: cluster.Spec.PodService.ServiceType,
+			},
+			corev1.EnvVar{
+				Name: "POD_NAMESPACE",
+				ValueFrom: &corev1.EnvVarSource{
+					FieldRef: &corev1.ObjectFieldSelector{
+						FieldPath: "metadata.namespace",
+					},
+				},
+			},
+		)
+	}
+
 	if wipeVolumes := buildWipeVolumesEnv(storageSpec, dirtyVolumes); wipeVolumes != "" {
 		env = append(env, corev1.EnvVar{
 			Name:  "WIPE_VOLUMES",

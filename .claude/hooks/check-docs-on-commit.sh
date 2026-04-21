@@ -1,58 +1,58 @@
 #!/bin/bash
 #
-# Claude Code Hook: feat commit 시 docs 업데이트 여부 검사
+# Claude Code Hook: Check whether docs are updated on feat commits
 #
-# 기능 추가(feat) commit에서 소스 코드가 변경되었는데
-# docs/ 디렉토리에 변경사항이 없으면 commit을 차단합니다.
-# fix, refactor, test, chore 등 기능 추가가 아닌 commit은 통과합니다.
+# When source code is changed in a feature (feat) commit
+# but the docs/ directory has no changes, the commit is blocked.
+# Non-feature commits (fix, refactor, test, chore, etc.) are allowed through.
 #
 
-# stdin에서 hook input JSON 읽기
+# Read hook input JSON from stdin
 INPUT=$(cat)
 
-# Bash 명령어 추출
+# Extract Bash command
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // ""')
 
-# git commit 명령이 아니면 통과
+# Allow through if not a git commit command
 if ! echo "$COMMAND" | grep -qE 'git\s+commit'; then
   exit 0
 fi
 
-# commit 메시지가 feat으로 시작하는지 확인
-# Claude Code의 commit 명령 형식:
+# Check if commit message starts with feat
+# Claude Code commit command formats:
 #   git commit -m "feat: ..."
 #   git commit -m "$(cat <<'EOF'\nfeat: ...\nEOF\n)"
-# 명령 전체에서 feat 키워드 존재 여부로 판단
+# Determine by checking for feat keyword in the full command
 IS_FEAT=false
 if echo "$COMMAND" | grep -qiE '(^|[\s"'"'"'(])feat[\s(:]'; then
   IS_FEAT=true
 fi
 
-# feat이 아니면 통과 (fix, refactor, test, chore, docs, ci 등)
+# Allow through if not a feat commit (fix, refactor, test, chore, docs, ci, etc.)
 if [ "$IS_FEAT" = false ]; then
   exit 0
 fi
 
-# staged 파일 목록 가져오기
+# Get list of staged files
 STAGED_FILES=$(git diff --cached --name-only 2>/dev/null || true)
 
-# staged 파일이 없으면 통과 (commit이 실패할 것이므로)
+# Allow through if no staged files (commit will fail anyway)
 if [ -z "$STAGED_FILES" ]; then
   exit 0
 fi
 
-# 소스 코드 변경 감지 패턴
-# Go 소스, CRD YAML, config/samples, Makefile 등
+# Source code change detection patterns
+# Go source, CRD YAML, config/samples, Makefile, etc.
 SOURCE_PATTERNS="\.go$|config/crd/|config/samples/|config/rbac/|Makefile|\.yaml$|\.yml$"
 
-# docs 변경 감지 패턴
+# Docs change detection pattern
 DOCS_PATTERN="^docs/"
 
-# 소스 코드 변경 여부 확인
+# Check for source code changes
 HAS_SOURCE_CHANGES=false
 while IFS= read -r file; do
   if echo "$file" | grep -qE "$SOURCE_PATTERNS"; then
-    # docs/ 내부 파일은 제외
+    # Exclude files inside docs/
     if ! echo "$file" | grep -qE "$DOCS_PATTERN"; then
       HAS_SOURCE_CHANGES=true
       break
@@ -60,12 +60,12 @@ while IFS= read -r file; do
   fi
 done <<< "$STAGED_FILES"
 
-# 소스 코드 변경이 없으면 통과 (docs-only 변경, README 수정 등)
+# Allow through if no source code changes (docs-only changes, README edits, etc.)
 if [ "$HAS_SOURCE_CHANGES" = false ]; then
   exit 0
 fi
 
-# docs 변경 여부 확인
+# Check for docs changes
 HAS_DOCS_CHANGES=false
 while IFS= read -r file; do
   if echo "$file" | grep -qE "$DOCS_PATTERN"; then
@@ -74,20 +74,20 @@ while IFS= read -r file; do
   fi
 done <<< "$STAGED_FILES"
 
-# 소스 변경이 있는데 docs 변경이 없으면 차단
+# Block if source changes exist but no docs changes
 if [ "$HAS_DOCS_CHANGES" = false ]; then
-  # 변경된 소스 파일 목록 생성
+  # Build list of changed source files
   CHANGED_SOURCE_FILES=$(echo "$STAGED_FILES" | grep -E "$SOURCE_PATTERNS" | grep -vE "$DOCS_PATTERN" || true)
 
-  echo "feat commit: 소스 코드가 변경되었지만 docs/ 디렉토리에 변경사항이 없습니다." >&2
+  echo "feat commit: Source code was changed but the docs/ directory has no changes." >&2
   echo "" >&2
-  echo "변경된 소스 파일:" >&2
+  echo "Changed source files:" >&2
   while IFS= read -r f; do
     [ -n "$f" ] && echo "  - $f" >&2
   done <<< "$CHANGED_SOURCE_FILES"
   echo "" >&2
-  echo "docs/ 디렉토리의 문서를 업데이트한 후 다시 commit 해주세요." >&2
-  echo "Docusaurus 문서 위치: docs/content/" >&2
+  echo "Please update the documentation in the docs/ directory and commit again." >&2
+  echo "Docusaurus docs location: docs/content/" >&2
   exit 2
 fi
 

@@ -1,0 +1,110 @@
+name: Skill Impact Notify
+# On merge to main: if skill-impacting files changed, automatically create a review issue in project-hub
+run-name: "Skill Impact: ${{ github.event.head_commit.message }}"
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'api/v1alpha1/aerospikecluster_types.go'
+      - 'api/v1alpha1/aerospikecluster_webhook.go'
+      - 'api/v1alpha1/types_storage.go'
+      - 'api/v1alpha1/types_network.go'
+      - 'api/v1alpha1/types_pod.go'
+      - 'api/v1alpha1/types_rack.go'
+      - 'internal/controller/reconciler_status.go'
+      - 'internal/controller/reconciler_restart.go'
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ secrets.GH_AW_GITHUB_TOKEN }}
+      HUB_REPO: aerospike-ce-ecosystem/project-hub
+      SOURCE_REPO: aerospike-ce-kubernetes-operator
+      COMMIT_SHA: ${{ github.sha }}
+      COMMIT_MSG: ${{ github.event.head_commit.message }}
+    steps:
+      - name: Detect affected skills and create hub issue
+        run: |
+          set -euo pipefail
+
+          echo "=== Step 1: Get changed files ==="
+          CHANGED_FILES=$(gh api "repos/${{ github.repository }}/commits/${COMMIT_SHA}" \
+            --jq '[.files[].filename] | join("\n")')
+          echo "Changed files:"
+          echo "${CHANGED_FILES}"
+
+          echo "=== Step 2: Map files to affected skills ==="
+          AFFECTED_SKILLS=""
+          AFFECTED_FILES=""
+
+          # File-to-skill mapping for ACKO
+          while IFS= read -r file; do
+            case "${file}" in
+              api/v1alpha1/aerospikecluster_types.go)
+                AFFECTED_SKILLS="${AFFECTED_SKILLS}acko-deploy\nacko-operations\nacko-config-reference\n"
+                AFFECTED_FILES="${AFFECTED_FILES}- \`${file}\` → **acko-deploy**, **acko-operations**, **acko-config-reference** (CRD spec, status fields)\n"
+                ;;
+              api/v1alpha1/aerospikecluster_webhook.go)
+                AFFECTED_SKILLS="${AFFECTED_SKILLS}acko-deploy\nacko-config-reference\n"
+                AFFECTED_FILES="${AFFECTED_FILES}- \`${file}\` → **acko-deploy**, **acko-config-reference** (CE constraints, validation rules, defaults)\n"
+                ;;
+              api/v1alpha1/types_*.go)
+                AFFECTED_SKILLS="${AFFECTED_SKILLS}acko-deploy\n"
+                AFFECTED_FILES="${AFFECTED_FILES}- \`${file}\` → **acko-deploy** (CR spec fields)\n"
+                ;;
+              internal/controller/reconciler_status.go)
+                AFFECTED_SKILLS="${AFFECTED_SKILLS}acko-operations\nacko-cluster-debugger\n"
+                AFFECTED_FILES="${AFFECTED_FILES}- \`${file}\` → **acko-operations**, **acko-cluster-debugger** (phase names, status fields, events)\n"
+                ;;
+              internal/controller/reconciler_restart.go)
+                AFFECTED_SKILLS="${AFFECTED_SKILLS}acko-operations\n"
+                AFFECTED_FILES="${AFFECTED_FILES}- \`${file}\` → **acko-operations** (restart procedures)\n"
+                ;;
+            esac
+          done <<< "${CHANGED_FILES}"
+
+          # Deduplicate skills
+          UNIQUE_SKILLS=$(echo -e "${AFFECTED_SKILLS}" | sort -u | grep -v '^$' | paste -sd ',' -)
+
+          if [ -z "${UNIQUE_SKILLS}" ]; then
+            echo "No skill-impacting files changed. Skipping."
+            exit 0
+          fi
+
+          echo "Affected skills: ${UNIQUE_SKILLS}"
+
+          echo "=== Step 3: Create hub issue ==="
+          COMMIT_TITLE=$(echo "${COMMIT_MSG}" | head -1)
+
+          ISSUE_BODY=$(cat <<ISSUEEOF
+          ## Skill Impact Review
+
+          **Source**: \`${SOURCE_REPO}\` ([commit ${COMMIT_SHA:0:7}](https://github.com/${{ github.repository }}/commit/${COMMIT_SHA}))
+          **Commit**: ${COMMIT_TITLE}
+          **Affected skills**: ${UNIQUE_SKILLS}
+
+          ### Changed Files → Skill Mapping
+
+          $(echo -e "${AFFECTED_FILES}")
+
+          ### Next Steps
+          1. The \`skill-impact-review\` label is automatically attached so the Hub Planner can analyze the diff
+          2. After reviewing the analysis, adding the \`start-implement\` label will automatically dispatch to the plugins repo
+
+          ---
+          > This issue was automatically created by the skill-impact-notify workflow in ${SOURCE_REPO}.
+          ISSUEEOF
+          )
+
+          gh issue create \
+            --repo "${HUB_REPO}" \
+            --title "[Skill Impact] ${SOURCE_REPO}: ${COMMIT_TITLE}" \
+            --body "${ISSUE_BODY}" \
+            --label "skill-impact-review" \
+            --label "cross-repo"
+
+          echo "=== Done ==="

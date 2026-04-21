@@ -1,5 +1,5 @@
 name: PR Reviewer
-# needs-review 라벨 시 PR diff 자동 리뷰 → HIGH/MEDIUM 이슈 자동 수정 (max 3회) → review-complete 라벨
+# On needs-review label: auto-review PR diff → auto-fix HIGH/MEDIUM issues (max 3 iterations) → add review-complete label
 
 on:
   pull_request:
@@ -25,11 +25,11 @@ jobs:
       - name: Run Claude Code - PR Review
         uses: anthropics/claude-code-action@v1
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_code_oauth_token: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GH_AW_GITHUB_TOKEN }}
-          bot_id: '24240623'
-          bot_name: 'KimSoungRyoul'
-          allowed_bots: '*'
+          bot_id: '${{ vars.CLAUDE_BOT_ID }}'
+          bot_name: '${{ vars.CLAUDE_BOT_NAME }}'
+          allowed_bots: '${{ vars.CLAUDE_ALLOWED_BOTS }}'
           branch_prefix: ''
           prompt: |
             You are an AI code review agent for **aerospike-ce-kubernetes-operator** (ACKO).
@@ -39,17 +39,17 @@ jobs:
             - CRD types in `api/v1alpha1/`, controllers in `internal/controller/`
 
             ## Task
-            Review PR #${{ github.event.pull_request.number }} with auto-fix loop (max 3 iterations).
+            Review PR #${{ github.event.pull_request.number }} with auto-fix loop (max ${{ vars.CLAUDE_REVIEW_MAX_ITERATIONS }} iterations).
 
             ### Review Loop
-            For each iteration (up to 3):
+            For each iteration (up to ${{ vars.CLAUDE_REVIEW_MAX_ITERATIONS }}):
 
             1. **Analyze**: `gh pr diff ${{ github.event.pull_request.number }}`
                - **HIGH**: Bugs, security issues, data loss in cluster ops, breaking CRD changes, reconciliation errors, RBAC issues, resource leaks
                - **MEDIUM**: Missing error handling, incomplete tests, missing status updates
                - **LOW**: Naming, docs, style
 
-            2. **If HIGH or MEDIUM issues + iteration < 3**: Fix all HIGH and MEDIUM issues, commit (`fix(review): ...`), push, comment progress, continue
+            2. **If HIGH or MEDIUM issues + iteration < ${{ vars.CLAUDE_REVIEW_MAX_ITERATIONS }}**: Fix all HIGH and MEDIUM issues, commit (`fix(review): ...`), push, comment progress, continue
             3. **If no HIGH/MEDIUM issues or limit reached**: Break
 
             ### Final Review
@@ -59,11 +59,11 @@ jobs:
             Add `review-complete` label: `gh pr edit ${{ github.event.pull_request.number }} --add-label "review-complete"`
 
             ## Constraints
-            - Max 3 iterations, auto-fix HIGH and MEDIUM issues
+            - Max ${{ vars.CLAUDE_REVIEW_MAX_ITERATIONS }} iterations, auto-fix HIGH and MEDIUM issues
             - Leave LOW as suggestions only
             - Always mention @kimsoungryoul in final comment
           claude_args: |
-            --max-turns 300
-            --model claude-opus-4-6
+            --max-turns ${{ vars.CLAUDE_MAX_TURNS }}
+            --model ${{ vars.CLAUDE_MODEL }}
             --dangerously-skip-permissions
-          settings: '{"git":{"includeCoAuthor":false},"env":{"CLAUDE_CODE_EFFORT":"high"}}'
+          settings: '${{ vars.CLAUDE_SETTINGS }}'

@@ -81,10 +81,6 @@ clean: ## Remove build artifacts, coverage files, and tool binaries.
 	rm -f cover*.out
 	rm -f cover.html
 
-# TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
-# The default setup assumes Kind is pre-installed and builds/loads the manager container image locally.
-# CertManager is installed by default; skip with:
-# - CERT_MANAGER_INSTALL_SKIP=true
 KIND_CLUSTER ?= aerospike-ce-kubernetes-operator-test-e2e
 
 .PHONY: setup-kind
@@ -415,11 +411,14 @@ $(ENVTEST): $(LOCALBIN)
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
 $(GOLANGCI_LINT): $(LOCALBIN)
 	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
-	@test -f .custom-gcl.yml && { \
-		echo "Building custom golangci-lint with plugins..." && \
-		$(GOLANGCI_LINT) custom --destination $(LOCALBIN) --name golangci-lint-custom && \
-		mv -f $(LOCALBIN)/golangci-lint-custom $(GOLANGCI_LINT); \
-	} || true
+	@if test -f .custom-gcl.yml; then \
+		if ! $(GOLANGCI_LINT) linters 2>/dev/null | grep -q logcheck; then \
+			echo "Building custom golangci-lint with plugins..." && \
+			GOFLAGS=-buildvcs=false $(GOLANGCI_LINT) custom --destination $(LOCALBIN) --name golangci-lint-custom && \
+			mv -f $(LOCALBIN)/golangci-lint-custom $(GOLANGCI_LINT)-$(GOLANGCI_LINT_VERSION) && \
+			ln -sf "$$(realpath "$(GOLANGCI_LINT)-$(GOLANGCI_LINT_VERSION)")" $(GOLANGCI_LINT); \
+		fi; \
+	fi
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary

@@ -3,7 +3,9 @@ package controller
 import (
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/configdiff"
 )
 
@@ -235,5 +237,110 @@ func TestBuildSetConfigCommand_RejectsSemicolonInContext(t *testing.T) {
 	_, err := buildSetConfigCommand(change)
 	if err == nil {
 		t.Error("expected error for semicolon in context")
+	}
+}
+
+// --- RollbackResult tests ---
+
+func TestRollbackResult_HasFailures(t *testing.T) {
+	tests := []struct {
+		name     string
+		result   RollbackResult
+		expected bool
+	}{
+		{"no failures", RollbackResult{SuccessCount: 3, FailedCount: 0}, false},
+		{"some failures", RollbackResult{SuccessCount: 2, FailedCount: 1, FailedPods: []string{"pod-1"}}, true},
+		{"all failures", RollbackResult{SuccessCount: 0, FailedCount: 3, FailedPods: []string{"pod-0", "pod-1", "pod-2"}}, true},
+		{"empty result", RollbackResult{}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.result.HasFailures(); got != tt.expected {
+				t.Errorf("RollbackResult.HasFailures() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+// --- buildRollbackCommand tests ---
+
+func TestBuildRollbackCommand_WithOldValue(t *testing.T) {
+	log := logr.Discard()
+	change := configdiff.Change{
+		Path:     "service.proto-fd-max",
+		Context:  "service",
+		Key:      "proto-fd-max",
+		OldValue: 15000,
+		NewValue: 20000,
+	}
+
+	cmd := buildRollbackCommand(log, change)
+	expected := "set-config:context=service;proto-fd-max=15000"
+	if cmd != expected {
+		t.Errorf("buildRollbackCommand = %q, want %q", cmd, expected)
+	}
+}
+
+func TestBuildRollbackCommand_NilOldValue(t *testing.T) {
+	log := logr.Discard()
+	change := configdiff.Change{
+		Path:     "service.proto-fd-max",
+		Context:  "service",
+		Key:      "proto-fd-max",
+		OldValue: nil,
+		NewValue: 20000,
+	}
+
+	cmd := buildRollbackCommand(log, change)
+	if cmd != "" {
+		t.Errorf("buildRollbackCommand should return empty for nil OldValue, got %q", cmd)
+	}
+}
+
+func TestBuildRollbackCommand_InvalidOldValue(t *testing.T) {
+	log := logr.Discard()
+	change := configdiff.Change{
+		Path:     "service.proto-fd-max",
+		Context:  "service;inject",
+		Key:      "proto-fd-max",
+		OldValue: 15000,
+		NewValue: 20000,
+	}
+
+	cmd := buildRollbackCommand(log, change)
+	if cmd != "" {
+		t.Errorf("buildRollbackCommand should return empty for invalid context, got %q", cmd)
+	}
+}
+
+func TestBuildRollbackCommand_NamespaceScoped(t *testing.T) {
+	log := logr.Discard()
+	change := configdiff.Change{
+		Path:      "namespace.default-ttl",
+		Context:   "namespace",
+		Key:       "default-ttl",
+		OldValue:  1800,
+		NewValue:  3600,
+		Namespace: "myns",
+	}
+
+	cmd := buildRollbackCommand(log, change)
+	expected := "set-config:context=namespace;id=myns;default-ttl=1800"
+	if cmd != expected {
+		t.Errorf("buildRollbackCommand = %q, want %q", cmd, expected)
+	}
+}
+
+// --- perPodDynamicConfigTimeout tests ---
+
+func TestPerPodDynamicConfigTimeout_Value(t *testing.T) {
+	// Verify the timeout constant is reasonable for CE max (8 pods)
+	// 30s × 8 = 240s < 300s (reconcileTimeout)
+	maxPods := 8
+	totalTime := perPodDynamicConfigTimeout * time.Duration(maxPods)
+	if totalTime >= reconcileTimeout {
+		t.Errorf("perPodDynamicConfigTimeout * maxPods (%v) should be less than reconcileTimeout (%v)",
+			totalTime, reconcileTimeout)
 	}
 }

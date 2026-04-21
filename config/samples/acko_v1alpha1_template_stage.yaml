@@ -6,10 +6,10 @@ metadata:
     app.kubernetes.io/profile: soft-rack
 spec:
   description: >-
-    스테이징 환경 추천. 멀티 랙(3 랙 이상)으로 배포하며 로컬 PVC를 보장합니다.
-    단, 동일한 쿠버네티스 노드에 여러 랙(Aerospike 파드)이 함께 배포될 수 있어 노드 수준의 완전한 격리는 보장하지 않습니다.
+    Recommended for staging. Deploys across multiple racks (3 or more) with local PVC guaranteed.
+    However, multiple racks (Aerospike pods) may be co-located on the same Kubernetes node, so full node-level isolation is not guaranteed.
 
-  size: 3   # 스테이징 권장 3-rack 구성; 클러스터 생성 시 spec.size로 재정의 가능
+  size: 3   # Recommended 3-rack staging configuration; override with spec.size when creating a cluster
 
   scheduling:
     podAntiAffinityLevel: preferred   # Soft anti-affinity for better spread

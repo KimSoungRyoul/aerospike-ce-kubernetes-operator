@@ -1,11 +1,11 @@
-# SoftRack 테스트용 템플릿 (Kind 환경 경량화)
+# SoftRack test template (lightweight for Kind environment)
 #
 # podAntiAffinityLevel: preferred
 #   -> PreferredDuringSchedulingIgnoredDuringExecution (weight=100)
-#   -> 동일 노드 공존 허용, 가능하면 spread
+#   -> Colocation on the same node is allowed; spread preferred when possible
 #
-# 프로덕션 soft-rack 템플릿(config/samples/acko_v1alpha1_template_stage.yaml) 대비
-# CPU/Memory/Storage를 Kind 로컬 환경에 맞게 줄임.
+# Compared to the production soft-rack template (config/samples/acko_v1alpha1_template_stage.yaml),
+# CPU/Memory/Storage are reduced to fit the Kind local environment.
 ---
 apiVersion: acko.io/v1alpha1
 kind: AerospikeClusterTemplate

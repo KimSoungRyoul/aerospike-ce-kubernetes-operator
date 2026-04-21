@@ -3,6 +3,17 @@
 # =============================================================================
 
 # =============================================================================
+# Aerospike Images (used by default templates and UI wizard)
+# =============================================================================
+# Override these for air-gapped environments where Docker Hub is unreachable.
+# Example: aerospikeImages.aerospike: "internal-registry.example.com/aerospike:ce-8.1.1.1"
+aerospikeImages:
+  # -- Default Aerospike CE server image
+  aerospike: "aerospike:ce-8.1.1.1"
+  # -- Default Prometheus exporter sidecar image
+  exporter: "aerospike/aerospike-prometheus-exporter:1.16.1"
+
+# =============================================================================
 # CRD Management
 # =============================================================================
 crds:
@@ -23,8 +34,8 @@ replicaCount: 1
 image:
   # -- Container image repository
   repository: ghcr.io/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator
-  # -- Container image tag; defaults to Chart.appVersion when empty
-  tag: ""
+  # -- Container image tag
+  tag: "latest"
   # -- Image pull policy: Always, IfNotPresent, or Never
   pullPolicy: IfNotPresent
 
@@ -74,10 +85,11 @@ webhook:
 certManager:
   # -- Use cert-manager to provision webhook TLS certificates.
   # This controls whether Certificate/Issuer resources are created.
-  # Requires cert-manager to be installed in the cluster — either:
-  #   1) Via subchart: set cert-manager.enabled=true below, OR
-  #   2) Pre-installed: install cert-manager separately before this chart.
-  # When disabled, you must provide a TLS secret manually via webhookTlsSecret.
+  # Requires cert-manager to be pre-installed in the cluster.
+  # Install cert-manager separately before installing this chart:
+  #   helm install cert-manager jetstack/cert-manager --set crds.enabled=true
+  # Alternatively, disable cert-manager integration and provide a TLS secret manually
+  # via webhookTlsSecret below.
   enabled: true
 
   # -- Issuer configuration for cert-manager
@@ -112,9 +124,9 @@ serviceMonitor:
   # -- Create a ServiceMonitor resource for Prometheus Operator
   enabled: false
   # -- Scrape interval (e.g., "30s")
-  # interval: 30s
+  interval: ""
   # -- Scrape timeout (e.g., "10s")
-  # scrapeTimeout: 10s
+  scrapeTimeout: ""
   # -- Additional labels for the ServiceMonitor (useful for Prometheus selection)
   additionalLabels: {}
 
@@ -182,7 +194,7 @@ podDisruptionBudget:
   minAvailable: 1
   # -- Maximum unavailable pods (mutually exclusive with minAvailable).
   # Uncomment and remove minAvailable to use.
-  # maxUnavailable: 0
+  maxUnavailable: ""
 
 # =============================================================================
 # Horizontal Pod Autoscaler
@@ -198,7 +210,7 @@ autoscaling:
   # -- Target average CPU utilization percentage
   targetCPUUtilizationPercentage: 80
   # -- Target average memory utilization percentage (optional)
-  # targetMemoryUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: ""
 
 # =============================================================================
 # Scheduling
@@ -261,7 +273,9 @@ podLabels: {}
 # =============================================================================
 ui:
   # -- Enable the Aerospike Cluster Manager web UI.
-  # Deploys the 3-Deployment dashboard (backend + legacy frontend + renewal frontend).
+  # Deploys the 3-Deployment dashboard (backend + legacy frontend + renewal frontend)
+  # alongside the operator. Access a service via:
+  #   kubectl port-forward svc/<release>-aerospike-ce-kubernetes-operator-ui-frontend 3000:3000
   enabled: true
 
   # -- Number of replicas for each UI Deployment (backend / frontend / frontend-renewal)
@@ -466,8 +480,11 @@ ui:
   persistence:
     # -- Enable persistent storage for the embedded PostgreSQL database
     enabled: true
-    # -- Storage class name (empty = default)
-    storageClassName: ""
+    # -- Storage class name for the PostgreSQL PVC.
+    # null  = use cluster default StorageClass
+    # ""    = disable dynamic provisioning (use pre-provisioned PV)
+    # "name" = use the specified StorageClass (e.g., "rbd-ssd-user", "gp3")
+    storageClassName: null
     # -- Access mode
     accessMode: ReadWriteOnce
     # -- Volume size
@@ -479,6 +496,10 @@ ui:
   k8s:
     # -- Enable Kubernetes cluster management features (Create Cluster)
     enabled: true
+    # -- Verify TLS certificates when connecting to the Kubernetes API server.
+    # Set to false for clusters with self-signed or non-standard CA certificates
+    # (e.g., Missing Authority Key Identifier).
+    verifySsl: true
 
   # =============================================================================
   # Security Context
@@ -554,6 +575,32 @@ ui:
   terminationGracePeriodSeconds: 45
 
   # =============================================================================
+  # Host Network
+  # =============================================================================
+  # Use the node's network namespace for the UI pod. Useful for local/dev
+  # clusters (e.g., Kind) that need to reach corporate Aerospike hosts via the
+  # host's VPN/DNS resolver. When enabled, dnsPolicy defaults to
+  # ClusterFirstWithHostNet so in-cluster DNS still works alongside host DNS.
+  # WARNING: hostNetwork bypasses K8s network isolation and binds container
+  # ports directly on the node. Do not enable in production.
+  # -- Run the UI pod in the host network namespace
+  hostNetwork: false
+
+  # -- Override the pod dnsPolicy. When hostNetwork is true and this is empty,
+  # defaults to ClusterFirstWithHostNet. Common values: ClusterFirst,
+  # ClusterFirstWithHostNet, Default, None.
+  dnsPolicy: ""
+
+  # -- Additional Pod DNS configuration (searches, nameservers, options).
+  # Useful for adding corporate search domains when connecting to internal
+  # Aerospike clusters via short hostnames. Example:
+  #   dnsConfig:
+  #     searches:
+  #       - nfra.io
+  #       - navercorp.com
+  dnsConfig: {}
+
+  # =============================================================================
   # Aerospike Ports
   # =============================================================================
   aerospikePorts:
@@ -583,7 +630,7 @@ ui:
     minAvailable: 1
     # -- Maximum number of pods that can be unavailable (mutually exclusive with minAvailable).
     # Uncomment and remove minAvailable to use.
-    # maxUnavailable: 1
+    maxUnavailable: ""
 
   # =============================================================================
   # Autoscaling (HPA)
@@ -598,7 +645,7 @@ ui:
     # -- Target CPU utilization percentage
     targetCPUUtilizationPercentage: 80
     # -- Target memory utilization percentage (optional, uncomment to enable)
-    # targetMemoryUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: ""
 
   # =============================================================================
   # Extra Environment Variables
@@ -637,9 +684,9 @@ defaultTemplates:
   templates:
     minimal:
       description: >-
-        개발 환경 추천. 단일 파드(1 Pod)로 구성되며 PVC와 네트워크 I/O 성능은 고려하지 않습니다.
-        기능 동작 확인에만 집중하는 최소 구성 클러스터로, 빠른 이터레이션이 필요한 로컬·임시 개발 환경에 적합합니다.
-      image: aerospike:ce-8.1.1.1
+        Recommended for development. Runs as a single pod (1 Pod) without concern for PVC or network I/O performance.
+        A minimal cluster focused solely on verifying feature behavior, suited for local or ephemeral development environments where fast iteration is needed.
+      # image is set from aerospikeImages.aerospike via template
       size: 1
       monitoring:
         enabled: false
@@ -665,8 +712,8 @@ defaultTemplates:
 
     soft-rack:
       description: >-
-        스테이징 환경 추천. 멀티 랙(3 랙 이상)으로 배포하며 로컬 PVC를 보장합니다.
-        단, 동일한 쿠버네티스 노드에 여러 랙(Aerospike 파드)이 함께 배포될 수 있어 노드 수준의 완전한 격리는 보장하지 않습니다.
+        Recommended for staging. Deploys across multiple racks (3 or more) with local PVC guaranteed.
+        However, multiple racks (Aerospike pods) may be co-located on the same Kubernetes node, so full node-level isolation is not guaranteed.
       scheduling:
         podAntiAffinityLevel: preferred
         tolerations:
@@ -693,9 +740,9 @@ defaultTemplates:
 
     hard-rack:
       description: >-
-        프로덕션 환경 추천. 쿠버네티스 노드당 1개의 랙을 보장(required 안티어피니티)하고 로컬 PVC를 보장합니다.
-        최소 3개 이상의 멀티 랙 구성을 권장하며, 완전한 데이터 로컬리티와 장애 도메인 격리를 제공합니다.
-      image: aerospike:ce-8.1.1.1
+        Recommended for production. Guarantees one rack per Kubernetes node (required anti-affinity) with local PVC.
+        A minimum of 3 racks is recommended, providing full data locality and fault domain isolation.
+      # image and exporterImage are set from aerospikeImages via template
       size: 6
       monitoring:
         enabled: true
@@ -736,4 +783,3 @@ defaultTemplates:
           proto-fd-max: 15000
         namespaceDefaults:
           replication-factor: 2
-          data-size: 2147483648
