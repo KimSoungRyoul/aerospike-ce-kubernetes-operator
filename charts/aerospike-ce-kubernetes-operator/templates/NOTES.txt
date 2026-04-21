@@ -96,16 +96,27 @@ Access the UI via Ingress:
 
 Access the UI via port-forward:
 
-  kubectl port-forward svc/{{ include "aerospike-ce-kubernetes-operator.ui.fullname" . }} {{ .Values.ui.service.frontendPort }}:{{ .Values.ui.service.frontendPort }} -n {{ .Release.Namespace }}
+  # Legacy frontend (port {{ .Values.ui.frontend.service.port }})
+  kubectl port-forward svc/{{ include "aerospike-ce-kubernetes-operator.ui.frontend.fullname" . }} {{ .Values.ui.frontend.service.port }}:{{ .Values.ui.frontend.service.port }} -n {{ .Release.Namespace }}
 
-Then open http://localhost:{{ .Values.ui.service.frontendPort }} in your browser.
+{{- if .Values.ui.frontendRenewal.enabled }}
+
+  # Frontend renewal (port {{ .Values.ui.frontendRenewal.service.port }})
+  kubectl port-forward svc/{{ include "aerospike-ce-kubernetes-operator.ui.frontendRenewal.fullname" . }} {{ .Values.ui.frontendRenewal.service.port }}:{{ .Values.ui.frontendRenewal.service.port }} -n {{ .Release.Namespace }}
+
+Then open http://localhost:{{ .Values.ui.frontend.service.port }} (or http://localhost:{{ .Values.ui.frontendRenewal.service.port }}) in your browser.
+{{- else }}
+
+Then open http://localhost:{{ .Values.ui.frontend.service.port }} in your browser.
+(`ui.frontendRenewal.enabled=false` — renewal UI is not deployed.)
+{{- end }}
 
 {{- end }}
 
 Verify the backend is running:
 
-  kubectl port-forward svc/{{ include "aerospike-ce-kubernetes-operator.ui.fullname" . }} {{ .Values.ui.service.backendPort }}:{{ .Values.ui.service.backendPort }} -n {{ .Release.Namespace }}
-  curl http://localhost:{{ .Values.ui.service.backendPort }}/api/health
+  kubectl port-forward svc/{{ include "aerospike-ce-kubernetes-operator.ui.backend.fullname" . }} 8000:{{ .Values.ui.backend.service.port }} -n {{ .Release.Namespace }}
+  curl http://localhost:8000/api/health
 
 {{- if .Values.ui.k8s.enabled }}
 

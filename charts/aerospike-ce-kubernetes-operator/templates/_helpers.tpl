@@ -174,9 +174,79 @@ UI service account name.
 {{- end }}
 
 {{/*
-UI container image with tag.
-UI is versioned independently from the operator; tag is set explicitly in values.yaml.
+UI component-specific fullnames (backend / frontend / frontend-renewal).
 */}}
-{{- define "aerospike-ce-kubernetes-operator.ui.image" -}}
-{{- printf "%s:%s" .Values.ui.image.repository (.Values.ui.image.tag | toString) -}}
+{{- define "aerospike-ce-kubernetes-operator.ui.backend.fullname" -}}
+{{- include "aerospike-ce-kubernetes-operator.ui.fullname" . }}-backend
+{{- end }}
+
+{{- define "aerospike-ce-kubernetes-operator.ui.frontend.fullname" -}}
+{{- include "aerospike-ce-kubernetes-operator.ui.fullname" . }}-frontend
+{{- end }}
+
+{{- define "aerospike-ce-kubernetes-operator.ui.frontendRenewal.fullname" -}}
+{{- include "aerospike-ce-kubernetes-operator.ui.fullname" . }}-frontend-renewal
+{{- end }}
+
+{{/*
+UI component-specific selector labels (adds app.kubernetes.io/component override).
+*/}}
+{{- define "aerospike-ce-kubernetes-operator.ui.backend.selectorLabels" -}}
+{{ include "aerospike-ce-kubernetes-operator.ui.selectorLabels" . }}
+app.kubernetes.io/component: ui-backend
+{{- end }}
+
+{{- define "aerospike-ce-kubernetes-operator.ui.frontend.selectorLabels" -}}
+{{ include "aerospike-ce-kubernetes-operator.ui.selectorLabels" . }}
+app.kubernetes.io/component: ui-frontend
+{{- end }}
+
+{{- define "aerospike-ce-kubernetes-operator.ui.frontendRenewal.selectorLabels" -}}
+{{ include "aerospike-ce-kubernetes-operator.ui.selectorLabels" . }}
+app.kubernetes.io/component: ui-frontend-renewal
+{{- end }}
+
+{{/*
+UI component-specific common labels.
+*/}}
+{{- define "aerospike-ce-kubernetes-operator.ui.backend.labels" -}}
+helm.sh/chart: {{ include "aerospike-ce-kubernetes-operator.chart" . }}
+{{ include "aerospike-ce-kubernetes-operator.ui.backend.selectorLabels" . }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+
+{{- define "aerospike-ce-kubernetes-operator.ui.frontend.labels" -}}
+helm.sh/chart: {{ include "aerospike-ce-kubernetes-operator.chart" . }}
+{{ include "aerospike-ce-kubernetes-operator.ui.frontend.selectorLabels" . }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+
+{{- define "aerospike-ce-kubernetes-operator.ui.frontendRenewal.labels" -}}
+helm.sh/chart: {{ include "aerospike-ce-kubernetes-operator.chart" . }}
+{{ include "aerospike-ce-kubernetes-operator.ui.frontendRenewal.selectorLabels" . }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+
+{{/*
+UI image helpers (per-component).
+*/}}
+{{- define "aerospike-ce-kubernetes-operator.ui.backend.image" -}}
+{{- printf "%s:%s" .Values.ui.backend.image.repository (.Values.ui.backend.image.tag | toString) -}}
+{{- end }}
+
+{{- define "aerospike-ce-kubernetes-operator.ui.frontend.image" -}}
+{{- printf "%s:%s" .Values.ui.frontend.image.repository (.Values.ui.frontend.image.tag | toString) -}}
+{{- end }}
+
+{{- define "aerospike-ce-kubernetes-operator.ui.frontendRenewal.image" -}}
+{{- printf "%s:%s" .Values.ui.frontendRenewal.image.repository (.Values.ui.frontendRenewal.image.tag | toString) -}}
 {{- end }}

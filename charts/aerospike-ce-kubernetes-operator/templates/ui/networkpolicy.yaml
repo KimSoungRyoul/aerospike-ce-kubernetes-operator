@@ -15,10 +15,14 @@ spec:
     - Egress
   ingress:
     - ports:
-        - port: {{ .Values.ui.service.frontendPort }}
+        - port: {{ .Values.ui.backend.service.targetPort }}
           protocol: TCP
-        - port: {{ .Values.ui.service.backendPort }}
+        - port: {{ .Values.ui.frontend.service.port }}
           protocol: TCP
+        {{- if .Values.ui.frontendRenewal.enabled }}
+        - port: {{ .Values.ui.frontendRenewal.service.port }}
+          protocol: TCP
+        {{- end }}
       {{- with .Values.ui.networkPolicy.ingressFrom }}
       from:
         {{- toYaml . | nindent 8 }}

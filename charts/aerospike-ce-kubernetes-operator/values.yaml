@@ -273,24 +273,135 @@ podLabels: {}
 # =============================================================================
 ui:
   # -- Enable the Aerospike Cluster Manager web UI.
-  # Deploys a full-stack management dashboard alongside the operator.
-  # Access via: kubectl port-forward svc/<release>-aerospike-ce-kubernetes-operator-ui 3000:3000
+  # Deploys the 3-Deployment dashboard (backend + legacy frontend + renewal frontend)
+  # alongside the operator. Access a service via:
+  #   kubectl port-forward svc/<release>-aerospike-ce-kubernetes-operator-ui-frontend 3000:3000
   enabled: true
 
-  # -- Number of UI replicas
+  # -- Number of replicas for each UI Deployment (backend / frontend / frontend-renewal)
   replicaCount: 1
 
-  # -- Container image settings (single image containing both frontend and backend)
-  image:
-    # -- Container image repository
-    repository: ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager
-    # -- Container image tag. UI is versioned independently from the operator.
-    tag: "latest"
-    # -- Image pull policy
-    pullPolicy: IfNotPresent
-
-  # -- Image pull secrets for private registries
+  # -- Image pull secrets for private registries (applied to all UI Deployments)
   imagePullSecrets: []
+
+  # =============================================================================
+  # Backend (FastAPI) — port 8000 internally, Service port 80
+  # =============================================================================
+  backend:
+    image:
+      repository: ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-backend
+      tag: "latest"
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      # -- Service port exposed (HTTP default 80). Traffic is forwarded to containerPort 8000.
+      port: 80
+      # -- Container port (non-privileged; required because container runs as non-root).
+      targetPort: 8000
+      annotations: {}
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 200m
+        memory: 512Mi
+    livenessProbe:
+      httpGet:
+        path: /api/health
+        port: backend
+      initialDelaySeconds: 15
+      periodSeconds: 20
+      timeoutSeconds: 5
+    readinessProbe:
+      httpGet:
+        path: /api/health
+        port: backend
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 5
+    startupProbe:
+      httpGet:
+        path: /api/health
+        port: backend
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 30
+
+  # =============================================================================
+  # Frontend (legacy Next.js) — port 3000
+  # =============================================================================
+  frontend:
+    image:
+      repository: ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-frontend
+      tag: "latest"
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      port: 3000
+      annotations: {}
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 150m
+        memory: 384Mi
+    livenessProbe:
+      httpGet:
+        path: /
+        port: frontend
+      initialDelaySeconds: 15
+      periodSeconds: 20
+      timeoutSeconds: 5
+    readinessProbe:
+      httpGet:
+        path: /
+        port: frontend
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 5
+
+  # =============================================================================
+  # Frontend Renewal (Next.js 14 Tremor rewrite) — port 3100
+  # =============================================================================
+  # The renewal frontend is a parallel rewrite that runs alongside the legacy
+  # `frontend/` image. It's enabled by default so both are reachable during the
+  # migration, but can be turned off to ship only the legacy UI (or the other
+  # way around while the rewrite stabilizes). `ui.enabled=false` still disables
+  # the whole UI stack regardless of this flag.
+  frontendRenewal:
+    # -- Deploy the renewal (Tremor-based) frontend alongside the legacy one.
+    enabled: true
+    image:
+      repository: ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-frontend-renewal
+      tag: "latest"
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      port: 3100
+      annotations: {}
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 150m
+        memory: 384Mi
+    livenessProbe:
+      httpGet:
+        path: /
+        port: frontend
+      initialDelaySeconds: 15
+      periodSeconds: 20
+      timeoutSeconds: 5
+    readinessProbe:
+      httpGet:
+        path: /
+        port: frontend
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 5
 
   # =============================================================================
   # Service Account & RBAC
@@ -306,32 +417,13 @@ ui:
     create: true
 
   # =============================================================================
-  # Service
-  # =============================================================================
-  service:
-    # -- Service type (ClusterIP, NodePort, or LoadBalancer)
-    type: ClusterIP
-    # -- Frontend port (Next.js web UI)
-    frontendPort: 3000
-    # -- Backend port (FastAPI REST API)
-    backendPort: 8000
-    # -- Annotations to add to the UI Service.
-    # Useful for cloud load balancer configuration, DNS controllers, etc.
-    # Example (AWS NLB):
-    #   annotations:
-    #     service.beta.kubernetes.io/aws-load-balancer-type: nlb
-    #     service.beta.kubernetes.io/aws-load-balancer-scheme: internal
-    # Example (GCP Internal LB):
-    #   annotations:
-    #     cloud.google.com/load-balancer-type: Internal
-    annotations: {}
-
-  # =============================================================================
-  # Ingress
+  # Ingress (routes to frontend Service by default; override target via ui.ingress.targetPort)
   # =============================================================================
   ingress:
     # -- Enable ingress for external access
     enabled: false
+    # -- Which UI Service the Ingress should route to: frontend | frontendRenewal | backend
+    target: frontend
     # -- Ingress class name
     className: ""
     # -- Ingress annotations
@@ -410,21 +502,6 @@ ui:
     verifySsl: true
 
   # =============================================================================
-  # Resources
-  # =============================================================================
-  # -- CPU and memory resource requests/limits for the UI container.
-  # The UI is a lightweight Next.js + FastAPI application; these defaults
-  # are suitable for most deployments. Increase limits if serving many
-  # concurrent users or running complex queries.
-  resources:
-    requests:
-      cpu: 100m
-      memory: 256Mi
-    limits:
-      cpu: 200m
-      memory: 512Mi
-
-  # =============================================================================
   # Security Context
   # =============================================================================
   podSecurityContext:
@@ -440,46 +517,6 @@ ui:
     capabilities:
       drop:
         - ALL
-
-  # =============================================================================
-  # Probes
-  # =============================================================================
-  # The /api/health endpoint on the backend port performs a comprehensive health
-  # check covering both the FastAPI backend and the Next.js frontend. The startup
-  # probe allows up to 150s (30 * 5s) for initial boot (DB migrations, etc.)
-  # before liveness checks begin.
-  # =============================================================================
-
-  # -- Liveness probe configuration for the UI container.
-  # Restarts the container if it becomes unresponsive.
-  livenessProbe:
-    httpGet:
-      path: /api/health
-      port: backend
-    initialDelaySeconds: 15
-    periodSeconds: 20
-    timeoutSeconds: 5
-
-  # -- Readiness probe configuration for the UI container.
-  # Removes the pod from Service endpoints until it is ready to serve traffic.
-  readinessProbe:
-    httpGet:
-      path: /api/health
-      port: backend
-    initialDelaySeconds: 5
-    periodSeconds: 10
-    timeoutSeconds: 5
-
-  # -- Startup probe configuration for the UI container.
-  # Allows slow-starting containers to finish initialization before liveness
-  # checks begin. failureThreshold * periodSeconds = max startup time.
-  startupProbe:
-    httpGet:
-      path: /api/health
-      port: backend
-    periodSeconds: 5
-    timeoutSeconds: 3
-    failureThreshold: 30
 
   # =============================================================================
   # Environment

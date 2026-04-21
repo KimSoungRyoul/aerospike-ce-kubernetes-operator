@@ -11,9 +11,10 @@ data:
   LOG_LEVEL: {{ .Values.ui.env.logLevel | quote }}
   LOG_FORMAT: {{ .Values.ui.env.logFormat | quote }}
   K8S_MANAGEMENT_ENABLED: {{ .Values.ui.k8s.enabled | quote }}
-  BACKEND_URL: "http://localhost:{{ .Values.ui.service.backendPort }}"
-  FRONTEND_PORT: {{ .Values.ui.service.frontendPort | quote }}
-  BACKEND_PORT: {{ .Values.ui.service.backendPort | quote }}
+  # Next.js rewrites target (frontend / frontend-renewal both consume this to proxy /api/* to the backend Service)
+  BACKEND_URL: {{ printf "http://%s:%d" (include "aerospike-ce-kubernetes-operator.ui.backend.fullname" .) (int .Values.ui.backend.service.port) | quote }}
+  FRONTEND_PORT: {{ .Values.ui.frontend.service.port | quote }}
+  BACKEND_PORT: {{ .Values.ui.backend.service.targetPort | quote }}
   DB_POOL_SIZE: {{ .Values.ui.env.dbPoolSize | quote }}
   DB_POOL_OVERFLOW: {{ .Values.ui.env.dbPoolOverflow | quote }}
   DB_POOL_TIMEOUT: {{ .Values.ui.env.dbPoolTimeout | quote }}
