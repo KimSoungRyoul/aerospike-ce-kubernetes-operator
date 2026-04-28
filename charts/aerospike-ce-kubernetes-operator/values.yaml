@@ -327,6 +327,24 @@ ui:
       periodSeconds: 5
       timeoutSeconds: 3
       failureThreshold: 30
+    # -- Extra volumes attached to the backend pod. Use together with
+    # `extraVolumeMounts` and `ui.k8s.caFile` to mount a custom CA bundle for
+    # K8s API verification on clusters whose API-server cert lacks the
+    # Authority Key Identifier extension. Example:
+    #   extraVolumes:
+    #     - name: k8s-api-ca
+    #       secret:
+    #         secretName: my-k8s-api-ca
+    #         items:
+    #           - key: ca.crt
+    #             path: ca.crt
+    extraVolumes: []
+    # -- Extra volume mounts on the backend container. Example:
+    #   extraVolumeMounts:
+    #     - name: k8s-api-ca
+    #       mountPath: /etc/ssl/k8s
+    #       readOnly: true
+    extraVolumeMounts: []
 
   # =============================================================================
   # Frontend (legacy Next.js) — port 3000
@@ -500,6 +518,13 @@ ui:
     # Set to false for clusters with self-signed or non-standard CA certificates
     # (e.g., Missing Authority Key Identifier).
     verifySsl: true
+    # -- Path inside the backend container to a custom CA bundle (PEM) used to
+    # verify the K8s API-server certificate. Required on clusters whose
+    # API-server cert is signed by a CA that lacks the Authority Key Identifier
+    # extension — CPython 3.13+ rejects such chains by default. Mount the CA
+    # via `ui.backend.extraVolumes` / `ui.backend.extraVolumeMounts`.
+    # Example: "/etc/ssl/k8s/ca.crt"
+    caFile: ""
 
   # =============================================================================
   # Security Context
