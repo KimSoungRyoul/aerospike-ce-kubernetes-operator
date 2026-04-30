@@ -4461,11 +4461,11 @@ func newServiceMonitorAwareClient(t *testing.T, objs ...client.Object) client.Cl
 		Build()
 }
 
-func makeMonitoringEnabledCluster(name, namespace string, uid types.UID) *AerospikeCluster {
+func makeMonitoringEnabledCluster(uid types.UID) *AerospikeCluster {
 	return &AerospikeCluster{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
+			Name:      "demo",
+			Namespace: "ns-a",
 			UID:       uid,
 		},
 		Spec: AerospikeClusterSpec{
@@ -4485,7 +4485,7 @@ func makeMonitoringEnabledCluster(name, namespace string, uid types.UID) *Aerosp
 // a pre-existing ServiceMonitor owned by a *different* AerospikeCluster causes
 // the webhook to reject the new CR.
 func TestValidateServiceMonitorUniqueness_RejectsConflictingOwner(t *testing.T) {
-	cluster := makeMonitoringEnabledCluster("demo", "ns-a", "uid-new")
+	cluster := makeMonitoringEnabledCluster("uid-new")
 	smName := serviceMonitorName(cluster)
 
 	otherOwner := metav1.OwnerReference{
@@ -4514,7 +4514,7 @@ func TestValidateServiceMonitorUniqueness_RejectsConflictingOwner(t *testing.T) 
 // ServiceMonitor with no owner references at all (e.g. hand-rolled by an
 // admin) blocks the new CR — the operator must not silently take it over.
 func TestValidateServiceMonitorUniqueness_NoOwnerRefs(t *testing.T) {
-	cluster := makeMonitoringEnabledCluster("demo", "ns-a", "uid-new")
+	cluster := makeMonitoringEnabledCluster("uid-new")
 	smName := serviceMonitorName(cluster)
 	existing := newServiceMonitorUnstructured(smName, "ns-a", nil)
 
@@ -4533,7 +4533,7 @@ func TestValidateServiceMonitorUniqueness_NoOwnerRefs(t *testing.T) {
 // existing ServiceMonitor whose owner UID matches *this* cluster is treated
 // as ours — required to keep ValidateUpdate idempotent.
 func TestValidateServiceMonitorUniqueness_IdempotentSameOwner(t *testing.T) {
-	cluster := makeMonitoringEnabledCluster("demo", "ns-a", "uid-self")
+	cluster := makeMonitoringEnabledCluster("uid-self")
 	smName := serviceMonitorName(cluster)
 
 	selfOwner := metav1.OwnerReference{
@@ -4554,7 +4554,7 @@ func TestValidateServiceMonitorUniqueness_IdempotentSameOwner(t *testing.T) {
 // TestValidateServiceMonitorUniqueness_NoConflict ensures that listing
 // returning no matching ServiceMonitor is allowed.
 func TestValidateServiceMonitorUniqueness_NoConflict(t *testing.T) {
-	cluster := makeMonitoringEnabledCluster("demo", "ns-a", "uid-new")
+	cluster := makeMonitoringEnabledCluster("uid-new")
 
 	// Pre-populate an unrelated ServiceMonitor in the same namespace.
 	otherOwner := metav1.OwnerReference{
@@ -4577,7 +4577,7 @@ func TestValidateServiceMonitorUniqueness_NoConflict(t *testing.T) {
 // confirms that a same-named ServiceMonitor in a *different* namespace does
 // not block creation. The webhook must scope the lookup to cluster.Namespace.
 func TestValidateServiceMonitorUniqueness_DifferentNamespaceIsNotAConflict(t *testing.T) {
-	cluster := makeMonitoringEnabledCluster("demo", "ns-a", "uid-new")
+	cluster := makeMonitoringEnabledCluster("uid-new")
 	smName := serviceMonitorName(cluster)
 
 	otherOwner := metav1.OwnerReference{
@@ -4666,7 +4666,7 @@ func TestValidateServiceMonitorUniqueness_MonitoringDisabled(t *testing.T) {
 // this file's tests). This protects existing tests that build the validator
 // without a client.
 func TestValidateServiceMonitorUniqueness_NilClient(t *testing.T) {
-	cluster := makeMonitoringEnabledCluster("demo", "ns-a", "uid-new")
+	cluster := makeMonitoringEnabledCluster("uid-new")
 	v := &AerospikeClusterValidator{}
 
 	if err := v.validateServiceMonitorUniqueness(context.Background(), cluster); err != nil {
@@ -4678,7 +4678,7 @@ func TestValidateServiceMonitorUniqueness_NilClient(t *testing.T) {
 // ValidateCreate entry point to confirm the new check is wired into the
 // webhook chain (not just callable directly).
 func TestValidateCreate_RejectsDuplicateServiceMonitor(t *testing.T) {
-	cluster := makeMonitoringEnabledCluster("demo", "ns-a", "uid-new")
+	cluster := makeMonitoringEnabledCluster("uid-new")
 	// Provide enough monitoring config to pass the pure validate() pass so we
 	// reach the client-dependent ServiceMonitor uniqueness check.
 	cluster.Spec.Monitoring.ExporterImage = "aerospike/aerospike-prometheus-exporter:1.16.1"
