@@ -25,9 +25,13 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
@@ -50,8 +54,17 @@ const (
 func (r *AerospikeCluster) SetupWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr, r).
 		WithDefaulter(&AerospikeClusterDefaulter{}).
-		WithValidator(&AerospikeClusterValidator{}).
+		WithValidator(&AerospikeClusterValidator{Client: mgr.GetClient()}).
 		Complete()
+}
+
+// serviceMonitorGVK is the GroupVersionKind used to query ServiceMonitors via
+// the unstructured client. Mirrors internal/controller.serviceMonitorGVK; kept
+// local here to avoid an import cycle from api -> internal/controller.
+var serviceMonitorGVK = schema.GroupVersionKind{
+	Group:   "monitoring.coreos.com",
+	Version: "v1",
+	Kind:    "ServiceMonitor",
 }
 
 // +kubebuilder:webhook:path=/mutate-acko-io-v1alpha1-aerospikecluster,mutating=true,failurePolicy=fail,sideEffects=None,groups=acko.io,resources=aerospikeclusters,verbs=create;update,versions=v1alpha1,name=maerospikecluster.kb.io,admissionReviewVersions=v1
@@ -195,14 +208,23 @@ func getOrCreateMapSection(m map[string]any, key string) (map[string]any, error)
 // +kubebuilder:webhook:path=/validate-acko-io-v1alpha1-aerospikecluster,mutating=false,failurePolicy=fail,sideEffects=None,groups=acko.io,resources=aerospikeclusters,verbs=create;update,versions=v1alpha1,name=vaerospikecluster.kb.io,admissionReviewVersions=v1
 
 // AerospikeClusterValidator implements admission.Validator for AerospikeCluster.
-type AerospikeClusterValidator struct{}
+//
+// Client is used by validations that need to query the cluster (e.g.
+// validateServiceMonitorUniqueness, which lists existing ServiceMonitors in
+// the target namespace). It may be nil in unit tests that exercise pure
+// in-memory validations; client-dependent checks must be nil-safe.
+//
+// +kubebuilder:object:generate=false
+type AerospikeClusterValidator struct {
+	Client client.Client
+}
 
 var _ admission.Validator[*AerospikeCluster] = &AerospikeClusterValidator{}
 
 // ValidateCreate implements admission.Validator[*AerospikeCluster].
 func (v *AerospikeClusterValidator) ValidateCreate(ctx context.Context, cluster *AerospikeCluster) (admission.Warnings, error) {
 	aerospikeclusterlog.Info("Validating create", "name", cluster.Name)
-	return v.validate(cluster)
+	return v.validateWithCtx(ctx, cluster)
 }
 
 // ValidateUpdate implements admission.Validator[*AerospikeCluster].
@@ -255,12 +277,124 @@ func (v *AerospikeClusterValidator) ValidateUpdate(ctx context.Context, oldClust
 		}
 	}
 
-	return v.validate(cluster)
+	return v.validateWithCtx(ctx, cluster)
 }
 
 // ValidateDelete implements admission.Validator[*AerospikeCluster].
 func (v *AerospikeClusterValidator) ValidateDelete(ctx context.Context, cluster *AerospikeCluster) (admission.Warnings, error) {
 	return nil, nil
+}
+
+// serviceMonitorName returns the ServiceMonitor name produced by the
+// reconciler for the given cluster. The format must stay in sync with
+// internal/utils.ServiceMonitorName; both are kept identical and trivially
+// short to avoid a cross-package dependency (api/v1alpha1 cannot import
+// internal/utils, which already depends on api/v1alpha1).
+func serviceMonitorName(cluster *AerospikeCluster) string {
+	return fmt.Sprintf("%s-monitor", cluster.Name)
+}
+
+// validateWithCtx wraps validate() with checks that need cluster access via
+// the Kubernetes client. Pure-config validations remain in validate() so they
+// stay testable without a client.
+func (v *AerospikeClusterValidator) validateWithCtx(ctx context.Context, cluster *AerospikeCluster) (admission.Warnings, error) {
+	warnings, err := v.validate(cluster)
+	if err != nil {
+		// Surface config errors first; client-dependent checks would only add noise.
+		return warnings, err
+	}
+
+	if smErr := v.validateServiceMonitorUniqueness(ctx, cluster); smErr != nil {
+		return warnings, smErr
+	}
+
+	return warnings, nil
+}
+
+// validateServiceMonitorUniqueness rejects the CR if a ServiceMonitor with the
+// name this cluster would produce already exists in the same namespace and is
+// not owned by this cluster. This protects against silent overwrites when
+// multiple AerospikeCluster CRs (or operator instances) are pointed at the
+// same namespace.
+//
+// Idempotent updates remain allowed: a ServiceMonitor whose owner reference
+// matches the cluster's UID is treated as belonging to this CR.
+//
+// The check is skipped when:
+//   - monitoring or serviceMonitor is disabled (no SM would be created),
+//   - the validator has no client (unit-test path; real wiring always injects one),
+//   - the ServiceMonitor CRD is not installed (the reconciler will surface
+//     that error at apply time, with more useful context).
+func (v *AerospikeClusterValidator) validateServiceMonitorUniqueness(
+	ctx context.Context,
+	cluster *AerospikeCluster,
+) error {
+	if v.Client == nil {
+		return nil
+	}
+	if cluster.Spec.Monitoring == nil || !cluster.Spec.Monitoring.Enabled {
+		return nil
+	}
+	if cluster.Spec.Monitoring.ServiceMonitor == nil || !cluster.Spec.Monitoring.ServiceMonitor.Enabled {
+		return nil
+	}
+
+	smName := serviceMonitorName(cluster)
+
+	smList := &unstructured.UnstructuredList{}
+	smList.SetGroupVersionKind(serviceMonitorGVK)
+
+	if err := v.Client.List(ctx, smList, client.InNamespace(cluster.Namespace)); err != nil {
+		// CRD not installed — the reconciler will skip ServiceMonitor reconciliation
+		// with a clearer log message, so don't fail admission here.
+		if meta.IsNoMatchError(err) {
+			return nil
+		}
+		return fmt.Errorf("listing ServiceMonitors in namespace %q: %w", cluster.Namespace, err)
+	}
+
+	for i := range smList.Items {
+		sm := &smList.Items[i]
+		if sm.GetName() != smName {
+			continue
+		}
+
+		// If owned by this cluster (UID match), the existing SM is ours; allow
+		// idempotent updates.
+		ownedByThis := false
+		for _, ref := range sm.GetOwnerReferences() {
+			if ref.UID == cluster.UID {
+				ownedByThis = true
+				break
+			}
+		}
+		if ownedByThis {
+			continue
+		}
+
+		// Identify the conflicting owner to make the error actionable.
+		conflict := describeOwnerForError(sm)
+		return fmt.Errorf(
+			"ServiceMonitor %q already exists in namespace %q (%s); disable monitoring.serviceMonitor on this AerospikeCluster or rename to avoid the conflict",
+			smName, cluster.Namespace, conflict,
+		)
+	}
+
+	return nil
+}
+
+// describeOwnerForError returns a short human-readable description of the
+// existing ServiceMonitor's owner, suitable for inclusion in admission errors.
+func describeOwnerForError(sm *unstructured.Unstructured) string {
+	for _, ref := range sm.GetOwnerReferences() {
+		if ref.Kind == "AerospikeCluster" {
+			return fmt.Sprintf("owned by AerospikeCluster %q", ref.Name)
+		}
+	}
+	if refs := sm.GetOwnerReferences(); len(refs) > 0 {
+		return fmt.Sprintf("owned by %s %q", refs[0].Kind, refs[0].Name)
+	}
+	return "no owner reference matches this AerospikeCluster"
 }
 
 // validate performs all CE-specific validations.
