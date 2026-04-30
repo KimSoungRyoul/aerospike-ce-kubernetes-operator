@@ -1,78 +1,51 @@
 {{- if .Values.ui.enabled }}
 # =============================================================================
-# Backend Service (port: 80 → targetPort: 8000)
+# API Service (port: 80 → targetPort: 8000)
 # =============================================================================
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "aerospike-ce-kubernetes-operator.ui.backend.fullname" . }}
+  name: {{ include "aerospike-ce-kubernetes-operator.ui.api.fullname" . }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "aerospike-ce-kubernetes-operator.ui.backend.labels" . | nindent 4 }}
-  {{- with .Values.ui.backend.service.annotations }}
+    {{- include "aerospike-ce-kubernetes-operator.ui.api.labels" . | nindent 4 }}
+  {{- with .Values.ui.api.service.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  type: {{ .Values.ui.backend.service.type }}
+  type: {{ .Values.ui.api.service.type }}
   ports:
-    - name: backend
-      port: {{ .Values.ui.backend.service.port }}
-      targetPort: backend
+    - name: api
+      port: {{ .Values.ui.api.service.port }}
+      targetPort: api
       protocol: TCP
       appProtocol: http
   selector:
-    {{- include "aerospike-ce-kubernetes-operator.ui.backend.selectorLabels" . | nindent 4 }}
+    {{- include "aerospike-ce-kubernetes-operator.ui.api.selectorLabels" . | nindent 4 }}
 ---
 # =============================================================================
-# Frontend Service (legacy) — port 3000
+# Web Service (Next.js) — port 3100
 # =============================================================================
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "aerospike-ce-kubernetes-operator.ui.frontend.fullname" . }}
+  name: {{ include "aerospike-ce-kubernetes-operator.ui.web.fullname" . }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "aerospike-ce-kubernetes-operator.ui.frontend.labels" . | nindent 4 }}
-  {{- with .Values.ui.frontend.service.annotations }}
+    {{- include "aerospike-ce-kubernetes-operator.ui.web.labels" . | nindent 4 }}
+  {{- with .Values.ui.web.service.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  type: {{ .Values.ui.frontend.service.type }}
+  type: {{ .Values.ui.web.service.type }}
   ports:
-    - name: frontend
-      port: {{ .Values.ui.frontend.service.port }}
-      targetPort: frontend
+    - name: web
+      port: {{ .Values.ui.web.service.port }}
+      targetPort: web
       protocol: TCP
       appProtocol: http
   selector:
-    {{- include "aerospike-ce-kubernetes-operator.ui.frontend.selectorLabels" . | nindent 4 }}
-{{- if .Values.ui.frontendRenewal.enabled }}
----
-# =============================================================================
-# Frontend Renewal Service — port 3100
-# =============================================================================
-apiVersion: v1
-kind: Service
-metadata:
-  name: {{ include "aerospike-ce-kubernetes-operator.ui.frontendRenewal.fullname" . }}
-  namespace: {{ .Release.Namespace }}
-  labels:
-    {{- include "aerospike-ce-kubernetes-operator.ui.frontendRenewal.labels" . | nindent 4 }}
-  {{- with .Values.ui.frontendRenewal.service.annotations }}
-  annotations:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-spec:
-  type: {{ .Values.ui.frontendRenewal.service.type }}
-  ports:
-    - name: frontend
-      port: {{ .Values.ui.frontendRenewal.service.port }}
-      targetPort: frontend
-      protocol: TCP
-      appProtocol: http
-  selector:
-    {{- include "aerospike-ce-kubernetes-operator.ui.frontendRenewal.selectorLabels" . | nindent 4 }}
-{{- end }}
+    {{- include "aerospike-ce-kubernetes-operator.ui.web.selectorLabels" . | nindent 4 }}
 {{- end }}

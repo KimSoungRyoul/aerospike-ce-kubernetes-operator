@@ -260,7 +260,7 @@ podLabels: {}
 # created by the operator. It does NOT communicate directly with the operator pod.
 #
 # Architecture:
-#   [Browser] -> [UI Frontend :3000] -> [UI Backend :8000] -> [K8s API Server]
+#   [Browser] -> [UI Web :3100] -> [UI API :80→8000] -> [K8s API Server]
 #                                                               |
 #                                        [Operator] <----------+
 #                                            |
@@ -273,23 +273,23 @@ podLabels: {}
 # =============================================================================
 ui:
   # -- Enable the Aerospike Cluster Manager web UI.
-  # Deploys the 3-Deployment dashboard (backend + legacy frontend + renewal frontend)
-  # alongside the operator. Access a service via:
-  #   kubectl port-forward svc/<release>-aerospike-ce-kubernetes-operator-ui-frontend 3000:3000
+  # Deploys the 2-Deployment dashboard (api + web) alongside the operator.
+  # Access via:
+  #   kubectl port-forward svc/<release>-aerospike-ce-kubernetes-operator-ui-web 3100:3100
   enabled: true
 
-  # -- Number of replicas for each UI Deployment (backend / frontend / frontend-renewal)
+  # -- Number of replicas for each UI Deployment (api / web)
   replicaCount: 1
 
   # -- Image pull secrets for private registries (applied to all UI Deployments)
   imagePullSecrets: []
 
   # =============================================================================
-  # Backend (FastAPI) — port 8000 internally, Service port 80
+  # API (FastAPI) — port 8000 internally, Service port 80
   # =============================================================================
-  backend:
+  api:
     image:
-      repository: ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-backend
+      repository: ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-api
       tag: "latest"
       pullPolicy: IfNotPresent
     service:
@@ -309,25 +309,25 @@ ui:
     livenessProbe:
       httpGet:
         path: /api/health
-        port: backend
+        port: api
       initialDelaySeconds: 15
       periodSeconds: 20
       timeoutSeconds: 5
     readinessProbe:
       httpGet:
         path: /api/health
-        port: backend
+        port: api
       initialDelaySeconds: 5
       periodSeconds: 10
       timeoutSeconds: 5
     startupProbe:
       httpGet:
         path: /api/health
-        port: backend
+        port: api
       periodSeconds: 5
       timeoutSeconds: 3
       failureThreshold: 30
-    # -- Extra volumes attached to the backend pod. Use together with
+    # -- Extra volumes attached to the api pod. Use together with
     # `extraVolumeMounts` and `ui.k8s.caFile` to mount a custom CA bundle for
     # K8s API verification on clusters whose API-server cert lacks the
     # Authority Key Identifier extension. Example:
@@ -339,7 +339,7 @@ ui:
     #           - key: ca.crt
     #             path: ca.crt
     extraVolumes: []
-    # -- Extra volume mounts on the backend container. Example:
+    # -- Extra volume mounts on the api container. Example:
     #   extraVolumeMounts:
     #     - name: k8s-api-ca
     #       mountPath: /etc/ssl/k8s
@@ -347,52 +347,11 @@ ui:
     extraVolumeMounts: []
 
   # =============================================================================
-  # Frontend (legacy Next.js) — port 3000
+  # Web (Next.js 14 + proxy.js sidecar) — port 3100
   # =============================================================================
-  frontend:
+  web:
     image:
-      repository: ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-frontend
-      tag: "latest"
-      pullPolicy: IfNotPresent
-    service:
-      type: ClusterIP
-      port: 3000
-      annotations: {}
-    resources:
-      requests:
-        cpu: 50m
-        memory: 128Mi
-      limits:
-        cpu: 150m
-        memory: 384Mi
-    livenessProbe:
-      httpGet:
-        path: /
-        port: frontend
-      initialDelaySeconds: 15
-      periodSeconds: 20
-      timeoutSeconds: 5
-    readinessProbe:
-      httpGet:
-        path: /
-        port: frontend
-      initialDelaySeconds: 5
-      periodSeconds: 10
-      timeoutSeconds: 5
-
-  # =============================================================================
-  # Frontend Renewal (Next.js 14 Tremor rewrite) — port 3100
-  # =============================================================================
-  # The renewal frontend is a parallel rewrite that runs alongside the legacy
-  # `frontend/` image. It's enabled by default so both are reachable during the
-  # migration, but can be turned off to ship only the legacy UI (or the other
-  # way around while the rewrite stabilizes). `ui.enabled=false` still disables
-  # the whole UI stack regardless of this flag.
-  frontendRenewal:
-    # -- Deploy the renewal (Tremor-based) frontend alongside the legacy one.
-    enabled: true
-    image:
-      repository: ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-frontend-renewal
+      repository: ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-ui
       tag: "latest"
       pullPolicy: IfNotPresent
     service:
@@ -409,14 +368,14 @@ ui:
     livenessProbe:
       httpGet:
         path: /
-        port: frontend
+        port: web
       initialDelaySeconds: 15
       periodSeconds: 20
       timeoutSeconds: 5
     readinessProbe:
       httpGet:
         path: /
-        port: frontend
+        port: web
       initialDelaySeconds: 5
       periodSeconds: 10
       timeoutSeconds: 5
@@ -435,13 +394,13 @@ ui:
     create: true
 
   # =============================================================================
-  # Ingress (routes to frontend Service by default; override target via ui.ingress.targetPort)
+  # Ingress (routes to web Service by default; override target via ui.ingress.target)
   # =============================================================================
   ingress:
     # -- Enable ingress for external access
     enabled: false
-    # -- Which UI Service the Ingress should route to: frontend | frontendRenewal | backend
-    target: frontend
+    # -- Which UI Service the Ingress should route to: web | api
+    target: web
     # -- Ingress class name
     className: ""
     # -- Ingress annotations
@@ -458,7 +417,7 @@ ui:
   # =============================================================================
   # PostgreSQL (Embedded Sidecar)
   # =============================================================================
-  # The UI backend requires a PostgreSQL database for storing cluster connection
+  # The UI api requires a PostgreSQL database for storing cluster connection
   # metadata and session data. By default, a PostgreSQL container runs as a
   # sidecar in the same pod. For production deployments, disable this sidecar
   # and point ui.env.databaseUrl to a managed PostgreSQL instance (e.g., RDS,
@@ -518,11 +477,11 @@ ui:
     # Set to false for clusters with self-signed or non-standard CA certificates
     # (e.g., Missing Authority Key Identifier).
     verifySsl: true
-    # -- Path inside the backend container to a custom CA bundle (PEM) used to
+    # -- Path inside the api container to a custom CA bundle (PEM) used to
     # verify the K8s API-server certificate. Required on clusters whose
     # API-server cert is signed by a CA that lacks the Authority Key Identifier
     # extension — CPython 3.13+ rejects such chains by default. Mount the CA
-    # via `ui.backend.extraVolumes` / `ui.backend.extraVolumeMounts`.
+    # via `ui.api.extraVolumes` / `ui.api.extraVolumeMounts`.
     # Example: "/etc/ssl/k8s/ca.crt"
     caFile: ""
 
@@ -547,7 +506,7 @@ ui:
   # Environment
   # =============================================================================
   env:
-    # -- Backend CORS origins (empty = no CORS; frontend proxies via Next.js rewrites)
+    # -- API CORS origins (empty = no CORS; web proxies /api/* via Next.js rewrites in dev / proxy.js in prod)
     corsOrigins: ""
     # -- Log level (DEBUG, INFO, WARNING, ERROR)
     logLevel: "INFO"
@@ -571,7 +530,7 @@ ui:
   # =============================================================================
   metrics:
     serviceMonitor:
-      # -- Create a ServiceMonitor resource for the UI backend metrics endpoint
+      # -- Create a ServiceMonitor resource for the UI api metrics endpoint
       enabled: false
       # -- Scrape interval (e.g., "30s")
       interval: 30s

@@ -2,8 +2,8 @@ apiVersion: v2
 name: aerospike-ce-kubernetes-operator
 description: Kubernetes Operator for Aerospike Community Edition clusters
 type: application
-version: 0.1.2
-appVersion: "0.1.2"
+version: 0.2.0
+appVersion: "0.2.0"
 kubeVersion: ">=1.26.0-0"
 home: https://github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator
 sources:

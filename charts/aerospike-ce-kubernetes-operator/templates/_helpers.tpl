@@ -174,62 +174,44 @@ UI service account name.
 {{- end }}
 
 {{/*
-UI component-specific fullnames (backend / frontend / frontend-renewal).
+UI component-specific fullnames (api / web).
 */}}
-{{- define "aerospike-ce-kubernetes-operator.ui.backend.fullname" -}}
-{{- include "aerospike-ce-kubernetes-operator.ui.fullname" . }}-backend
+{{- define "aerospike-ce-kubernetes-operator.ui.api.fullname" -}}
+{{- include "aerospike-ce-kubernetes-operator.ui.fullname" . }}-api
 {{- end }}
 
-{{- define "aerospike-ce-kubernetes-operator.ui.frontend.fullname" -}}
-{{- include "aerospike-ce-kubernetes-operator.ui.fullname" . }}-frontend
-{{- end }}
-
-{{- define "aerospike-ce-kubernetes-operator.ui.frontendRenewal.fullname" -}}
-{{- include "aerospike-ce-kubernetes-operator.ui.fullname" . }}-frontend-renewal
+{{- define "aerospike-ce-kubernetes-operator.ui.web.fullname" -}}
+{{- include "aerospike-ce-kubernetes-operator.ui.fullname" . }}-web
 {{- end }}
 
 {{/*
 UI component-specific selector labels (adds app.kubernetes.io/component override).
 */}}
-{{- define "aerospike-ce-kubernetes-operator.ui.backend.selectorLabels" -}}
+{{- define "aerospike-ce-kubernetes-operator.ui.api.selectorLabels" -}}
 {{ include "aerospike-ce-kubernetes-operator.ui.selectorLabels" . }}
-app.kubernetes.io/component: ui-backend
+app.kubernetes.io/component: ui-api
 {{- end }}
 
-{{- define "aerospike-ce-kubernetes-operator.ui.frontend.selectorLabels" -}}
+{{- define "aerospike-ce-kubernetes-operator.ui.web.selectorLabels" -}}
 {{ include "aerospike-ce-kubernetes-operator.ui.selectorLabels" . }}
-app.kubernetes.io/component: ui-frontend
-{{- end }}
-
-{{- define "aerospike-ce-kubernetes-operator.ui.frontendRenewal.selectorLabels" -}}
-{{ include "aerospike-ce-kubernetes-operator.ui.selectorLabels" . }}
-app.kubernetes.io/component: ui-frontend-renewal
+app.kubernetes.io/component: ui-web
 {{- end }}
 
 {{/*
 UI component-specific common labels.
 */}}
-{{- define "aerospike-ce-kubernetes-operator.ui.backend.labels" -}}
+{{- define "aerospike-ce-kubernetes-operator.ui.api.labels" -}}
 helm.sh/chart: {{ include "aerospike-ce-kubernetes-operator.chart" . }}
-{{ include "aerospike-ce-kubernetes-operator.ui.backend.selectorLabels" . }}
+{{ include "aerospike-ce-kubernetes-operator.ui.api.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
-{{- define "aerospike-ce-kubernetes-operator.ui.frontend.labels" -}}
+{{- define "aerospike-ce-kubernetes-operator.ui.web.labels" -}}
 helm.sh/chart: {{ include "aerospike-ce-kubernetes-operator.chart" . }}
-{{ include "aerospike-ce-kubernetes-operator.ui.frontend.selectorLabels" . }}
-{{- if .Chart.AppVersion }}
-app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
-{{- end }}
-app.kubernetes.io/managed-by: {{ .Release.Service }}
-{{- end }}
-
-{{- define "aerospike-ce-kubernetes-operator.ui.frontendRenewal.labels" -}}
-helm.sh/chart: {{ include "aerospike-ce-kubernetes-operator.chart" . }}
-{{ include "aerospike-ce-kubernetes-operator.ui.frontendRenewal.selectorLabels" . }}
+{{ include "aerospike-ce-kubernetes-operator.ui.web.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
@@ -239,14 +221,10 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{/*
 UI image helpers (per-component).
 */}}
-{{- define "aerospike-ce-kubernetes-operator.ui.backend.image" -}}
-{{- printf "%s:%s" .Values.ui.backend.image.repository (.Values.ui.backend.image.tag | toString) -}}
+{{- define "aerospike-ce-kubernetes-operator.ui.api.image" -}}
+{{- printf "%s:%s" .Values.ui.api.image.repository (.Values.ui.api.image.tag | toString) -}}
 {{- end }}
 
-{{- define "aerospike-ce-kubernetes-operator.ui.frontend.image" -}}
-{{- printf "%s:%s" .Values.ui.frontend.image.repository (.Values.ui.frontend.image.tag | toString) -}}
-{{- end }}
-
-{{- define "aerospike-ce-kubernetes-operator.ui.frontendRenewal.image" -}}
-{{- printf "%s:%s" .Values.ui.frontendRenewal.image.repository (.Values.ui.frontendRenewal.image.tag | toString) -}}
+{{- define "aerospike-ce-kubernetes-operator.ui.web.image" -}}
+{{- printf "%s:%s" .Values.ui.web.image.repository (.Values.ui.web.image.tag | toString) -}}
 {{- end }}

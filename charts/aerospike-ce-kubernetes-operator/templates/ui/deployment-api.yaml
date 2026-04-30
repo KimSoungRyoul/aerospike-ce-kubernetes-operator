@@ -5,10 +5,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "aerospike-ce-kubernetes-operator.ui.backend.fullname" . }}
+  name: {{ include "aerospike-ce-kubernetes-operator.ui.api.fullname" . }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "aerospike-ce-kubernetes-operator.ui.backend.labels" . | nindent 4 }}
+    {{- include "aerospike-ce-kubernetes-operator.ui.api.labels" . | nindent 4 }}
 spec:
   {{- if not .Values.ui.autoscaling.enabled }}
   replicas: {{ .Values.ui.replicaCount }}
@@ -24,11 +24,11 @@ spec:
     {{- end }}
   selector:
     matchLabels:
-      {{- include "aerospike-ce-kubernetes-operator.ui.backend.selectorLabels" . | nindent 6 }}
+      {{- include "aerospike-ce-kubernetes-operator.ui.api.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "aerospike-ce-kubernetes-operator.ui.backend.selectorLabels" . | nindent 8 }}
+        {{- include "aerospike-ce-kubernetes-operator.ui.api.selectorLabels" . | nindent 8 }}
       {{- with .Values.ui.podLabels }}
         {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -60,12 +60,12 @@ spec:
       {{- end }}
       terminationGracePeriodSeconds: {{ .Values.ui.terminationGracePeriodSeconds | default 45 }}
       containers:
-        - name: backend
-          image: {{ include "aerospike-ce-kubernetes-operator.ui.backend.image" . }}
-          imagePullPolicy: {{ .Values.ui.backend.image.pullPolicy }}
+        - name: api
+          image: {{ include "aerospike-ce-kubernetes-operator.ui.api.image" . }}
+          imagePullPolicy: {{ .Values.ui.api.image.pullPolicy }}
           ports:
-            - name: backend
-              containerPort: {{ .Values.ui.backend.service.targetPort }}
+            - name: api
+              containerPort: {{ .Values.ui.api.service.targetPort }}
               protocol: TCP
           envFrom:
             - configMapRef:
@@ -80,15 +80,15 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.ui.backend.livenessProbe }}
+          {{- with .Values.ui.api.livenessProbe }}
           livenessProbe:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.ui.backend.readinessProbe }}
+          {{- with .Values.ui.api.readinessProbe }}
           readinessProbe:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.ui.backend.startupProbe }}
+          {{- with .Values.ui.api.startupProbe }}
           startupProbe:
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -96,11 +96,11 @@ spec:
             preStop:
               exec:
                 command: ["sh", "-c", "sleep 5"]
-          {{- with .Values.ui.backend.resources }}
+          {{- with .Values.ui.api.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.ui.backend.extraVolumeMounts }}
+          {{- with .Values.ui.api.extraVolumeMounts }}
           volumeMounts:
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -177,7 +177,7 @@ spec:
             - name: data
               mountPath: /var/lib/postgresql/data
         {{- end }}
-      {{- if or .Values.ui.postgresql.enabled .Values.ui.backend.extraVolumes }}
+      {{- if or .Values.ui.postgresql.enabled .Values.ui.api.extraVolumes }}
       volumes:
         {{- if .Values.ui.postgresql.enabled }}
         - name: data
@@ -188,7 +188,7 @@ spec:
           emptyDir: {}
           {{- end }}
         {{- end }}
-        {{- with .Values.ui.backend.extraVolumes }}
+        {{- with .Values.ui.api.extraVolumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
       {{- end }}
