@@ -2,10 +2,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "aerospike-ce-kubernetes-operator.ui.frontend.fullname" . }}
+  name: {{ include "aerospike-ce-kubernetes-operator.ui.web.fullname" . }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "aerospike-ce-kubernetes-operator.ui.frontend.labels" . | nindent 4 }}
+    {{- include "aerospike-ce-kubernetes-operator.ui.web.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.ui.replicaCount }}
   strategy:
@@ -15,11 +15,11 @@ spec:
       maxUnavailable: 0
   selector:
     matchLabels:
-      {{- include "aerospike-ce-kubernetes-operator.ui.frontend.selectorLabels" . | nindent 6 }}
+      {{- include "aerospike-ce-kubernetes-operator.ui.web.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "aerospike-ce-kubernetes-operator.ui.frontend.selectorLabels" . | nindent 8 }}
+        {{- include "aerospike-ce-kubernetes-operator.ui.web.selectorLabels" . | nindent 8 }}
       {{- with .Values.ui.podLabels }}
         {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -40,12 +40,12 @@ spec:
       {{- end }}
       terminationGracePeriodSeconds: {{ .Values.ui.terminationGracePeriodSeconds | default 45 }}
       containers:
-        - name: frontend
-          image: {{ include "aerospike-ce-kubernetes-operator.ui.frontend.image" . }}
-          imagePullPolicy: {{ .Values.ui.frontend.image.pullPolicy }}
+        - name: web
+          image: {{ include "aerospike-ce-kubernetes-operator.ui.web.image" . }}
+          imagePullPolicy: {{ .Values.ui.web.image.pullPolicy }}
           ports:
-            - name: frontend
-              containerPort: {{ .Values.ui.frontend.service.port }}
+            - name: web
+              containerPort: {{ .Values.ui.web.service.port }}
               protocol: TCP
           envFrom:
             - configMapRef:
@@ -58,11 +58,11 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.ui.frontend.livenessProbe }}
+          {{- with .Values.ui.web.livenessProbe }}
           livenessProbe:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.ui.frontend.readinessProbe }}
+          {{- with .Values.ui.web.readinessProbe }}
           readinessProbe:
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -70,7 +70,7 @@ spec:
             preStop:
               exec:
                 command: ["sh", "-c", "sleep 5"]
-          {{- with .Values.ui.frontend.resources }}
+          {{- with .Values.ui.web.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}

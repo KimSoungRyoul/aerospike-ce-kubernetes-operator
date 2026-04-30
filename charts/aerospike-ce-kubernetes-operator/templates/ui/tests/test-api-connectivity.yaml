@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: {{ include "aerospike-ce-kubernetes-operator.ui.fullname" . }}-test-frontend
+  name: {{ include "aerospike-ce-kubernetes-operator.ui.fullname" . }}-test-api
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "aerospike-ce-kubernetes-operator.ui.labels" . | nindent 4 }}
@@ -23,16 +23,16 @@ spec:
         - sh
         - -c
         - |
-          echo "Testing frontend endpoint..."
+          echo "Testing API health endpoint..."
           HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
             --max-time 10 \
-            http://{{ include "aerospike-ce-kubernetes-operator.ui.frontend.fullname" . }}:{{ .Values.ui.frontend.service.port }}/)
+            http://{{ include "aerospike-ce-kubernetes-operator.ui.api.fullname" . }}:{{ .Values.ui.api.service.port }}/api/health)
           echo "HTTP status code: $HTTP_CODE"
           if [ "$HTTP_CODE" = "200" ]; then
-            echo "Frontend connectivity check passed!"
+            echo "API health check passed!"
             exit 0
           else
-            echo "Frontend connectivity check failed with HTTP $HTTP_CODE"
+            echo "API health check failed with HTTP $HTTP_CODE"
             exit 1
           fi
       securityContext:

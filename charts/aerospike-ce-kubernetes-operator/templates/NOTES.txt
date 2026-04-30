@@ -6,6 +6,17 @@ Ensure acko-crds is installed separately before creating AerospikeCluster resour
   helm install acko-crds oci://ghcr.io/aerospike-ce-ecosystem/charts/acko-crds --version {{ .Chart.Version }}
 {{- end }}
 
+NOTE: 0.2.0 introduces a breaking rename of the UI value keys.
+  ui.backend.*           -> ui.api.*
+  ui.frontend.*          -> REMOVED (legacy frontend deleted)
+  ui.frontendRenewal.*   -> ui.web.*
+  ui.frontendRenewal.enabled -> REMOVED (web is always deployed when ui.enabled=true)
+  ui.ingress.target enum: frontend|frontendRenewal|backend -> web|api (default: web)
+Selector labels changed (ui-backend -> ui-api, ui-frontend-renewal -> ui-web).
+When upgrading from 0.1.x, uninstall and reinstall the chart — selector mutation
+prevents in-place upgrade. The legacy `frontend` Deployment is no longer
+shipped; only the renewal UI (now `web`) is deployed alongside the api.
+
 Release: {{ .Release.Name }}
 Namespace: {{ .Release.Namespace }}
 
@@ -96,26 +107,16 @@ Access the UI via Ingress:
 
 Access the UI via port-forward:
 
-  # Legacy frontend (port {{ .Values.ui.frontend.service.port }})
-  kubectl port-forward svc/{{ include "aerospike-ce-kubernetes-operator.ui.frontend.fullname" . }} {{ .Values.ui.frontend.service.port }}:{{ .Values.ui.frontend.service.port }} -n {{ .Release.Namespace }}
+  # Web (Next.js, port {{ .Values.ui.web.service.port }})
+  kubectl port-forward svc/{{ include "aerospike-ce-kubernetes-operator.ui.web.fullname" . }} {{ .Values.ui.web.service.port }}:{{ .Values.ui.web.service.port }} -n {{ .Release.Namespace }}
 
-{{- if .Values.ui.frontendRenewal.enabled }}
-
-  # Frontend renewal (port {{ .Values.ui.frontendRenewal.service.port }})
-  kubectl port-forward svc/{{ include "aerospike-ce-kubernetes-operator.ui.frontendRenewal.fullname" . }} {{ .Values.ui.frontendRenewal.service.port }}:{{ .Values.ui.frontendRenewal.service.port }} -n {{ .Release.Namespace }}
-
-Then open http://localhost:{{ .Values.ui.frontend.service.port }} (or http://localhost:{{ .Values.ui.frontendRenewal.service.port }}) in your browser.
-{{- else }}
-
-Then open http://localhost:{{ .Values.ui.frontend.service.port }} in your browser.
-(`ui.frontendRenewal.enabled=false` — renewal UI is not deployed.)
-{{- end }}
+Then open http://localhost:{{ .Values.ui.web.service.port }} in your browser.
 
 {{- end }}
 
-Verify the backend is running:
+Verify the API is running:
 
-  kubectl port-forward svc/{{ include "aerospike-ce-kubernetes-operator.ui.backend.fullname" . }} 8000:{{ .Values.ui.backend.service.port }} -n {{ .Release.Namespace }}
+  kubectl port-forward svc/{{ include "aerospike-ce-kubernetes-operator.ui.api.fullname" . }} 8000:{{ .Values.ui.api.service.port }} -n {{ .Release.Namespace }}
   curl http://localhost:8000/api/health
 
 {{- if .Values.ui.k8s.enabled }}

@@ -2,16 +2,16 @@
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: {{ include "aerospike-ce-kubernetes-operator.ui.backend.fullname" . }}
+  name: {{ include "aerospike-ce-kubernetes-operator.ui.api.fullname" . }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "aerospike-ce-kubernetes-operator.ui.backend.labels" . | nindent 4 }}
+    {{- include "aerospike-ce-kubernetes-operator.ui.api.labels" . | nindent 4 }}
     {{- with .Values.ui.metrics.serviceMonitor.labels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
 spec:
   endpoints:
-    - port: backend
+    - port: api
       scheme: http
       path: /api/metrics
       {{- with .Values.ui.metrics.serviceMonitor.interval }}
@@ -22,5 +22,5 @@ spec:
       {{- end }}
   selector:
     matchLabels:
-      {{- include "aerospike-ce-kubernetes-operator.ui.backend.selectorLabels" . | nindent 6 }}
+      {{- include "aerospike-ce-kubernetes-operator.ui.api.selectorLabels" . | nindent 6 }}
 {{- end }}
