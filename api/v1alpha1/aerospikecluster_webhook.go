@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -52,9 +53,16 @@ const (
 
 // SetupWebhookWithManager registers the webhooks for AerospikeCluster.
 func (r *AerospikeCluster) SetupWebhookWithManager(mgr ctrl.Manager) error {
+	// APIReader bypasses the manager's delegating cache. The cached client can
+	// swallow or wrap CRD-absent errors so meta.IsNoMatchError fails to match;
+	// the API reader hits the apiserver directly and returns the original
+	// no-match error, which is what validateServiceMonitorUniqueness relies on.
 	return ctrl.NewWebhookManagedBy(mgr, r).
 		WithDefaulter(&AerospikeClusterDefaulter{}).
-		WithValidator(&AerospikeClusterValidator{Client: mgr.GetClient()}).
+		WithValidator(&AerospikeClusterValidator{
+			Client:    mgr.GetClient(),
+			APIReader: mgr.GetAPIReader(),
+		}).
 		Complete()
 }
 
@@ -210,13 +218,20 @@ func getOrCreateMapSection(m map[string]any, key string) (map[string]any, error)
 // AerospikeClusterValidator implements admission.Validator for AerospikeCluster.
 //
 // Client is used by validations that need to query the cluster (e.g.
-// validateServiceMonitorUniqueness, which lists existing ServiceMonitors in
-// the target namespace). It may be nil in unit tests that exercise pure
+// validateServiceMonitorUniqueness, which Gets the ServiceMonitor in the
+// target namespace). It may be nil in unit tests that exercise pure
 // in-memory validations; client-dependent checks must be nil-safe.
+//
+// APIReader is a non-cached reader (mgr.GetAPIReader()). It is used for the
+// ServiceMonitor uniqueness check so that meta.IsNoMatchError surfaces
+// reliably when the monitoring CRD is absent — the cached delegating client
+// can swallow or wrap that signal. Tests may leave APIReader nil; the check
+// falls back to Client in that case.
 //
 // +kubebuilder:object:generate=false
 type AerospikeClusterValidator struct {
-	Client client.Client
+	Client    client.Client
+	APIReader client.Reader
 }
 
 var _ admission.Validator[*AerospikeCluster] = &AerospikeClusterValidator{}
@@ -289,7 +304,9 @@ func (v *AerospikeClusterValidator) ValidateDelete(ctx context.Context, cluster 
 // reconciler for the given cluster. The format must stay in sync with
 // internal/utils.ServiceMonitorName; both are kept identical and trivially
 // short to avoid a cross-package dependency (api/v1alpha1 cannot import
-// internal/utils, which already depends on api/v1alpha1).
+// internal/utils, which already depends on api/v1alpha1). A drift guard
+// (TestServiceMonitorNameMatchesUtilsHelper in webhook_drift_test.go) pins
+// the two implementations together at test time.
 func serviceMonitorName(cluster *AerospikeCluster) string {
 	return fmt.Sprintf("%s-monitor", cluster.Name)
 }
@@ -322,14 +339,21 @@ func (v *AerospikeClusterValidator) validateWithCtx(ctx context.Context, cluster
 //
 // The check is skipped when:
 //   - monitoring or serviceMonitor is disabled (no SM would be created),
-//   - the validator has no client (unit-test path; real wiring always injects one),
+//   - the validator has no reader wired in (unit-test path),
 //   - the ServiceMonitor CRD is not installed (the reconciler will surface
 //     that error at apply time, with more useful context).
+//
+// We Get the SM by name (O(1)) instead of listing every ServiceMonitor in
+// the namespace and filtering — listing was O(N) per admission and paid the
+// cost on every CR create/update in busy namespaces. We prefer APIReader
+// (non-cached) over Client because the delegating cache can swallow or
+// wrap meta.IsNoMatchError when the monitoring CRD is absent.
 func (v *AerospikeClusterValidator) validateServiceMonitorUniqueness(
 	ctx context.Context,
 	cluster *AerospikeCluster,
 ) error {
-	if v.Client == nil {
+	reader := v.readerForServiceMonitor()
+	if reader == nil {
 		return nil
 	}
 	if cluster.Spec.Monitoring == nil || !cluster.Spec.Monitoring.Enabled {
@@ -341,45 +365,50 @@ func (v *AerospikeClusterValidator) validateServiceMonitorUniqueness(
 
 	smName := serviceMonitorName(cluster)
 
-	smList := &unstructured.UnstructuredList{}
-	smList.SetGroupVersionKind(serviceMonitorGVK)
+	sm := &unstructured.Unstructured{}
+	sm.SetGroupVersionKind(serviceMonitorGVK)
 
-	if err := v.Client.List(ctx, smList, client.InNamespace(cluster.Namespace)); err != nil {
+	err := reader.Get(ctx, client.ObjectKey{Name: smName, Namespace: cluster.Namespace}, sm)
+	switch {
+	case err == nil:
+		// Fall through to ownership check below.
+	case apierrors.IsNotFound(err):
+		// Happy path: nothing already there with this name.
+		return nil
+	case meta.IsNoMatchError(err):
 		// CRD not installed — the reconciler will skip ServiceMonitor reconciliation
 		// with a clearer log message, so don't fail admission here.
-		if meta.IsNoMatchError(err) {
+		return nil
+	default:
+		return fmt.Errorf("getting ServiceMonitor %q in namespace %q: %w", smName, cluster.Namespace, err)
+	}
+
+	// If owned by this cluster (UID match), the existing SM is ours; allow
+	// idempotent updates.
+	for _, ref := range sm.GetOwnerReferences() {
+		if ref.UID == cluster.UID {
 			return nil
 		}
-		return fmt.Errorf("listing ServiceMonitors in namespace %q: %w", cluster.Namespace, err)
 	}
 
-	for i := range smList.Items {
-		sm := &smList.Items[i]
-		if sm.GetName() != smName {
-			continue
-		}
+	// Identify the conflicting owner to make the error actionable.
+	conflict := describeOwnerForError(sm)
+	return fmt.Errorf(
+		"ServiceMonitor %q already exists in namespace %q (%s); disable monitoring.serviceMonitor on this AerospikeCluster or rename to avoid the conflict",
+		smName, cluster.Namespace, conflict,
+	)
+}
 
-		// If owned by this cluster (UID match), the existing SM is ours; allow
-		// idempotent updates.
-		ownedByThis := false
-		for _, ref := range sm.GetOwnerReferences() {
-			if ref.UID == cluster.UID {
-				ownedByThis = true
-				break
-			}
-		}
-		if ownedByThis {
-			continue
-		}
-
-		// Identify the conflicting owner to make the error actionable.
-		conflict := describeOwnerForError(sm)
-		return fmt.Errorf(
-			"ServiceMonitor %q already exists in namespace %q (%s); disable monitoring.serviceMonitor on this AerospikeCluster or rename to avoid the conflict",
-			smName, cluster.Namespace, conflict,
-		)
+// readerForServiceMonitor returns the non-cached APIReader when wired in,
+// falling back to Client for tests that only set the cached client. Returns
+// nil if neither is set so callers can short-circuit to a no-op.
+func (v *AerospikeClusterValidator) readerForServiceMonitor() client.Reader {
+	if v.APIReader != nil {
+		return v.APIReader
 	}
-
+	if v.Client != nil {
+		return v.Client
+	}
 	return nil
 }
 
