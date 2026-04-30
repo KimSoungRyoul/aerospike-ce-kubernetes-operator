@@ -169,33 +169,7 @@ func (r *AerospikeClusterReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 	// Circuit breaker: if consecutive failures exceed threshold, back off exponentially.
 	if cluster.Status.FailedReconcileCount >= maxFailedReconciles {
-		backoff := calculateBackoff(cluster.Status.FailedReconcileCount)
-		log.Info("Circuit breaker active, backing off",
-			"failedCount", cluster.Status.FailedReconcileCount,
-			"backoff", backoff,
-			"lastError", cluster.Status.LastReconcileError)
-		metrics.CircuitBreakerActive.WithLabelValues(cluster.Namespace, cluster.Name).Set(1)
-		r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventCircuitBreakerActive,
-			"Circuit breaker active after %d consecutive failures, backing off %v. Last error: %s",
-			cluster.Status.FailedReconcileCount, backoff, cluster.Status.LastReconcileError)
-		// Surface backoff state on the CR so users can distinguish it from a
-		// transient InProgress retry. The next successful reconcile restores
-		// the appropriate phase via the regular setPhase calls.
-		//
-		// Only transition the phase the first time we enter the backoff window;
-		// otherwise every requeue while in backoff would update Status (the
-		// reason string contains the dynamic failure count + backoff duration,
-		// breaking the equality short-circuit in setPhase) and put unnecessary
-		// pressure on the API server.
-		if cluster.Status.Phase != ackov1alpha1.AerospikePhaseBackoffActive {
-			backoffReason := fmt.Sprintf("Circuit breaker active after %d consecutive failures; backing off %v",
-				cluster.Status.FailedReconcileCount, backoff)
-			if phaseErr := r.setPhase(ctx, cluster, ackov1alpha1.AerospikePhaseBackoffActive, backoffReason); phaseErr != nil {
-				log.Error(phaseErr, "Failed to set phase to BackoffActive")
-				// Non-fatal: still requeue with backoff so the circuit breaker behavior is preserved.
-			}
-		}
-		return ctrl.Result{RequeueAfter: backoff}, nil
+		return r.handleCircuitBreakerBackoff(ctx, cluster), nil
 	}
 	metrics.CircuitBreakerActive.WithLabelValues(cluster.Namespace, cluster.Name).Set(0)
 
@@ -265,6 +239,49 @@ func (r *AerospikeClusterReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	return result, nil
+}
+
+// handleCircuitBreakerBackoff is invoked when the circuit breaker has tripped
+// (consecutive failures >= maxFailedReconciles). It records metrics/events,
+// surfaces the BackoffActive phase on the CR (only on first entry to avoid
+// API churn), and returns a requeue Result with exponential backoff.
+//
+// Phase update failures are intentionally swallowed (logged only) so that the
+// circuit-breaker requeue is preserved even when status writes fail.
+func (r *AerospikeClusterReconciler) handleCircuitBreakerBackoff(
+	ctx context.Context,
+	cluster *ackov1alpha1.AerospikeCluster,
+) ctrl.Result {
+	log := logf.FromContext(ctx)
+
+	backoff := calculateBackoff(cluster.Status.FailedReconcileCount)
+	log.Info("Circuit breaker active, backing off",
+		"failedCount", cluster.Status.FailedReconcileCount,
+		"backoff", backoff,
+		"lastError", cluster.Status.LastReconcileError)
+	metrics.CircuitBreakerActive.WithLabelValues(cluster.Namespace, cluster.Name).Set(1)
+	r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventCircuitBreakerActive,
+		"Circuit breaker active after %d consecutive failures, backing off %v. Last error: %s",
+		cluster.Status.FailedReconcileCount, backoff, cluster.Status.LastReconcileError)
+
+	// Surface backoff state on the CR so users can distinguish it from a
+	// transient InProgress retry. The next successful reconcile restores
+	// the appropriate phase via the regular setPhase calls.
+	//
+	// Only transition the phase the first time we enter the backoff window;
+	// otherwise every requeue while in backoff would update Status (the
+	// reason string contains the dynamic failure count + backoff duration,
+	// breaking the equality short-circuit in setPhase) and put unnecessary
+	// pressure on the API server.
+	if cluster.Status.Phase != ackov1alpha1.AerospikePhaseBackoffActive {
+		backoffReason := fmt.Sprintf("Circuit breaker active after %d consecutive failures; backing off %v",
+			cluster.Status.FailedReconcileCount, backoff)
+		if phaseErr := r.setPhase(ctx, cluster, ackov1alpha1.AerospikePhaseBackoffActive, backoffReason); phaseErr != nil {
+			log.Error(phaseErr, "Failed to set phase to BackoffActive")
+			// Non-fatal: still requeue with backoff so the circuit breaker behavior is preserved.
+		}
+	}
+	return ctrl.Result{RequeueAfter: backoff}
 }
 
 // resolveTemplate handles template resolution, snapshot persistence, and annotation cleanup.
