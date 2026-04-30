@@ -1,0 +1,43 @@
+changelog:
+  exclude:
+    authors:
+      - dependabot
+      - github-actions
+      - pre-commit-ci
+    labels:
+      - skip-changelog
+      - duplicate
+      - invalid
+      - wontfix
+  categories:
+    - title: 🚀 Features
+      labels:
+        - enhancement
+        - feature
+        - new feature
+        - improve feature
+    - title: 🐛 Bug Fixes
+      labels:
+        - bug
+        - fix
+    - title: 📚 Documentation
+      labels:
+        - documentation
+        - docs
+    - title: 🔧 Maintenance
+      labels:
+        - chore
+        - dependencies
+        - refactor
+        - infra
+    - title: ⚠️ Breaking Changes
+      labels:
+        - breaking-change
+        - api/crd
+        - safety
+    - title: 📊 Observability
+      labels:
+        - observability
+    - title: Other Changes
+      labels:
+        - "*"
