@@ -22,4 +22,4 @@ repos:
         language: system
         types: [go]
         pass_filenames: false
-        exclude: '^aerospike-cluster-manager/'
+        # Scoping is enforced by the explicit package list in `entry`; pass_filenames=false makes `exclude` a no-op.
