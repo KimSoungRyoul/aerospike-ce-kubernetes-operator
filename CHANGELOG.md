@@ -19,4 +19,4 @@ changes by label:
 
 ## Unreleased
 
-See: https://github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/compare/<latest-tag>...main
+See: https://github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/compare/ (replace with the most recent release tag) ...main
