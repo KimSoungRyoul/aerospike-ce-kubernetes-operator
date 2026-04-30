@@ -22,6 +22,7 @@ func TestPhaseToFloat(t *testing.T) {
 		{"ACLSync", 8},
 		{"Paused", 9},
 		{"Deleting", 10},
+		{"BackoffActive", 11},
 		{"", 0},
 		{"Unknown", 0},
 	}

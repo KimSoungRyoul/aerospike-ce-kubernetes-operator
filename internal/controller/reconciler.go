@@ -181,11 +181,19 @@ func (r *AerospikeClusterReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		// Surface backoff state on the CR so users can distinguish it from a
 		// transient InProgress retry. The next successful reconcile restores
 		// the appropriate phase via the regular setPhase calls.
-		backoffReason := fmt.Sprintf("Circuit breaker active after %d consecutive failures; backing off %v",
-			cluster.Status.FailedReconcileCount, backoff)
-		if phaseErr := r.setPhase(ctx, cluster, ackov1alpha1.AerospikePhaseBackoffActive, backoffReason); phaseErr != nil {
-			log.Error(phaseErr, "Failed to set phase to BackoffActive")
-			// Non-fatal: still requeue with backoff so the circuit breaker behavior is preserved.
+		//
+		// Only transition the phase the first time we enter the backoff window;
+		// otherwise every requeue while in backoff would update Status (the
+		// reason string contains the dynamic failure count + backoff duration,
+		// breaking the equality short-circuit in setPhase) and put unnecessary
+		// pressure on the API server.
+		if cluster.Status.Phase != ackov1alpha1.AerospikePhaseBackoffActive {
+			backoffReason := fmt.Sprintf("Circuit breaker active after %d consecutive failures; backing off %v",
+				cluster.Status.FailedReconcileCount, backoff)
+			if phaseErr := r.setPhase(ctx, cluster, ackov1alpha1.AerospikePhaseBackoffActive, backoffReason); phaseErr != nil {
+				log.Error(phaseErr, "Failed to set phase to BackoffActive")
+				// Non-fatal: still requeue with backoff so the circuit breaker behavior is preserved.
+			}
 		}
 		return ctrl.Result{RequeueAfter: backoff}, nil
 	}
@@ -400,13 +408,22 @@ func (r *AerospikeClusterReconciler) resetFailedReconcileCount(
 		return err
 	}
 
-	if latest.Status.FailedReconcileCount == 0 && latest.Status.LastReconcileError == "" {
+	wasInBackoff := latest.Status.Phase == ackov1alpha1.AerospikePhaseBackoffActive
+	if latest.Status.FailedReconcileCount == 0 && latest.Status.LastReconcileError == "" && !wasInBackoff {
 		return nil
 	}
 
 	prevCount := latest.Status.FailedReconcileCount
 	latest.Status.FailedReconcileCount = 0
 	latest.Status.LastReconcileError = ""
+	// If the cluster was sitting in BackoffActive, transition it back to
+	// InProgress so the next successful path (or the same reconcile loop's
+	// updateStatusAndPhase) can advance it to Completed without leaving a
+	// stale BackoffActive phase visible to users.
+	if wasInBackoff {
+		latest.Status.Phase = ackov1alpha1.AerospikePhaseInProgress
+		latest.Status.PhaseReason = "Recovering from circuit breaker backoff"
+	}
 	setCondition(latest, ackov1alpha1.ConditionReconcileHealthy, true,
 		"ReconcileSucceeded", "Reconciliation succeeded")
 
@@ -416,6 +433,10 @@ func (r *AerospikeClusterReconciler) resetFailedReconcileCount(
 
 	cluster.Status.FailedReconcileCount = 0
 	cluster.Status.LastReconcileError = ""
+	if wasInBackoff {
+		cluster.Status.Phase = ackov1alpha1.AerospikePhaseInProgress
+		cluster.Status.PhaseReason = "Recovering from circuit breaker backoff"
+	}
 
 	log.Info("Circuit breaker counter reset after successful reconcile", "previousFailedCount", prevCount)
 	if prevCount >= maxFailedReconciles {
