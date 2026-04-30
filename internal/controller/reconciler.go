@@ -178,6 +178,15 @@ func (r *AerospikeClusterReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventCircuitBreakerActive,
 			"Circuit breaker active after %d consecutive failures, backing off %v. Last error: %s",
 			cluster.Status.FailedReconcileCount, backoff, cluster.Status.LastReconcileError)
+		// Surface backoff state on the CR so users can distinguish it from a
+		// transient InProgress retry. The next successful reconcile restores
+		// the appropriate phase via the regular setPhase calls.
+		backoffReason := fmt.Sprintf("Circuit breaker active after %d consecutive failures; backing off %v",
+			cluster.Status.FailedReconcileCount, backoff)
+		if phaseErr := r.setPhase(ctx, cluster, ackov1alpha1.AerospikePhaseBackoffActive, backoffReason); phaseErr != nil {
+			log.Error(phaseErr, "Failed to set phase to BackoffActive")
+			// Non-fatal: still requeue with backoff so the circuit breaker behavior is preserved.
+		}
 		return ctrl.Result{RequeueAfter: backoff}, nil
 	}
 	metrics.CircuitBreakerActive.WithLabelValues(cluster.Namespace, cluster.Name).Set(0)

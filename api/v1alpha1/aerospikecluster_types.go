@@ -346,7 +346,7 @@ const (
 )
 
 // AerospikePhase represents the current phase of the cluster.
-// +kubebuilder:validation:Enum=InProgress;Completed;Error;ScalingUp;ScalingDown;WaitingForMigration;RollingRestart;ACLSync;Paused;Deleting;ConfigDegraded
+// +kubebuilder:validation:Enum=InProgress;Completed;Error;ScalingUp;ScalingDown;WaitingForMigration;RollingRestart;ACLSync;Paused;Deleting;ConfigDegraded;BackoffActive
 type AerospikePhase string
 
 const (
@@ -376,6 +376,10 @@ const (
 	// leaving some pods with inconsistent configuration. The operator will attempt
 	// cold restart recovery on the next reconcile.
 	AerospikePhaseConfigDegraded AerospikePhase = "ConfigDegraded"
+	// AerospikePhaseBackoffActive indicates the reconciler has hit the
+	// failed-reconcile threshold and is paused in exponential backoff.
+	// The cluster is not actively reconciling until backoff expires.
+	AerospikePhaseBackoffActive AerospikePhase = "BackoffActive"
 )
 
 // RestartReason describes why a pod was restarted by the operator.

@@ -1,10 +1,14 @@
 package controller
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
 )
@@ -223,6 +227,77 @@ func TestValidationErrorSetsMaxFailedReconciles(t *testing.T) {
 	expectedBackoff := calculateBackoff(maxFailedReconciles)
 	if backoff != expectedBackoff {
 		t.Errorf("backoff = %v, want %v", backoff, expectedBackoff)
+	}
+}
+
+func TestCircuitBreakerSetsBackoffActivePhase(t *testing.T) {
+	// When the circuit breaker activates (FailedReconcileCount >= maxFailedReconciles),
+	// setPhase should transition the cluster to AerospikePhaseBackoffActive instead of
+	// leaving a stale InProgress phase.
+	scheme := runtime.NewScheme()
+	if err := ackov1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme() error = %v", err)
+	}
+
+	stored := &ackov1alpha1.AerospikeCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "demo",
+			Namespace: "default",
+		},
+		Status: ackov1alpha1.AerospikeClusterStatus{
+			Phase:                ackov1alpha1.AerospikePhaseInProgress,
+			PhaseReason:          "Reconciliation started",
+			FailedReconcileCount: maxFailedReconciles,
+			LastReconcileError:   "validation error: bad config",
+		},
+	}
+
+	reconciler := &AerospikeClusterReconciler{
+		Client: fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithStatusSubresource(&ackov1alpha1.AerospikeCluster{}).
+			WithObjects(stored).
+			Build(),
+		Scheme: scheme,
+	}
+
+	cluster := stored.DeepCopy()
+	if err := reconciler.setPhase(
+		context.Background(),
+		cluster,
+		ackov1alpha1.AerospikePhaseBackoffActive,
+		"Circuit breaker active after 10 consecutive failures; backing off 4m16s",
+	); err != nil {
+		t.Fatalf("setPhase() error = %v", err)
+	}
+
+	updated := &ackov1alpha1.AerospikeCluster{}
+	if err := reconciler.Get(
+		context.Background(),
+		types.NamespacedName{Name: stored.Name, Namespace: stored.Namespace},
+		updated,
+	); err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+
+	if updated.Status.Phase != ackov1alpha1.AerospikePhaseBackoffActive {
+		t.Errorf("Phase = %q, want %q", updated.Status.Phase, ackov1alpha1.AerospikePhaseBackoffActive)
+	}
+	if updated.Status.PhaseReason == "" {
+		t.Error("PhaseReason should not be empty after BackoffActive transition")
+	}
+	// The circuit breaker counter should still be at the threshold; it is only reset
+	// on the next successful reconcile.
+	if updated.Status.FailedReconcileCount != maxFailedReconciles {
+		t.Errorf("FailedReconcileCount = %d, want %d (counter must persist while backoff is active)",
+			updated.Status.FailedReconcileCount, maxFailedReconciles)
+	}
+}
+
+func TestAerospikePhaseBackoffActiveConstantValue(t *testing.T) {
+	if ackov1alpha1.AerospikePhaseBackoffActive != "BackoffActive" {
+		t.Errorf("AerospikePhaseBackoffActive = %q, want %q",
+			ackov1alpha1.AerospikePhaseBackoffActive, "BackoffActive")
 	}
 }
 
