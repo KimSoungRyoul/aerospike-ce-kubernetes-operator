@@ -695,11 +695,20 @@ func (r *AerospikeClusterReconciler) getRackSize(cluster *ackov1alpha1.Aerospike
 // setPhase re-fetches the latest cluster object and updates its phase and reason.
 // Uses RetryOnConflict to handle transient conflict errors without requiring
 // a full requeue cycle.
+//
+// Also updates the acko_cluster_phase Prometheus gauge whenever Status is
+// mutated, so phase transitions driven by setPhase (e.g. BackoffActive,
+// ScalingUp, RollingRestart) show up in metrics. updateStatusAndPhase
+// already updates the same gauge, so its callers continue to work unchanged.
+// Idempotency: if the phase/reason/pending-pods are already what we want,
+// we skip both the Status().Update AND the metric Set to avoid double-counting
+// from rapid reconciles (e.g. while the circuit breaker is in BackoffActive).
 func (r *AerospikeClusterReconciler) setPhase(ctx context.Context, cluster *ackov1alpha1.AerospikeCluster, phase ackov1alpha1.AerospikePhase, reason string) error {
 	desiredPendingRestartPods := slices.Clone(cluster.Status.PendingRestartPods)
 	nn := types.NamespacedName{Name: cluster.Name, Namespace: cluster.Namespace}
 
 	var latestRV string
+	var statusUpdated bool
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		latest, fetchErr := r.refetchCluster(ctx, nn)
 		if fetchErr != nil {
@@ -720,10 +729,19 @@ func (r *AerospikeClusterReconciler) setPhase(ctx context.Context, cluster *acko
 			return err
 		}
 		latestRV = latest.ResourceVersion
+		statusUpdated = true
 		return nil
 	})
 	if err != nil {
 		return err
+	}
+
+	// Update the cluster_phase gauge only when Status was actually mutated.
+	// See PhaseToFloat (internal/metrics/metrics.go) for the source of truth
+	// mapping phase strings to gauge values.
+	if statusUpdated {
+		metrics.ClusterPhase.WithLabelValues(cluster.Namespace, cluster.Name).
+			Set(metrics.PhaseToFloat(string(phase)))
 	}
 
 	// Propagate the updated resource version back to the caller's object

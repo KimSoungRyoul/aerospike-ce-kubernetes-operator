@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -13,6 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
+	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/metrics"
 	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/utils"
 )
 
@@ -458,6 +460,81 @@ func TestAerospikePhaseBackoffActiveConstantValue(t *testing.T) {
 	if ackov1alpha1.AerospikePhaseBackoffActive != "BackoffActive" {
 		t.Errorf("AerospikePhaseBackoffActive = %q, want %q",
 			ackov1alpha1.AerospikePhaseBackoffActive, "BackoffActive")
+	}
+}
+
+// TestBackoffActivePhaseUpdatesMetric exercises the gap discovered during
+// kind-cluster validation: when the circuit breaker drives the cluster into
+// BackoffActive via setPhase, the acko_cluster_phase gauge must reflect
+// PhaseToFloat("BackoffActive") (=11). Before the fix, setPhase did
+// Status().Update() directly without calling metrics.ClusterPhase.Set,
+// leaving the gauge stuck at whatever the previous phase was — meaning
+// the BackoffActive phase value was unreachable in production metrics.
+func TestBackoffActivePhaseUpdatesMetric(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := ackov1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme() error = %v", err)
+	}
+
+	stored := &ackov1alpha1.AerospikeCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "metric-demo",
+			Namespace:  "default",
+			Finalizers: []string{utils.StorageFinalizer},
+		},
+		Status: ackov1alpha1.AerospikeClusterStatus{
+			Phase:                ackov1alpha1.AerospikePhaseInProgress,
+			PhaseReason:          "Reconciliation started",
+			FailedReconcileCount: maxFailedReconciles,
+			LastReconcileError:   "validation error: bad config",
+		},
+	}
+
+	reconciler := &AerospikeClusterReconciler{
+		Client: fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithStatusSubresource(&ackov1alpha1.AerospikeCluster{}).
+			WithObjects(stored).
+			Build(),
+		Scheme:   scheme,
+		Recorder: record.NewFakeRecorder(10),
+	}
+
+	// Reset the gauge to a known non-target value so we can verify the
+	// transition wrote the BackoffActive value (and not just inherited it).
+	metrics.ClusterPhase.WithLabelValues(stored.Namespace, stored.Name).
+		Set(metrics.PhaseToFloat(string(ackov1alpha1.AerospikePhaseInProgress)))
+	t.Cleanup(func() {
+		metrics.ClusterPhase.DeleteLabelValues(stored.Namespace, stored.Name)
+	})
+
+	if _, err := reconciler.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: stored.Name, Namespace: stored.Namespace},
+	}); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+
+	updated := &ackov1alpha1.AerospikeCluster{}
+	if err := reconciler.Get(
+		context.Background(),
+		types.NamespacedName{Name: stored.Name, Namespace: stored.Namespace},
+		updated,
+	); err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if updated.Status.Phase != ackov1alpha1.AerospikePhaseBackoffActive {
+		t.Fatalf("precondition: Phase = %q, want %q (test driver did not hit the circuit-breaker branch)",
+			updated.Status.Phase, ackov1alpha1.AerospikePhaseBackoffActive)
+	}
+
+	gotGauge := testutil.ToFloat64(metrics.ClusterPhase.WithLabelValues(stored.Namespace, stored.Name))
+	wantGauge := metrics.PhaseToFloat(string(ackov1alpha1.AerospikePhaseBackoffActive))
+	if gotGauge != wantGauge {
+		t.Errorf("acko_cluster_phase = %v, want %v (BackoffActive); setPhase must update the gauge",
+			gotGauge, wantGauge)
+	}
+	if wantGauge != 11 {
+		t.Errorf("PhaseToFloat(BackoffActive) = %v, want 11 (regression: enum value drifted)", wantGauge)
 	}
 }
 

@@ -6,12 +6,15 @@ import (
 )
 
 var (
-	// ClusterPhase reports the current phase of each AerospikeCluster.
-	// Values: 0=Unknown, 1=InProgress, 2=Completed, 3=Error
+	// ClusterPhase reports the current phase of each AerospikeCluster as a
+	// numeric gauge. The full string-to-float mapping is defined by
+	// PhaseToFloat in this package (see below) — keep that function as the
+	// single source of truth instead of enumerating phases in the Help text,
+	// which goes stale every time a phase is added.
 	ClusterPhase = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "acko_cluster_phase",
-			Help: "Current phase of the AerospikeCluster (0=Unknown, 1=InProgress, 2=Completed, 3=Error)",
+			Help: "Current phase of the AerospikeCluster as a numeric code; see metrics.PhaseToFloat for the full string-to-value mapping.",
 		},
 		[]string{"namespace", "name"},
 	)
