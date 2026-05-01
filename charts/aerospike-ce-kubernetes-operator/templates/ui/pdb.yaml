@@ -1,4 +1,4 @@
-{{- if and .Values.ui.enabled .Values.ui.podDisruptionBudget.enabled }}
+{{- if and (eq (include "aerospike-ce-kubernetes-operator.ui.web.enabled" .) "true") .Values.ui.podDisruptionBudget.enabled }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:

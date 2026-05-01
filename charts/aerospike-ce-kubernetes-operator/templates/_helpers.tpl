@@ -228,3 +228,35 @@ UI image helpers (per-component).
 {{- define "aerospike-ce-kubernetes-operator.ui.web.image" -}}
 {{- printf "%s:%s" .Values.ui.web.image.repository (.Values.ui.web.image.tag | toString) -}}
 {{- end }}
+
+{{/*
+UI component enablement.
+
+`ui.enabled` is the master switch (false → no UI resources at all). When
+ui.enabled is true, ui.api.enabled / ui.web.enabled act as independent
+sub-toggles so an operator can deploy API-only (when an external UI talks
+to the FastAPI backend) or Web-only (when ui.web.env.apiUrl points to an
+external API instance).
+
+Defaults: both api.enabled and web.enabled are true, so the existing
+chart 0.2.x deployment behavior is preserved exactly when only ui.enabled
+is set in user values.
+*/}}
+{{- define "aerospike-ce-kubernetes-operator.ui.api.enabled" -}}
+{{- and .Values.ui.enabled .Values.ui.api.enabled -}}
+{{- end }}
+
+{{- define "aerospike-ce-kubernetes-operator.ui.web.enabled" -}}
+{{- and .Values.ui.enabled .Values.ui.web.enabled -}}
+{{- end }}
+
+{{/*
+UI service names (used by web → api routing and by NOTES output).
+*/}}
+{{- define "aerospike-ce-kubernetes-operator.ui.api.serviceName" -}}
+{{- include "aerospike-ce-kubernetes-operator.ui.api.fullname" . -}}
+{{- end }}
+
+{{- define "aerospike-ce-kubernetes-operator.ui.web.serviceName" -}}
+{{- include "aerospike-ce-kubernetes-operator.ui.web.fullname" . -}}
+{{- end }}

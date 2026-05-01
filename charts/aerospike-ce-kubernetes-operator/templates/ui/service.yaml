@@ -1,4 +1,4 @@
-{{- if .Values.ui.enabled }}
+{{- if eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true" }}
 # =============================================================================
 # API Service (port: 80 → targetPort: 8000)
 # =============================================================================
@@ -23,7 +23,11 @@ spec:
       appProtocol: http
   selector:
     {{- include "aerospike-ce-kubernetes-operator.ui.api.selectorLabels" . | nindent 4 }}
+{{- end }}
+{{- if eq (include "aerospike-ce-kubernetes-operator.ui.web.enabled" .) "true" }}
+{{- if eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true" }}
 ---
+{{- end }}
 # =============================================================================
 # Web Service (Next.js) — port 3100
 # =============================================================================

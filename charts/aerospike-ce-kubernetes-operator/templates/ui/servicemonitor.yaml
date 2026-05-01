@@ -1,4 +1,4 @@
-{{- if and .Values.ui.enabled .Values.ui.metrics.serviceMonitor.enabled }}
+{{- if and (eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true") .Values.ui.metrics.serviceMonitor.enabled }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:

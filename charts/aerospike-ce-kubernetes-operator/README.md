@@ -114,6 +114,105 @@ kubectl port-forward svc/<release-name>-acko-ui 3000:3000 -n aerospike-operator
 # Open http://localhost:3000
 ```
 
+#### Independent api / web toggles (chart 0.3.0+)
+
+The Cluster Manager ships as two Deployments — `api` (FastAPI) and `web`
+(Next.js). When `ui.enabled=true`, the per-component sub-toggles
+`ui.api.enabled` and `ui.web.enabled` (both defaulting to true) decide
+which Deployments are created. This lets you run API-only or Web-only
+modes without forking the chart.
+
+```yaml
+# API only — Swagger / CLI / external UI talks to the API directly
+ui:
+  enabled: true
+  web:
+    enabled: false
+
+# Web only — point the web frontend at an external API instance
+ui:
+  enabled: true
+  api:
+    enabled: false
+  web:
+    enabled: true
+    env:
+      apiUrl: "https://my-asm-api.example.com"
+```
+
+#### OpenTelemetry (chart 0.3.0+)
+
+Enable OTel export via SDK-standard env vars surfaced as chart values:
+
+```yaml
+ui:
+  api:
+    otel:
+      enabled: true
+      endpoint: "http://otel-collector.observability.svc.cluster.local:4317"
+      protocol: grpc                                # or http/protobuf
+      sampler: parentbased_traceidratio
+      samplerArg: "1.0"
+      serviceName: aerospike-cluster-manager-api
+      resourceAttributes: "deployment.environment=staging,team=platform"
+      headers: ""
+```
+
+When `ui.api.otel.enabled=false` (default), the deployment sets
+`OTEL_SDK_DISABLED=true` and the API uses NoOp providers — zero overhead.
+
+#### Pluggable log handlers (chart 0.3.0+)
+
+Forward API logs to NELO, Datadog, Loki, Sentry, or any
+`logging.Handler` without rebuilding the upstream image. Either the
+`extraPipPackages` init-container path or a custom image works:
+
+```yaml
+ui:
+  api:
+    extraPipPackages:
+      - "pynelo>=1.0.0"
+    logging:
+      handlers: "pynelo:AsyncNeloHandler"
+    extraEnv:
+      - name: NELO_HOST
+        value: "nelo-collector.svc.cluster.local"
+    extraEnvFrom:
+      - secretRef:
+          name: nelo-token
+```
+
+For more elaborate routing (multiple handlers, formatters, filters), the
+`ui.api.logging.dictConfig` value is written to a ConfigMap, mounted at
+`/etc/asm/logging.yaml`, and applied via `logging.config.dictConfig`:
+
+```yaml
+ui:
+  api:
+    logging:
+      dictConfig:
+        version: 1
+        disable_existing_loggers: false
+        formatters:
+          json:
+            "()": pythonjsonlogger.json.JsonFormatter
+            fmt: "%(asctime)s %(levelname)s %(name)s %(message)s %(otelTraceID)s"
+        handlers:
+          console:
+            class: logging.StreamHandler
+            formatter: json
+        loggers:
+          aerospike_cluster_manager_api:
+            level: INFO
+            handlers: [console]
+            propagate: false
+```
+
+See [docs/observability.md](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/blob/main/docs/observability.md)
+and [docs/logging.md](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/blob/main/docs/logging.md)
+in the cluster-manager repo for the full reference, including airgap and
+constraint notes.
+
 #### Customizing the UI deployment
 
 You can customize the UI with service annotations, resource defaults, and extra environment variables:

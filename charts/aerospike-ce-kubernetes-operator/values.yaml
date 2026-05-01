@@ -273,7 +273,13 @@ podLabels: {}
 # =============================================================================
 ui:
   # -- Enable the Aerospike Cluster Manager web UI.
-  # Deploys the 2-Deployment dashboard (api + web) alongside the operator.
+  # Master switch — when false, neither api nor web is deployed regardless of
+  # the per-component `api.enabled` / `web.enabled` toggles below. When true,
+  # those toggles act as independent on/off switches:
+  #   ui.enabled=true,  api.enabled=true,  web.enabled=true   (default) → both
+  #   ui.enabled=true,  api.enabled=true,  web.enabled=false           → API only (use Swagger / external UI)
+  #   ui.enabled=true,  api.enabled=false, web.enabled=true            → Web only (point web.env.apiUrl at an external API)
+  #   ui.enabled=false, *,                  *                           → operator only
   # Access via:
   #   kubectl port-forward svc/<release>-aerospike-ce-kubernetes-operator-ui-web 3100:3100
   enabled: true
@@ -288,6 +294,10 @@ ui:
   # API (FastAPI) — port 8000 internally, Service port 80
   # =============================================================================
   api:
+    # -- Deploy the API component when ui.enabled is also true.
+    # Set to false to deploy only the web frontend (then set
+    # `ui.web.env.apiUrl` to your external API endpoint).
+    enabled: true
     image:
       repository: ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-api
       tag: "latest"
@@ -346,10 +356,98 @@ ui:
     #       readOnly: true
     extraVolumeMounts: []
 
+    # -- Extra environment variables passed to the api container.
+    # Useful for plugin handler configuration (NELO_HOST, NELO_PROJECT_TOKEN, etc.)
+    # Example:
+    #   extraEnv:
+    #     - name: NELO_HOST
+    #       value: "nelo-collector.svc.cluster.local"
+    extraEnv: []
+
+    # -- envFrom entries (configMapRef / secretRef) for bulk env injection.
+    # Example:
+    #   extraEnvFrom:
+    #     - secretRef:
+    #         name: nelo-token
+    extraEnvFrom: []
+
+    # -- Additional Python packages installed by an init container into a
+    # PYTHONPATH-mounted volume so plugin log handlers (pynelo, ddtrace, ...)
+    # can be loaded without rebuilding the upstream image.
+    #
+    # Limitations: requires PyPI egress from the cluster, adds pod-startup
+    # latency, may break with C extensions whose ABI mismatches the runtime
+    # base image (python:3.14-slim by default). For airgap / locked-down
+    # environments, build a custom image (FROM upstream + RUN pip install)
+    # and override `image.repository` instead.
+    extraPipPackages: []
+
+    # =============================================================================
+    # OpenTelemetry — opt-in observability (off by default).
+    # All exporter / sampler / resource configuration goes through OTel SDK
+    # standard environment variables. The chart only surfaces the ones needed
+    # for the typical "send everything to a collector" path; see the OTel SDK
+    # spec for the full list.
+    # =============================================================================
+    otel:
+      # -- Enable OpenTelemetry export. When false the deployment sets
+      # OTEL_SDK_DISABLED=true and the API uses NoOp providers.
+      enabled: false
+      # -- OTLP collector endpoint (gRPC: :4317, HTTP/protobuf: :4318)
+      endpoint: ""
+      # -- "grpc" or "http/protobuf"
+      protocol: grpc
+      # -- OTel SDK standard sampler. Common values:
+      #   "parentbased_traceidratio" — child-of-parent + ratio fallback
+      #   "always_on" / "always_off"
+      sampler: parentbased_traceidratio
+      # -- Sampler argument (ratio for traceidratio variants)
+      samplerArg: "1.0"
+      # -- service.name resource attribute
+      serviceName: aerospike-cluster-manager-api
+      # -- Comma-separated extra resource attributes
+      # Example: "deployment.environment=staging,team=platform"
+      resourceAttributes: ""
+      # -- OTLP headers (auth tokens, etc.)
+      # Example: "api-key=xxxxxxxx,x-tenant=foo"
+      headers: ""
+
+    # =============================================================================
+    # Logging — pluggable handlers via LOG_HANDLERS or full dictConfig.
+    # See aerospike-cluster-manager docs/logging.md for examples.
+    # =============================================================================
+    logging:
+      # -- LOG_HANDLERS env value. Comma-separated list of handler specs:
+      # "module.path:ClassName" or entry-point name registered under
+      # "aerospike_cluster_manager.log_handlers".
+      # Example: "pynelo:AsyncNeloHandler"
+      handlers: ""
+      # -- Path to an externally-mounted dictConfig file (when you mount it
+      # via your own ConfigMap / Volume). Mutually exclusive with
+      # `dictConfig` below.
+      configFile: ""
+      # -- dictConfig payload. When non-empty, the chart writes it to a
+      # ConfigMap, mounts it at /etc/asm/logging.yaml, and sets
+      # LOGGING_CONFIG_FILE accordingly. Example:
+      #   dictConfig:
+      #     version: 1
+      #     handlers:
+      #       console:
+      #         class: logging.StreamHandler
+      #     loggers:
+      #       aerospike_cluster_manager_api:
+      #         level: INFO
+      #         handlers: [console]
+      dictConfig: {}
+
   # =============================================================================
   # Web (Next.js 14 + proxy.js sidecar) — port 3100
   # =============================================================================
   web:
+    # -- Deploy the web component when ui.enabled is also true.
+    # Set to false to deploy only the API backend (use Swagger / CLI tools
+    # against the API Service directly).
+    enabled: true
     image:
       repository: ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-ui
       tag: "latest"
@@ -358,6 +456,12 @@ ui:
       type: ClusterIP
       port: 3100
       annotations: {}
+    # -- Web container env. proxy.js reads API_URL to forward /api/* requests.
+    env:
+      # -- External API URL. When set, web's proxy.js forwards /api/* there
+      # instead of the in-cluster API Service. Required when
+      # `ui.api.enabled=false` so the web frontend has somewhere to talk to.
+      apiUrl: ""
     resources:
       requests:
         cpu: 50m
