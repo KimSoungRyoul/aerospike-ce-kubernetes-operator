@@ -11,8 +11,11 @@ data:
   LOG_LEVEL: {{ .Values.ui.env.logLevel | quote }}
   LOG_FORMAT: {{ .Values.ui.env.logFormat | quote }}
   K8S_MANAGEMENT_ENABLED: {{ .Values.ui.k8s.enabled | quote }}
-  # ui/proxy.js (and Next.js dev rewrites) consume this to forward /api/* to the API Service.
-  API_URL: {{ printf "http://%s:%d" (include "aerospike-ce-kubernetes-operator.ui.api.fullname" .) (int .Values.ui.api.service.port) | quote }}
+  # ui/proxy.js (and Next.js dev rewrites) consume this to forward /api/* to
+  # the API Service. When ui.web.env.apiUrl is set, the web container talks
+  # to an external API instead of the in-cluster Service — required when
+  # ui.api.enabled=false but ui.web.enabled=true.
+  API_URL: {{ if .Values.ui.web.env.apiUrl }}{{ .Values.ui.web.env.apiUrl | quote }}{{ else }}{{ printf "http://%s:%d" (include "aerospike-ce-kubernetes-operator.ui.api.fullname" .) (int .Values.ui.api.service.port) | quote }}{{ end }}
   WEB_PORT: {{ .Values.ui.web.service.port | quote }}
   API_PORT: {{ .Values.ui.api.service.targetPort | quote }}
   DB_POOL_SIZE: {{ .Values.ui.env.dbPoolSize | quote }}
@@ -26,4 +29,17 @@ data:
   ENABLE_POSTGRES: {{ .Values.ui.postgresql.enabled | quote }}
   DEFAULT_AEROSPIKE_IMAGE: {{ .Values.aerospikeImages.aerospike | quote }}
   DEFAULT_EXPORTER_IMAGE: {{ .Values.aerospikeImages.exporter | quote }}
+{{- end }}
+{{- if and (eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true") .Values.ui.api.logging.dictConfig }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "aerospike-ce-kubernetes-operator.ui.api.fullname" . }}-logging
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aerospike-ce-kubernetes-operator.ui.api.labels" . | nindent 4 }}
+data:
+  logging.yaml: |
+{{ toYaml .Values.ui.api.logging.dictConfig | indent 4 }}
 {{- end }}

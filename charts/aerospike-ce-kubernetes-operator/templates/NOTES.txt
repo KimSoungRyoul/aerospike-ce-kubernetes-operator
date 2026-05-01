@@ -6,6 +6,10 @@ Ensure acko-crds is installed separately before creating AerospikeCluster resour
   helm install acko-crds oci://ghcr.io/aerospike-ce-ecosystem/charts/acko-crds --version {{ .Chart.Version }}
 {{- end }}
 
+NOTE: 0.3.0 adds independent ui.api.enabled / ui.web.enabled toggles
+(both default to true). API-only and Web-only deployments are now
+first-class. Existing 0.2.0 values produce the same output unchanged.
+
 NOTE: 0.2.0 introduces a breaking rename of the UI value keys.
   ui.backend.*           -> ui.api.*
   ui.frontend.*          -> REMOVED (legacy frontend deleted)
@@ -94,8 +98,16 @@ Namespace: {{ .Release.Namespace }}
   Aerospike Cluster Manager (Web UI)
 ------------------------------------------------------------------------
 
-The Aerospike Cluster Manager UI is ENABLED.
+The Aerospike Cluster Manager is ENABLED ({{ if (eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true") }}api={{ end }}{{ if and (eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true") (eq (include "aerospike-ce-kubernetes-operator.ui.web.enabled" .) "true") }}, {{ end }}{{ if (eq (include "aerospike-ce-kubernetes-operator.ui.web.enabled" .) "true") }}web={{ end }}).
 
+{{- if and (ne (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true") (ne (include "aerospike-ce-kubernetes-operator.ui.web.enabled" .) "true") }}
+
+WARNING: ui.enabled=true but both ui.api.enabled and ui.web.enabled are false.
+No UI components will be deployed. Either set ui.enabled=false to skip the UI
+entirely, or enable at least one of ui.api.enabled / ui.web.enabled.
+{{- end }}
+
+{{- if eq (include "aerospike-ce-kubernetes-operator.ui.web.enabled" .) "true" }}
 {{- if .Values.ui.ingress.enabled }}
 
 Access the UI via Ingress:
@@ -114,10 +126,22 @@ Then open http://localhost:{{ .Values.ui.web.service.port }} in your browser.
 
 {{- end }}
 
+{{- if and (ne (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true") (not .Values.ui.web.env.apiUrl) }}
+
+WARNING: ui.web.enabled=true but ui.api.enabled=false and ui.web.env.apiUrl
+is empty. The web frontend will fail to reach an API. Set
+ui.web.env.apiUrl to your external API endpoint.
+{{- end }}
+
+{{- end }}
+
+{{- if eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true" }}
+
 Verify the API is running:
 
   kubectl port-forward svc/{{ include "aerospike-ce-kubernetes-operator.ui.api.fullname" . }} 8000:{{ .Values.ui.api.service.port }} -n {{ .Release.Namespace }}
   curl http://localhost:8000/api/health
+{{- end }}
 
 {{- if .Values.ui.k8s.enabled }}
 

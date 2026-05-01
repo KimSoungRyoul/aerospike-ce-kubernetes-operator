@@ -1,4 +1,4 @@
-{{- if .Values.ui.enabled }}
+{{- if eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true" }}
 {{- if and .Values.ui.autoscaling.enabled .Values.ui.postgresql.enabled }}
 {{- fail "ui.autoscaling.enabled and ui.postgresql.enabled cannot both be true. The embedded PostgreSQL sidecar is single-instance only. Disable ui.postgresql.enabled and provide ui.env.databaseUrl for an external database when using HPA." }}
 {{- end }}
@@ -59,6 +59,22 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       terminationGracePeriodSeconds: {{ .Values.ui.terminationGracePeriodSeconds | default 45 }}
+      {{- if .Values.ui.api.extraPipPackages }}
+      initContainers:
+        - name: install-extra-packages
+          image: {{ include "aerospike-ce-kubernetes-operator.ui.api.image" . }}
+          imagePullPolicy: {{ .Values.ui.api.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              pip install --target=/extra-packages --no-cache-dir \
+              {{- range .Values.ui.api.extraPipPackages }} {{ . | quote }}{{- end }}
+          volumeMounts:
+            - name: extra-packages
+              mountPath: /extra-packages
+      {{- end }}
       containers:
         - name: api
           image: {{ include "aerospike-ce-kubernetes-operator.ui.api.image" . }}
@@ -72,10 +88,56 @@ spec:
                 name: {{ include "aerospike-ce-kubernetes-operator.ui.fullname" . }}-config
             - secretRef:
                 name: {{ .Values.ui.postgresql.existingSecret | default (printf "%s-db" (include "aerospike-ce-kubernetes-operator.ui.fullname" .)) }}
-          {{- with .Values.ui.extraEnv }}
-          env:
+            {{- with .Values.ui.api.extraEnvFrom }}
             {{- toYaml . | nindent 12 }}
-          {{- end }}
+            {{- end }}
+          env:
+            {{- if .Values.ui.api.extraPipPackages }}
+            - name: PYTHONPATH
+              value: /extra-packages
+            {{- end }}
+            {{- if .Values.ui.api.otel.enabled }}
+            - name: OTEL_SDK_DISABLED
+              value: "false"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ required "ui.api.otel.endpoint is required when ui.api.otel.enabled is true" .Values.ui.api.otel.endpoint | quote }}
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: {{ .Values.ui.api.otel.protocol | quote }}
+            - name: OTEL_TRACES_SAMPLER
+              value: {{ .Values.ui.api.otel.sampler | quote }}
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: {{ .Values.ui.api.otel.samplerArg | quote }}
+            - name: OTEL_SERVICE_NAME
+              value: {{ .Values.ui.api.otel.serviceName | quote }}
+            {{- with .Values.ui.api.otel.resourceAttributes }}
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.ui.api.otel.headers }}
+            - name: OTEL_EXPORTER_OTLP_HEADERS
+              value: {{ . | quote }}
+            {{- end }}
+            {{- else }}
+            - name: OTEL_SDK_DISABLED
+              value: "true"
+            {{- end }}
+            {{- with .Values.ui.api.logging.handlers }}
+            - name: LOG_HANDLERS
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if .Values.ui.api.logging.dictConfig }}
+            - name: LOGGING_CONFIG_FILE
+              value: /etc/asm/logging.yaml
+            {{- else if .Values.ui.api.logging.configFile }}
+            - name: LOGGING_CONFIG_FILE
+              value: {{ .Values.ui.api.logging.configFile | quote }}
+            {{- end }}
+            {{- with .Values.ui.api.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- with .Values.ui.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- with .Values.ui.securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
@@ -100,9 +162,21 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.ui.api.extraVolumeMounts }}
+          {{- if or .Values.ui.api.extraVolumeMounts .Values.ui.api.extraPipPackages .Values.ui.api.logging.dictConfig }}
           volumeMounts:
+            {{- with .Values.ui.api.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- if .Values.ui.api.extraPipPackages }}
+            - name: extra-packages
+              mountPath: /extra-packages
+              readOnly: true
+            {{- end }}
+            {{- if .Values.ui.api.logging.dictConfig }}
+            - name: logging-config
+              mountPath: /etc/asm
+              readOnly: true
+            {{- end }}
           {{- end }}
         {{- if .Values.ui.postgresql.enabled }}
         - name: postgres
@@ -177,7 +251,7 @@ spec:
             - name: data
               mountPath: /var/lib/postgresql/data
         {{- end }}
-      {{- if or .Values.ui.postgresql.enabled .Values.ui.api.extraVolumes }}
+      {{- if or .Values.ui.postgresql.enabled .Values.ui.api.extraVolumes .Values.ui.api.extraPipPackages .Values.ui.api.logging.dictConfig }}
       volumes:
         {{- if .Values.ui.postgresql.enabled }}
         - name: data
@@ -190,6 +264,15 @@ spec:
         {{- end }}
         {{- with .Values.ui.api.extraVolumes }}
         {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if .Values.ui.api.extraPipPackages }}
+        - name: extra-packages
+          emptyDir: {}
+        {{- end }}
+        {{- if .Values.ui.api.logging.dictConfig }}
+        - name: logging-config
+          configMap:
+            name: {{ include "aerospike-ce-kubernetes-operator.ui.api.fullname" . }}-logging
         {{- end }}
       {{- end }}
       {{- with .Values.ui.nodeSelector }}

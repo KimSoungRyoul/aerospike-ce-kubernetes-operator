@@ -1,4 +1,4 @@
-{{- if .Values.ui.enabled }}
+{{- if eq (include "aerospike-ce-kubernetes-operator.ui.web.enabled" .) "true" }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
