@@ -8,6 +8,13 @@ on:
         description: 'Ginkgo label filter (e.g. "!heavy")'
         required: false
         default: '!heavy'
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'charts/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
@@ -17,6 +24,8 @@ jobs:
   test-e2e:
     name: Run on Ubuntu
     runs-on: ubuntu-latest
+    # Skip on PRs labeled 'heavy' so large/intentional PRs can opt out of e2e cost.
+    if: github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'heavy')
     steps:
       - name: Clone the code
         uses: actions/checkout@v4

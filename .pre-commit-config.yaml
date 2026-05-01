@@ -15,7 +15,11 @@ repos:
     hooks:
       - id: golangci-lint
         name: golangci-lint
-        entry: make lint-fix
+        # Build the custom golangci-lint binary (logcheck plugin) via make, then lint
+        # only first-party Go packages — skipping stray Go files under the
+        # aerospike-cluster-manager submodule (e.g. node_modules vendor trees).
+        entry: bash -c 'make golangci-lint && bin/golangci-lint run --fix ./api/... ./cmd/... ./internal/... ./test/...'
         language: system
         types: [go]
         pass_filenames: false
+        # Scoping is enforced by the explicit package list in `entry`; pass_filenames=false makes `exclude` a no-op.

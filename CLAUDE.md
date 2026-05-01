@@ -15,6 +15,7 @@ make generate           # Generate DeepCopy methods
 make test               # Unit + envtest integration tests (excludes e2e)
 make lint               # golangci-lint
 make lint-fix           # golangci-lint with auto-fix
+pre-commit run golangci-lint --all-files   # run the same lint via the pre-commit hook
 make docker-build       # Build container image (IMG=ghcr.io/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator:latest)
 make install            # Install CRDs into current k8s cluster
 make deploy             # Deploy operator to current k8s cluster
