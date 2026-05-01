@@ -11,7 +11,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func boolPtr(b bool) *bool { return &b }
@@ -4413,5 +4418,292 @@ func TestValidate_RackBatchSize_NilRackConfig(t *testing.T) {
 		if strings.Contains(w, "resolves to 0 pods") {
 			t.Errorf("unexpected rack batch size warning when rackConfig is nil: %v", w)
 		}
+	}
+}
+
+// --- ServiceMonitor uniqueness webhook tests ---
+
+// newServiceMonitorUnstructured builds an *unstructured.Unstructured shaped
+// like a ServiceMonitor object that the fake client can store and the
+// validator can list back via the same GVK used by the reconciler.
+func newServiceMonitorUnstructured(name, namespace string, ownerRefs []metav1.OwnerReference) *unstructured.Unstructured {
+	sm := &unstructured.Unstructured{}
+	sm.SetGroupVersionKind(serviceMonitorGVK)
+	sm.SetName(name)
+	sm.SetNamespace(namespace)
+	if len(ownerRefs) > 0 {
+		sm.SetOwnerReferences(ownerRefs)
+	}
+	// Minimal spec so the fake client retains the object faithfully.
+	sm.Object["spec"] = map[string]any{}
+	return sm
+}
+
+// newServiceMonitorAwareClient returns a fake client that knows the
+// ServiceMonitor GVK as a list kind (required for unstructured List to work
+// against the fake client's tracker).
+func newServiceMonitorAwareClient(t *testing.T, objs ...client.Object) client.Client {
+	t.Helper()
+
+	scheme := runtime.NewScheme()
+	if err := AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme: %v", err)
+	}
+
+	smListGVK := serviceMonitorGVK
+	smListGVK.Kind = "ServiceMonitorList"
+	scheme.AddKnownTypeWithName(serviceMonitorGVK, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(smListGVK, &unstructured.UnstructuredList{})
+
+	return fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(objs...).
+		Build()
+}
+
+func makeMonitoringEnabledCluster(uid types.UID) *AerospikeCluster {
+	return &AerospikeCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "demo",
+			Namespace: "ns-a",
+			UID:       uid,
+		},
+		Spec: AerospikeClusterSpec{
+			Size:  1,
+			Image: "aerospike:ce-8.1.1.1",
+			Monitoring: &AerospikeMonitoringSpec{
+				Enabled: true,
+				ServiceMonitor: &ServiceMonitorSpec{
+					Enabled: true,
+				},
+			},
+		},
+	}
+}
+
+// TestValidateServiceMonitorUniqueness_RejectsConflictingOwner ensures that
+// a pre-existing ServiceMonitor owned by a *different* AerospikeCluster causes
+// the webhook to reject the new CR.
+func TestValidateServiceMonitorUniqueness_RejectsConflictingOwner(t *testing.T) {
+	cluster := makeMonitoringEnabledCluster("uid-new")
+	smName := serviceMonitorName(cluster)
+
+	otherOwner := metav1.OwnerReference{
+		APIVersion: GroupVersion.String(),
+		Kind:       "AerospikeCluster",
+		Name:       "demo-other",
+		UID:        "uid-other",
+	}
+	existing := newServiceMonitorUnstructured(smName, "ns-a", []metav1.OwnerReference{otherOwner})
+
+	v := &AerospikeClusterValidator{Client: newServiceMonitorAwareClient(t, existing)}
+
+	err := v.validateServiceMonitorUniqueness(context.Background(), cluster)
+	if err == nil {
+		t.Fatal("expected error for conflicting ServiceMonitor owner, got nil")
+	}
+	if !strings.Contains(err.Error(), smName) {
+		t.Errorf("error should mention ServiceMonitor name %q, got: %v", smName, err)
+	}
+	if !strings.Contains(err.Error(), "demo-other") {
+		t.Errorf("error should point at conflicting AerospikeCluster %q, got: %v", "demo-other", err)
+	}
+}
+
+// TestValidateServiceMonitorUniqueness_NoOwnerRefs ensures that a
+// ServiceMonitor with no owner references at all (e.g. hand-rolled by an
+// admin) blocks the new CR — the operator must not silently take it over.
+func TestValidateServiceMonitorUniqueness_NoOwnerRefs(t *testing.T) {
+	cluster := makeMonitoringEnabledCluster("uid-new")
+	smName := serviceMonitorName(cluster)
+	existing := newServiceMonitorUnstructured(smName, "ns-a", nil)
+
+	v := &AerospikeClusterValidator{Client: newServiceMonitorAwareClient(t, existing)}
+
+	err := v.validateServiceMonitorUniqueness(context.Background(), cluster)
+	if err == nil {
+		t.Fatal("expected error for ServiceMonitor without matching owner ref, got nil")
+	}
+	if !strings.Contains(err.Error(), "no owner reference matches this AerospikeCluster") {
+		t.Errorf("error should describe the missing owner-ref case, got: %v", err)
+	}
+}
+
+// TestValidateServiceMonitorUniqueness_IdempotentSameOwner ensures that an
+// existing ServiceMonitor whose owner UID matches *this* cluster is treated
+// as ours — required to keep ValidateUpdate idempotent.
+func TestValidateServiceMonitorUniqueness_IdempotentSameOwner(t *testing.T) {
+	cluster := makeMonitoringEnabledCluster("uid-self")
+	smName := serviceMonitorName(cluster)
+
+	selfOwner := metav1.OwnerReference{
+		APIVersion: GroupVersion.String(),
+		Kind:       "AerospikeCluster",
+		Name:       cluster.Name,
+		UID:        cluster.UID,
+	}
+	existing := newServiceMonitorUnstructured(smName, "ns-a", []metav1.OwnerReference{selfOwner})
+
+	v := &AerospikeClusterValidator{Client: newServiceMonitorAwareClient(t, existing)}
+
+	if err := v.validateServiceMonitorUniqueness(context.Background(), cluster); err != nil {
+		t.Fatalf("expected no error when SM is owned by this cluster, got: %v", err)
+	}
+}
+
+// TestValidateServiceMonitorUniqueness_NoConflict ensures that listing
+// returning no matching ServiceMonitor is allowed.
+func TestValidateServiceMonitorUniqueness_NoConflict(t *testing.T) {
+	cluster := makeMonitoringEnabledCluster("uid-new")
+
+	// Pre-populate an unrelated ServiceMonitor in the same namespace.
+	otherOwner := metav1.OwnerReference{
+		APIVersion: GroupVersion.String(),
+		Kind:       "AerospikeCluster",
+		Name:       "unrelated",
+		UID:        "uid-unrelated",
+	}
+	unrelated := newServiceMonitorUnstructured("unrelated-monitor", "ns-a",
+		[]metav1.OwnerReference{otherOwner})
+
+	v := &AerospikeClusterValidator{Client: newServiceMonitorAwareClient(t, unrelated)}
+
+	if err := v.validateServiceMonitorUniqueness(context.Background(), cluster); err != nil {
+		t.Fatalf("expected no error when no SM with the cluster's name exists, got: %v", err)
+	}
+}
+
+// TestValidateServiceMonitorUniqueness_DifferentNamespaceIsNotAConflict
+// confirms that a same-named ServiceMonitor in a *different* namespace does
+// not block creation. The webhook must scope the lookup to cluster.Namespace.
+func TestValidateServiceMonitorUniqueness_DifferentNamespaceIsNotAConflict(t *testing.T) {
+	cluster := makeMonitoringEnabledCluster("uid-new")
+	smName := serviceMonitorName(cluster)
+
+	otherOwner := metav1.OwnerReference{
+		APIVersion: GroupVersion.String(),
+		Kind:       "AerospikeCluster",
+		Name:       "demo-other",
+		UID:        "uid-other",
+	}
+	existing := newServiceMonitorUnstructured(smName, "ns-b",
+		[]metav1.OwnerReference{otherOwner})
+
+	v := &AerospikeClusterValidator{Client: newServiceMonitorAwareClient(t, existing)}
+
+	if err := v.validateServiceMonitorUniqueness(context.Background(), cluster); err != nil {
+		t.Fatalf("expected no error for SM in a different namespace, got: %v", err)
+	}
+}
+
+// TestValidateServiceMonitorUniqueness_MonitoringDisabled ensures that the
+// check is a no-op when monitoring is disabled at any level — no list call,
+// no error, regardless of what exists in the cluster.
+func TestValidateServiceMonitorUniqueness_MonitoringDisabled(t *testing.T) {
+	tests := []struct {
+		name       string
+		monitoring *AerospikeMonitoringSpec
+	}{
+		{
+			name:       "monitoring spec is nil",
+			monitoring: nil,
+		},
+		{
+			name:       "monitoring.enabled=false",
+			monitoring: &AerospikeMonitoringSpec{Enabled: false},
+		},
+		{
+			name: "monitoring.enabled=true but serviceMonitor missing",
+			monitoring: &AerospikeMonitoringSpec{
+				Enabled: true,
+			},
+		},
+		{
+			name: "monitoring.enabled=true but serviceMonitor.enabled=false",
+			monitoring: &AerospikeMonitoringSpec{
+				Enabled:        true,
+				ServiceMonitor: &ServiceMonitorSpec{Enabled: false},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cluster := &AerospikeCluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "demo",
+					Namespace: "ns-a",
+					UID:       "uid-new",
+				},
+				Spec: AerospikeClusterSpec{
+					Size:       1,
+					Image:      "aerospike:ce-8.1.1.1",
+					Monitoring: tc.monitoring,
+				},
+			}
+
+			// Even if a conflicting SM exists, the check must be a no-op.
+			otherOwner := metav1.OwnerReference{
+				APIVersion: GroupVersion.String(),
+				Kind:       "AerospikeCluster",
+				Name:       "demo-other",
+				UID:        "uid-other",
+			}
+			existing := newServiceMonitorUnstructured(serviceMonitorName(cluster), "ns-a",
+				[]metav1.OwnerReference{otherOwner})
+
+			v := &AerospikeClusterValidator{Client: newServiceMonitorAwareClient(t, existing)}
+
+			if err := v.validateServiceMonitorUniqueness(context.Background(), cluster); err != nil {
+				t.Fatalf("expected no error when monitoring is disabled, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestValidateServiceMonitorUniqueness_NilClient ensures the check is a no-op
+// when no client has been wired in (the unit-test path used by the rest of
+// this file's tests). This protects existing tests that build the validator
+// without a client.
+func TestValidateServiceMonitorUniqueness_NilClient(t *testing.T) {
+	cluster := makeMonitoringEnabledCluster("uid-new")
+	v := &AerospikeClusterValidator{}
+
+	if err := v.validateServiceMonitorUniqueness(context.Background(), cluster); err != nil {
+		t.Fatalf("expected no error when validator has no client, got: %v", err)
+	}
+}
+
+// TestValidateCreate_RejectsDuplicateServiceMonitor exercises the full
+// ValidateCreate entry point to confirm the new check is wired into the
+// webhook chain (not just callable directly).
+func TestValidateCreate_RejectsDuplicateServiceMonitor(t *testing.T) {
+	cluster := makeMonitoringEnabledCluster("uid-new")
+	// Provide enough monitoring config to pass the pure validate() pass so we
+	// reach the client-dependent ServiceMonitor uniqueness check.
+	cluster.Spec.Monitoring.ExporterImage = "aerospike/aerospike-prometheus-exporter:1.16.1"
+	cluster.Spec.Monitoring.Port = DefaultExporterPort
+
+	smName := serviceMonitorName(cluster)
+
+	otherOwner := metav1.OwnerReference{
+		APIVersion: GroupVersion.String(),
+		Kind:       "AerospikeCluster",
+		Name:       "demo-other",
+		UID:        "uid-other",
+	}
+	existing := newServiceMonitorUnstructured(smName, "ns-a", []metav1.OwnerReference{otherOwner})
+
+	v := &AerospikeClusterValidator{Client: newServiceMonitorAwareClient(t, existing)}
+
+	_, err := v.ValidateCreate(context.Background(), cluster)
+	if err == nil {
+		t.Fatal("expected ValidateCreate to reject duplicate ServiceMonitor, got nil error")
+	}
+	if !strings.Contains(err.Error(), smName) {
+		t.Errorf("error should mention ServiceMonitor name %q, got: %v", smName, err)
+	}
+	if !strings.Contains(err.Error(), "demo-other") {
+		t.Errorf("error should point at conflicting AerospikeCluster %q, got: %v", "demo-other", err)
 	}
 }
