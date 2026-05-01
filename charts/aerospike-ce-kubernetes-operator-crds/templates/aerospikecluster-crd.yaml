@@ -17377,6 +17377,7 @@ spec:
                     - Paused
                     - Deleting
                     - ConfigDegraded
+                    - BackoffActive
                     type: string
                 type: object
               operatorVersion:
@@ -17405,6 +17406,7 @@ spec:
                 - Paused
                 - Deleting
                 - ConfigDegraded
+                - BackoffActive
                 type: string
               phaseReason:
                 description: |-
