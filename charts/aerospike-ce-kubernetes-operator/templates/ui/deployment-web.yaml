@@ -30,6 +30,10 @@ spec:
       {{- end }}
     spec:
       serviceAccountName: {{ include "aerospike-ce-kubernetes-operator.ui.serviceAccountName" . }}
+      # The web pod is a Next.js frontend with no Kubernetes API access requirement.
+      # Mounting the SA token here would only widen attack surface (the SA itself is
+      # shared with the api pod, which does need it for K8S_MANAGEMENT_ENABLED).
+      automountServiceAccountToken: false
       {{- with .Values.ui.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}

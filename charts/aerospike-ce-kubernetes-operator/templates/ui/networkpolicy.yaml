@@ -15,10 +15,14 @@ spec:
     - Egress
   ingress:
     - ports:
+        {{- if eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true" }}
         - port: {{ .Values.ui.api.service.targetPort }}
           protocol: TCP
+        {{- end }}
+        {{- if eq (include "aerospike-ce-kubernetes-operator.ui.web.enabled" .) "true" }}
         - port: {{ .Values.ui.web.service.port }}
           protocol: TCP
+        {{- end }}
       {{- with .Values.ui.networkPolicy.ingressFrom }}
       from:
         {{- toYaml . | nindent 8 }}
