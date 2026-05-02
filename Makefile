@@ -103,44 +103,37 @@ run-local: manifests helm-sync-crds ## Deploy operator + cluster-manager UI into
 	@echo "==> [2/7] Building operator image..."
 	$(CONTAINER_TOOL) build --build-arg VERSION=$(VERSION) -t $(IMG) .
 	@echo ""
-	@echo "==> [3/7] Building 3 cluster-manager images (backend / frontend / frontend-renewal)..."
-	$(CONTAINER_TOOL) build -f aerospike-cluster-manager/Dockerfile.backend          -t $(CLUSTER_MANAGER_BACKEND_IMG):latest          aerospike-cluster-manager/
-	$(CONTAINER_TOOL) build -f aerospike-cluster-manager/Dockerfile.frontend         -t $(CLUSTER_MANAGER_FRONTEND_IMG):latest         aerospike-cluster-manager/
-	$(CONTAINER_TOOL) build -f aerospike-cluster-manager/Dockerfile.frontend-renewal -t $(CLUSTER_MANAGER_FRONTEND_RENEWAL_IMG):latest aerospike-cluster-manager/
+	@echo "==> [3/7] Building cluster-manager backend image (FastAPI :8000)..."
+	$(CONTAINER_TOOL) build --target backend -f aerospike-cluster-manager/Dockerfile -t $(CLUSTER_MANAGER_API_IMG):latest aerospike-cluster-manager/
 	@echo ""
 	@echo "==> [4/7] Loading images into Kind cluster..."
 	$(CONTAINER_TOOL) save $(SAVE_FORMAT_FLAG) $(IMG) -o /tmp/acko-operator.tar
 	$(KIND) load image-archive /tmp/acko-operator.tar --name kind
-	$(CONTAINER_TOOL) save $(SAVE_FORMAT_FLAG) $(CLUSTER_MANAGER_BACKEND_IMG):latest          -o /tmp/acko-ui-backend.tar
-	$(KIND) load image-archive /tmp/acko-ui-backend.tar --name kind
-	$(CONTAINER_TOOL) save $(SAVE_FORMAT_FLAG) $(CLUSTER_MANAGER_FRONTEND_IMG):latest         -o /tmp/acko-ui-frontend.tar
-	$(KIND) load image-archive /tmp/acko-ui-frontend.tar --name kind
-	$(CONTAINER_TOOL) save $(SAVE_FORMAT_FLAG) $(CLUSTER_MANAGER_FRONTEND_RENEWAL_IMG):latest -o /tmp/acko-ui-frontend-renewal.tar
-	$(KIND) load image-archive /tmp/acko-ui-frontend-renewal.tar --name kind
-	@rm -f /tmp/acko-operator.tar /tmp/acko-ui-backend.tar /tmp/acko-ui-frontend.tar /tmp/acko-ui-frontend-renewal.tar
+	$(CONTAINER_TOOL) save $(SAVE_FORMAT_FLAG) $(CLUSTER_MANAGER_API_IMG):latest -o /tmp/acko-ui-api.tar
+	$(KIND) load image-archive /tmp/acko-ui-api.tar --name kind
+	@rm -f /tmp/acko-operator.tar /tmp/acko-ui-api.tar
 	@echo ""
 	@echo "==> [5/7] Installing cert-manager..."
 	helm install cert-manager jetstack/cert-manager --namespace cert-manager --create-namespace --set crds.enabled=true
 	@echo "    Waiting for cert-manager webhook..."
 	kubectl wait --for=condition=Available deployment/cert-manager-webhook -n cert-manager --timeout=120s
 	@echo ""
-	@echo "==> [6/7] Deploying operator and UI via Helm..."
+	@echo "==> [6/7] Deploying operator and UI (api only) via Helm..."
 	helm upgrade -i aerospike-ce-kubernetes-operator ./charts/aerospike-ce-kubernetes-operator \
 		-n aerospike-operator --create-namespace \
 		--set ui.enabled=true \
 		--set image.tag=latest \
-		--set ui.backend.image.tag=latest \
-		--set ui.frontend.image.tag=latest \
-		--set ui.frontendRenewal.image.tag=latest
+		--set ui.api.image.repository=$(CLUSTER_MANAGER_API_IMG) \
+		--set ui.api.image.tag=latest \
+		--set ui.api.image.pullPolicy=IfNotPresent \
+		--set ui.web.enabled=false
 	@echo ""
 	@echo "==> [7/7] Waiting for operator deployment to be ready..."
 	kubectl -n aerospike-operator wait --for=condition=Available deployment --all --timeout=180s
 	@echo ""
 	@echo "==> ACKO local development stack is running!"
-	@echo "    Operator:          deployed in namespace 'aerospike-operator'"
-	@echo "    Frontend (legacy): kubectl port-forward -n aerospike-operator svc/aerospike-ce-kubernetes-operator-ui-frontend 3000:3000"
-	@echo "    Frontend renewal:  kubectl port-forward -n aerospike-operator svc/aerospike-ce-kubernetes-operator-ui-frontend-renewal 3100:3100"
-	@echo "    Backend:           kubectl port-forward -n aerospike-operator svc/aerospike-ce-kubernetes-operator-ui-backend 8000:80"
+	@echo "    Operator:    deployed in namespace 'aerospike-operator'"
+	@echo "    Backend API: kubectl port-forward -n aerospike-operator svc/aerospike-ce-kubernetes-operator-ui-api 8000:80"
 	@echo ""
 
 .PHONY: stop-local
@@ -190,40 +183,32 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "unknown")
 LDFLAGS = -X github.com/ksr/aerospike-ce-kubernetes-operator/internal/version.Version=$(VERSION)
 
-# Cluster Manager image settings (3 images: backend / frontend / frontend-renewal)
-CLUSTER_MANAGER_BACKEND_IMG ?= ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-backend
-CLUSTER_MANAGER_FRONTEND_IMG ?= ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-frontend
-CLUSTER_MANAGER_FRONTEND_RENEWAL_IMG ?= ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-frontend-renewal
+# Cluster Manager image (single image; helm `ui.api` deployment)
+CLUSTER_MANAGER_API_IMG ?= ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-api
 CLUSTER_MANAGER_KIND_CLUSTER ?= kind
 CLUSTER_MANAGER_NAMESPACE ?= aerospike-operator
 NO_CACHE ?=
 BUILD_NO_CACHE_FLAG = $(if $(NO_CACHE),--no-cache,)
 
 .PHONY: reload-cluster-manager
-reload-cluster-manager: ## Build operator + 3 cluster-manager images, load into Kind, and redeploy via helm upgrade (use NO_CACHE=1 to disable cache)
+reload-cluster-manager: ## Build operator + cluster-manager api image, load into Kind, and redeploy via helm upgrade (use NO_CACHE=1 to disable cache)
 	@echo ">>> [1/5] Building images..."
 	$(CONTAINER_TOOL) build $(BUILD_NO_CACHE_FLAG) --build-arg VERSION=$(VERSION) -t $(IMG) .
-	$(CONTAINER_TOOL) build $(BUILD_NO_CACHE_FLAG) -f aerospike-cluster-manager/Dockerfile.backend          -t $(CLUSTER_MANAGER_BACKEND_IMG):latest          aerospike-cluster-manager/
-	$(CONTAINER_TOOL) build $(BUILD_NO_CACHE_FLAG) -f aerospike-cluster-manager/Dockerfile.frontend         -t $(CLUSTER_MANAGER_FRONTEND_IMG):latest         aerospike-cluster-manager/
-	$(CONTAINER_TOOL) build $(BUILD_NO_CACHE_FLAG) -f aerospike-cluster-manager/Dockerfile.frontend-renewal -t $(CLUSTER_MANAGER_FRONTEND_RENEWAL_IMG):latest aerospike-cluster-manager/
+	$(CONTAINER_TOOL) build $(BUILD_NO_CACHE_FLAG) --target backend -f aerospike-cluster-manager/Dockerfile -t $(CLUSTER_MANAGER_API_IMG):latest aerospike-cluster-manager/
 	@echo ">>> [2/5] Loading images into Kind cluster '$(CLUSTER_MANAGER_KIND_CLUSTER)'"
 	$(CONTAINER_TOOL) save $(SAVE_FORMAT_FLAG) $(IMG) -o /tmp/acko-operator.tar
 	$(KIND) load image-archive /tmp/acko-operator.tar --name $(CLUSTER_MANAGER_KIND_CLUSTER)
-	$(CONTAINER_TOOL) save $(SAVE_FORMAT_FLAG) $(CLUSTER_MANAGER_BACKEND_IMG):latest          -o /tmp/acko-ui-backend.tar
-	$(KIND) load image-archive /tmp/acko-ui-backend.tar --name $(CLUSTER_MANAGER_KIND_CLUSTER)
-	$(CONTAINER_TOOL) save $(SAVE_FORMAT_FLAG) $(CLUSTER_MANAGER_FRONTEND_IMG):latest         -o /tmp/acko-ui-frontend.tar
-	$(KIND) load image-archive /tmp/acko-ui-frontend.tar --name $(CLUSTER_MANAGER_KIND_CLUSTER)
-	$(CONTAINER_TOOL) save $(SAVE_FORMAT_FLAG) $(CLUSTER_MANAGER_FRONTEND_RENEWAL_IMG):latest -o /tmp/acko-ui-frontend-renewal.tar
-	$(KIND) load image-archive /tmp/acko-ui-frontend-renewal.tar --name $(CLUSTER_MANAGER_KIND_CLUSTER)
-	@rm -f /tmp/acko-operator.tar /tmp/acko-ui-backend.tar /tmp/acko-ui-frontend.tar /tmp/acko-ui-frontend-renewal.tar
+	$(CONTAINER_TOOL) save $(SAVE_FORMAT_FLAG) $(CLUSTER_MANAGER_API_IMG):latest -o /tmp/acko-ui-api.tar
+	$(KIND) load image-archive /tmp/acko-ui-api.tar --name $(CLUSTER_MANAGER_KIND_CLUSTER)
+	@rm -f /tmp/acko-operator.tar /tmp/acko-ui-api.tar
 	@echo ">>> [3/5] Upgrading Helm release"
 	helm upgrade aerospike-ce-kubernetes-operator ./charts/aerospike-ce-kubernetes-operator \
 		-n $(CLUSTER_MANAGER_NAMESPACE) --reuse-values \
 		--set ui.enabled=true \
 		--set image.tag=latest \
-		--set ui.backend.image.tag=latest \
-		--set ui.frontend.image.tag=latest \
-		--set ui.frontendRenewal.image.tag=latest
+		--set ui.api.image.repository=$(CLUSTER_MANAGER_API_IMG) \
+		--set ui.api.image.tag=latest \
+		--set ui.web.enabled=false
 	@echo ">>> [4/5] Restarting deployments"
 	kubectl -n $(CLUSTER_MANAGER_NAMESPACE) rollout restart deployment
 	@echo ">>> [5/5] Waiting for rollout to complete"
