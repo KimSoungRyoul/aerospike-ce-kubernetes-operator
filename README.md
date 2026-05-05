@@ -89,6 +89,8 @@ helm install aerospike-operator oci://ghcr.io/aerospike-ce-ecosystem/aerospike-o
   -n aerospike-operator --create-namespace
 ```
 
+> Multi-cluster mode (common cluster + per-environment operator clusters with Keycloak OIDC): see [docs/multi-cluster-keycloak.md](docs/multi-cluster-keycloak.md).
+
 #### Option B: From Local Chart
 
 ```sh
