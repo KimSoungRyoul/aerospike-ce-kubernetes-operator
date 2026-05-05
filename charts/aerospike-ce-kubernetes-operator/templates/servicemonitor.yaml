@@ -1,3 +1,4 @@
+{{- if eq (include "aerospike-ce-kubernetes-operator.operator.enabled" .) "true" }}
 {{- if .Values.serviceMonitor.enabled }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
@@ -25,4 +26,5 @@ spec:
   selector:
     matchLabels:
       {{- include "aerospike-ce-kubernetes-operator.selectorLabels" . | nindent 6 }}
+{{- end }}
 {{- end }}

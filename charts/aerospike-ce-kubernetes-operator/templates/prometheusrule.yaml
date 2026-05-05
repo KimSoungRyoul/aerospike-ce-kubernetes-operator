@@ -1,3 +1,4 @@
+{{- if eq (include "aerospike-ce-kubernetes-operator.operator.enabled" .) "true" }}
 {{- if .Values.prometheusRule.enabled }}
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
@@ -77,4 +78,5 @@ spec:
             summary: "Aerospike operator pod is restarting frequently"
             description: "The Aerospike operator pod has restarted more than 3 times in the last hour."
         {{- end }}
+{{- end }}
 {{- end }}

@@ -1,0 +1,60 @@
+{{- if and (eq (include "aerospike-ce-kubernetes-operator.multiCluster.enabled" .) "true") .Values.ui.tests.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "aerospike-ce-kubernetes-operator.ui.fullname" . }}-test-multicluster
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aerospike-ce-kubernetes-operator.ui.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 100
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: registry-probe
+      image: curlimages/curl:8.5.0
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          REGISTRY_URL="http://{{ include "aerospike-ce-kubernetes-operator.ui.web.fullname" . }}:{{ .Values.ui.web.service.port }}/cluster-registry.json"
+          echo "Fetching cluster registry from $REGISTRY_URL"
+          HTTP_CODE=$(curl -s -o /tmp/registry.json -w "%{http_code}" --max-time 10 "$REGISTRY_URL")
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "FAIL: cluster-registry.json returned HTTP $HTTP_CODE"
+            exit 1
+          fi
+          echo "cluster-registry.json reachable (HTTP 200)"
+          cat /tmp/registry.json
+          {{- range .Values.multiCluster.clusters }}
+          API_URL="{{ .apiUrl }}/api/health"
+          echo "Probing {{ .id }} -> $API_URL"
+          API_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$API_URL" || echo "000")
+          if [ "$API_CODE" != "200" ]; then
+            echo "FAIL: cluster {{ .id }} health endpoint returned HTTP $API_CODE"
+            exit 1
+          fi
+          echo "cluster {{ .id }} healthy"
+          {{- end }}
+          echo "multi-cluster routing test passed"
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          cpu: 50m
+          memory: 64Mi
+{{- end }}

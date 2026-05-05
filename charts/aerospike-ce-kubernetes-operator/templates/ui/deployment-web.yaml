@@ -78,6 +78,34 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- if or (eq (include "aerospike-ce-kubernetes-operator.multiCluster.enabled" .) "true") (eq (include "aerospike-ce-kubernetes-operator.web.oidc.enabled" .) "true") }}
+          volumeMounts:
+            {{- if eq (include "aerospike-ce-kubernetes-operator.multiCluster.enabled" .) "true" }}
+            - name: cluster-registry
+              mountPath: /app/public/cluster-registry.json
+              subPath: cluster-registry.json
+              readOnly: true
+            {{- end }}
+            {{- if eq (include "aerospike-ce-kubernetes-operator.web.oidc.enabled" .) "true" }}
+            - name: web-oidc-config
+              mountPath: /app/public/web-oidc-config.json
+              subPath: web-oidc-config.json
+              readOnly: true
+            {{- end }}
+          {{- end }}
+      {{- if or (eq (include "aerospike-ce-kubernetes-operator.multiCluster.enabled" .) "true") (eq (include "aerospike-ce-kubernetes-operator.web.oidc.enabled" .) "true") }}
+      volumes:
+        {{- if eq (include "aerospike-ce-kubernetes-operator.multiCluster.enabled" .) "true" }}
+        - name: cluster-registry
+          configMap:
+            name: {{ include "aerospike-ce-kubernetes-operator.clusterRegistryConfigMapName" . }}
+        {{- end }}
+        {{- if eq (include "aerospike-ce-kubernetes-operator.web.oidc.enabled" .) "true" }}
+        - name: web-oidc-config
+          configMap:
+            name: {{ include "aerospike-ce-kubernetes-operator.webOidcConfigMapName" . }}
+        {{- end }}
+      {{- end }}
       {{- with .Values.ui.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

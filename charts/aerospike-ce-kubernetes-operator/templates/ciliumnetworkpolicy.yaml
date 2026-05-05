@@ -1,3 +1,4 @@
+{{- if eq (include "aerospike-ce-kubernetes-operator.operator.enabled" .) "true" }}
 {{- if .Values.cilium.enabled }}
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
@@ -55,4 +56,5 @@ spec:
     # Allow communication with kube-apiserver
     - toEntities:
         - kube-apiserver
+{{- end }}
 {{- end }}

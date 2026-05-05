@@ -266,3 +266,106 @@ UI service names (used by web → api routing and by NOTES output).
 {{- define "aerospike-ce-kubernetes-operator.ui.web.serviceName" -}}
 {{- include "aerospike-ce-kubernetes-operator.ui.web.fullname" . -}}
 {{- end }}
+
+{{/*
+=============================================================================
+Operator / multi-cluster / OIDC enablement helpers
+=============================================================================
+Each helper renders the literal string "true" / "false" so callers can guard
+templates with `eq (include "...") "true"`.
+*/}}
+
+{{- define "aerospike-ce-kubernetes-operator.operator.enabled" -}}
+{{- $op := .Values.operator | default dict -}}
+{{- if hasKey $op "enabled" -}}
+{{- $op.enabled -}}
+{{- else -}}
+true
+{{- end -}}
+{{- end }}
+
+{{- define "aerospike-ce-kubernetes-operator.multiCluster.enabled" -}}
+{{- $mc := .Values.multiCluster | default dict -}}
+{{- if hasKey $mc "enabled" -}}
+{{- $mc.enabled -}}
+{{- else -}}
+false
+{{- end -}}
+{{- end }}
+
+{{- define "aerospike-ce-kubernetes-operator.api.oidc.enabled" -}}
+{{- $oidc := dig "api" "auth" "oidc" "enabled" false .Values.ui -}}
+{{- $oidc -}}
+{{- end }}
+
+{{- define "aerospike-ce-kubernetes-operator.web.oidc.enabled" -}}
+{{- $oidc := dig "web" "auth" "oidc" "enabled" false .Values.ui -}}
+{{- $oidc -}}
+{{- end }}
+
+{{/*
+ConfigMap names for the multi-cluster registry and SPA OIDC config.
+*/}}
+{{- define "aerospike-ce-kubernetes-operator.clusterRegistryConfigMapName" -}}
+{{- include "aerospike-ce-kubernetes-operator.fullname" . }}-cluster-registry
+{{- end }}
+
+{{- define "aerospike-ce-kubernetes-operator.webOidcConfigMapName" -}}
+{{- include "aerospike-ce-kubernetes-operator.fullname" . }}-web-oidc-config
+{{- end }}
+
+{{/*
+=============================================================================
+Validation gates (called from templates/_validations.tpl via NOTES.txt)
+=============================================================================
+
+These gates fail-fast at `helm template` / `helm install` time when the
+values combination is contradictory. Each gate is a no-op when its
+preconditions are not met, so the helper is safe to call unconditionally.
+*/}}
+
+{{- define "aerospike-ce-kubernetes-operator.validate.multiClusterVsApiUrl" -}}
+{{- if eq (include "aerospike-ce-kubernetes-operator.ui.web.enabled" .) "true" -}}
+{{- if and (eq (include "aerospike-ce-kubernetes-operator.multiCluster.enabled" .) "true") .Values.ui.web.env.apiUrl -}}
+{{- fail "multiCluster.enabled=true conflicts with ui.web.env.apiUrl: routing is ambiguous. Either disable multi-cluster (and use ui.web.env.apiUrl for a single API) or clear ui.web.env.apiUrl and rely on the cluster registry." -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{- define "aerospike-ce-kubernetes-operator.validate.defaultTemplatesNeedCRDs" -}}
+{{- if and .Values.defaultTemplates.enabled (not .Values.crds.install) -}}
+{{- fail "defaultTemplates.enabled=true requires crds.install=true (the AerospikeClusterTemplate CRD must exist before templates can be applied). Either enable crds.install or set defaultTemplates.enabled=false." -}}
+{{- end -}}
+{{- end }}
+
+{{- define "aerospike-ce-kubernetes-operator.validate.apiOidcIssuerUrl" -}}
+{{- if eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true" -}}
+{{- if eq (include "aerospike-ce-kubernetes-operator.api.oidc.enabled" .) "true" -}}
+{{- if not .Values.ui.api.auth.oidc.issuerUrl -}}
+{{- fail "ui.api.auth.oidc.enabled=true requires ui.api.auth.oidc.issuerUrl to be set (e.g. https://keycloak.example.com/realms/acko)." -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{- define "aerospike-ce-kubernetes-operator.validate.webOidcClientId" -}}
+{{- if eq (include "aerospike-ce-kubernetes-operator.ui.web.enabled" .) "true" -}}
+{{- if eq (include "aerospike-ce-kubernetes-operator.web.oidc.enabled" .) "true" -}}
+{{- if not .Values.ui.web.auth.oidc.clientId -}}
+{{- fail "ui.web.auth.oidc.enabled=true requires ui.web.auth.oidc.clientId to be set (the SPA's public client ID registered in the IdP)." -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Aggregate validation entry-point. Templates can `include` this helper once
+(typically from NOTES.txt or a dedicated _validations partial) to enforce
+all gates uniformly.
+*/}}
+{{- define "aerospike-ce-kubernetes-operator.validate" -}}
+{{- include "aerospike-ce-kubernetes-operator.validate.multiClusterVsApiUrl" . -}}
+{{- include "aerospike-ce-kubernetes-operator.validate.defaultTemplatesNeedCRDs" . -}}
+{{- include "aerospike-ce-kubernetes-operator.validate.apiOidcIssuerUrl" . -}}
+{{- include "aerospike-ce-kubernetes-operator.validate.webOidcClientId" . -}}
+{{- end }}

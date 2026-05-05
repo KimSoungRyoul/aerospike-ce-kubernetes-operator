@@ -43,3 +43,36 @@ data:
   logging.yaml: |
 {{ toYaml .Values.ui.api.logging.dictConfig | indent 4 }}
 {{- end }}
+{{- if eq (include "aerospike-ce-kubernetes-operator.multiCluster.enabled" .) "true" }}
+---
+# Multi-cluster registry consumed by the web SPA at /cluster-registry.json.
+# The SPA uses this list to pivot between ACKO API endpoints (one per env).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "aerospike-ce-kubernetes-operator.clusterRegistryConfigMapName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aerospike-ce-kubernetes-operator.ui.web.labels" . | nindent 4 }}
+data:
+  cluster-registry.json: |
+    {{- $registry := dict "defaultClusterId" .Values.multiCluster.defaultClusterId "clusters" .Values.multiCluster.clusters }}
+    {{- toJson $registry | nindent 4 }}
+{{- end }}
+{{- if eq (include "aerospike-ce-kubernetes-operator.web.oidc.enabled" .) "true" }}
+---
+# SPA OIDC config consumed by the web pod at /web-oidc-config.json.
+# The web frontend fetches this at boot to configure keycloak-js (issuer,
+# clientId, redirectUri, scopes) without rebuilding the image per env.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "aerospike-ce-kubernetes-operator.webOidcConfigMapName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aerospike-ce-kubernetes-operator.ui.web.labels" . | nindent 4 }}
+data:
+  web-oidc-config.json: |
+    {{- $oidc := dict "issuerUrl" .Values.ui.web.auth.oidc.issuerUrl "clientId" .Values.ui.web.auth.oidc.clientId "redirectUri" .Values.ui.web.auth.oidc.redirectUri "scopes" .Values.ui.web.auth.oidc.scopes }}
+    {{- toJson $oidc | nindent 4 }}
+{{- end }}

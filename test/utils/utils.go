@@ -19,7 +19,9 @@ limitations under the License.
 package utils
 
 import (
+	_ "embed"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -36,7 +38,21 @@ const (
 	defaultKindBinary  = "kind"
 	defaultKindCluster = "kind"
 	podmanRuntime      = "podman"
+
+	keycloakNamespace      = "keycloak"
+	keycloakReleaseName    = "keycloak"
+	keycloakRealmConfigMap = "acko-realm"
+	keycloakChartRef       = "bitnami/keycloak"
+	keycloakRepoName       = "bitnami"
+	keycloakRepoURL        = "https://charts.bitnami.com/bitnami"
 )
+
+// ackoRealmJSON is the static Keycloak realm export used by the local/e2e
+// IdP. Bitnami's keycloak-config-cli imports it on startup. See
+// scripts/keycloak/acko-realm.json (Stream D contract C-5).
+//
+//go:embed testdata/acko-realm.json
+var ackoRealmJSON []byte
 
 func warnError(err error) {
 	_, _ = fmt.Fprintf(GinkgoWriter, "warning: %v\n", err)
@@ -165,6 +181,159 @@ func IsCertManagerCRDsInstalled() bool {
 	}
 
 	return false
+}
+
+// InstallKeycloak installs the bitnami/keycloak helm chart with the acko realm
+// preloaded via keycloak-config-cli. Idempotent: re-running upgrades the
+// release. Designed to mirror the Makefile `install-keycloak` target so e2e
+// tests and `make run-local` behave identically.
+func InstallKeycloak() error {
+	if _, err := exec.LookPath("helm"); err != nil {
+		return fmt.Errorf("helm binary not found on PATH: %w", err)
+	}
+
+	// helm repo add (ignore "already exists" errors)
+	cmd := exec.Command("helm", "repo", "add", keycloakRepoName, keycloakRepoURL)
+	if out, err := cmd.CombinedOutput(); err != nil &&
+		!strings.Contains(string(out), "already exists") {
+		return fmt.Errorf("helm repo add: %w (%s)", err, string(out))
+	}
+	cmd = exec.Command("helm", "repo", "update", keycloakRepoName)
+	if _, err := Run(cmd); err != nil {
+		return fmt.Errorf("helm repo update: %w", err)
+	}
+
+	// Ensure namespace
+	if err := applyDryRunResource(
+		[]string{"kubectl", "create", "namespace", keycloakNamespace, "--dry-run=client", "-o", "yaml"},
+	); err != nil {
+		return fmt.Errorf("create namespace %q: %w", keycloakNamespace, err)
+	}
+
+	// Write realm JSON to a temp file then turn into ConfigMap. We use
+	// `--from-file=acko-realm.json=<path>` so the ConfigMap key is exactly
+	// `acko-realm.json` regardless of the temp filename.
+	tmp, err := os.CreateTemp("", "acko-realm-*.json")
+	if err != nil {
+		return fmt.Errorf("temp realm file: %w", err)
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	if _, err := tmp.Write(ackoRealmJSON); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write realm json: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close realm json: %w", err)
+	}
+
+	if err := applyDryRunResource([]string{
+		"kubectl", "create", "configmap", keycloakRealmConfigMap,
+		"--from-file=acko-realm.json=" + tmp.Name(),
+		"-n", keycloakNamespace,
+		"--dry-run=client", "-o", "yaml",
+	}); err != nil {
+		return fmt.Errorf("apply realm configmap: %w", err)
+	}
+
+	// helm upgrade --install keycloak
+	helmArgs := []string{
+		"upgrade", "--install", keycloakReleaseName, keycloakChartRef,
+		"--namespace", keycloakNamespace,
+		"--set", "auth.adminUser=admin",
+		"--set", "auth.adminPassword=admin",
+		"--set", "keycloakConfigCli.enabled=true",
+		"--set", "keycloakConfigCli.existingConfigmap=" + keycloakRealmConfigMap,
+		"--set", "service.type=ClusterIP",
+		"--set", "proxy=edge",
+		"--wait", "--timeout", "5m",
+	}
+	cmd = exec.Command("helm", helmArgs...)
+	if _, err := Run(cmd); err != nil {
+		return fmt.Errorf("helm install keycloak: %w", err)
+	}
+
+	cmd = exec.Command("kubectl", "wait", "deployment.apps/keycloak",
+		"--for", "condition=Available",
+		"--namespace", keycloakNamespace,
+		"--timeout", "5m",
+	)
+	if _, err := Run(cmd); err != nil {
+		return fmt.Errorf("wait keycloak deployment: %w", err)
+	}
+
+	return WaitForKeycloakReady()
+}
+
+// UninstallKeycloak removes the local keycloak release and its namespace.
+// Best-effort; intended for AfterSuite cleanup paths.
+func UninstallKeycloak() {
+	cmd := exec.Command("helm", "uninstall", keycloakReleaseName, "-n", keycloakNamespace)
+	if _, err := Run(cmd); err != nil {
+		warnError(err)
+	}
+	cmd = exec.Command("kubectl", "delete", "namespace", keycloakNamespace, "--ignore-not-found")
+	if _, err := Run(cmd); err != nil {
+		warnError(err)
+	}
+}
+
+// WaitForKeycloakReady polls Keycloak's well-known OIDC endpoint until it
+// returns HTTP 200. Uses an in-cluster `kubectl exec` so this works whether
+// or not a port-forward is set up — important because BeforeSuite runs
+// before any test fixtures.
+func WaitForKeycloakReady() error {
+	const wellKnown = "http://localhost/realms/acko/.well-known/openid-configuration"
+	for i := range 60 {
+		cmd := exec.Command("kubectl", "exec", "-n", keycloakNamespace,
+			"deployment/keycloak", "--",
+			"curl", "-sS", "-o", "/dev/null", "-w", "%{http_code}", wellKnown)
+		out, err := cmd.CombinedOutput()
+		if err == nil && strings.TrimSpace(string(out)) == "200" {
+			return nil
+		}
+		_, _ = fmt.Fprintf(GinkgoWriter,
+			"keycloak realm not ready yet, retrying (%d/60): rc=%v out=%q\n",
+			i+1, err, strings.TrimSpace(string(out)))
+		time.Sleep(2 * time.Second)
+	}
+	return fmt.Errorf("keycloak realm 'acko' did not become ready within 120s")
+}
+
+// PingKeycloakHTTP is exposed for any caller that already has a port-forward
+// or NodePort and just needs to verify the realm is up over HTTP. Returns nil
+// on the first 200 within 60s.
+func PingKeycloakHTTP(baseURL string) error {
+	url := strings.TrimRight(baseURL, "/") + "/realms/acko/.well-known/openid-configuration"
+	client := &http.Client{Timeout: 5 * time.Second}
+	for i := range 30 {
+		resp, err := client.Get(url)
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return nil
+			}
+		}
+		_, _ = fmt.Fprintf(GinkgoWriter, "keycloak HTTP %s not 200 yet (%d/30)\n", url, i+1)
+		time.Sleep(2 * time.Second)
+	}
+	return fmt.Errorf("keycloak %s did not return 200 within 60s", url)
+}
+
+// applyDryRunResource runs the given `kubectl create ... --dry-run=client -o yaml`
+// command, then pipes the resulting YAML into `kubectl apply -f -`. This is
+// the idempotent apply pattern used throughout the e2e suite.
+func applyDryRunResource(generateCmd []string) error {
+	gen := exec.Command(generateCmd[0], generateCmd[1:]...) // nolint:gosec
+	yamlOut, err := gen.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s: %w (%s)", strings.Join(generateCmd, " "), err, string(yamlOut))
+	}
+	apply := exec.Command("kubectl", "apply", "-f", "-")
+	apply.Stdin = strings.NewReader(string(yamlOut))
+	if _, err := Run(apply); err != nil {
+		return fmt.Errorf("kubectl apply (%s): %w", generateCmd[2], err)
+	}
+	return nil
 }
 
 // LoadImageToKindClusterWithName loads a local container image to the kind cluster.
