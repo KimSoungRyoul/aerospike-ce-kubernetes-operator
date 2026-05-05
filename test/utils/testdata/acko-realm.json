@@ -1,5 +1,4 @@
 {
-  "_comment": "DEV-ONLY — DO NOT APPLY TO PRODUCTION. Plaintext credentials below (admin/admin, dev-user/dev, prod-user/prod) and wildcard redirectUris/webOrigins are intended for local kind clusters and CI e2e only. For production, follow docs/multi-cluster-keycloak.md to provision the realm via kcadm or the Terraform Keycloak provider.",
   "realm": "acko",
   "enabled": true,
   "displayName": "ACKO Local Development",
@@ -147,9 +146,11 @@
     {
       "username": "admin",
       "enabled": true,
+      "email": "admin@acko.local",
       "emailVerified": true,
       "firstName": "Admin",
       "lastName": "User",
+      "requiredActions": [],
       "credentials": [
         {
           "type": "password",
@@ -162,9 +163,11 @@
     {
       "username": "dev-user",
       "enabled": true,
+      "email": "dev-user@acko.local",
       "emailVerified": true,
       "firstName": "Dev",
       "lastName": "User",
+      "requiredActions": [],
       "credentials": [
         {
           "type": "password",
@@ -177,9 +180,11 @@
     {
       "username": "prod-user",
       "enabled": true,
+      "email": "prod-user@acko.local",
       "emailVerified": true,
       "firstName": "Prod",
       "lastName": "User",
+      "requiredActions": [],
       "credentials": [
         {
           "type": "password",

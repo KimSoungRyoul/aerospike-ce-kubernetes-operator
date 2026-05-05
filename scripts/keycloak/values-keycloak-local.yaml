@@ -1,0 +1,61 @@
+# scripts/keycloak/values-keycloak-local.yaml
+#
+# DEV-ONLY helm values for `bitnami/keycloak`, consumed by
+# `make run-local` and `make install-keycloak`. Pair with
+# `--version 25.2.0` on the helm CLI to avoid chart upgrades
+# pointing at image tags the legacy mirror never archived.
+#
+# Why every image is overridden to `bitnamilegacy/*`:
+#
+#   Bitnami removed `docker.io/bitnami/*` free images on
+#   2025-08-28. The chart's default values still point at the
+#   now-empty repo, so a fresh install fails with ErrImagePull.
+#   We override every image (keycloak / postgresql /
+#   keycloak-config-cli) to the frozen `bitnamilegacy/*` mirror
+#   until we migrate off bitnami. The legacy mirror is itself
+#   "no longer updated, may be removed in the future" — see
+#   `MULTI_CLUSTER_OIDC_FOLLOW_UPS.md` P0.0 for the migration
+#   tracking entry.
+#
+# `postgresql.image.tag` is pinned to `-r4` because the legacy
+# mirror does not contain the chart's default `-r0` build.
+#
+# `global.security.allowInsecureImages: true` bypasses the chart's
+# secure-image guard which would otherwise refuse a non-bitnami
+# repository as the source.
+
+global:
+  security:
+    allowInsecureImages: true
+
+image:
+  registry: docker.io
+  repository: bitnamilegacy/keycloak
+
+postgresql:
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/postgresql
+    tag: 17.6.0-debian-12-r4
+
+keycloakConfigCli:
+  enabled: true
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/keycloak-config-cli
+  # `acko-realm` ConfigMap is created by the `install-keycloak`
+  # Makefile target from `scripts/keycloak/acko-realm.json` before
+  # `helm upgrade --install` runs.
+  existingConfigmap: acko-realm
+
+auth:
+  adminUser: admin
+  adminPassword: admin
+
+service:
+  type: ClusterIP
+
+# Keycloak 26 listens behind a reverse proxy in `proxy=edge` mode.
+# Required so the issuer URL is computed from the X-Forwarded-Host
+# header rather than the in-cluster Service hostname.
+proxy: edge

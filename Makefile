@@ -154,17 +154,22 @@ install-keycloak: ## Install bitnami/keycloak with the acko realm imported (loca
 		--from-file=acko-realm.json=scripts/keycloak/acko-realm.json \
 		-n keycloak --dry-run=client -o yaml | kubectl apply -f -
 	@echo "    helm upgrade --install keycloak..."
+	@# All overrides (bitnamilegacy registries, postgresql tag pin, OIDC
+	@# realm import) live in scripts/keycloak/values-keycloak-local.yaml
+	@# so a single file is the source of truth for both the Makefile and
+	@# any operator who wants to inspect or override values directly.
+	@# Chart version pinned at the CLI level so a future chart upgrade
+	@# doesn't move us to an image tag that bitnamilegacy never archived.
 	helm upgrade --install keycloak bitnami/keycloak \
+		--version 25.2.0 \
 		--namespace keycloak \
-		--set auth.adminUser=admin \
-		--set auth.adminPassword=admin \
-		--set keycloakConfigCli.enabled=true \
-		--set keycloakConfigCli.existingConfigmap=acko-realm \
-		--set service.type=ClusterIP \
-		--set proxy=edge \
+		--values scripts/keycloak/values-keycloak-local.yaml \
 		--wait --timeout 5m
-	@echo "    Waiting for Keycloak deployment..."
-	kubectl wait --for=condition=Available deployment/keycloak \
+	@# bitnami/keycloak deploys a StatefulSet, not a Deployment, so we
+	@# wait on the pod's Ready condition rather than a Deployment's
+	@# Available condition (which would always 404).
+	@echo "    Waiting for Keycloak pod..."
+	kubectl wait --for=condition=Ready pod/keycloak-0 \
 		-n keycloak --timeout=300s
 	@echo "    Keycloak ready: http://keycloak.keycloak.svc.cluster.local/realms/acko"
 
