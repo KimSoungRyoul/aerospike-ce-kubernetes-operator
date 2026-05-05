@@ -45,6 +45,15 @@ jobs:
         run: kind version
 
       - name: Running Test e2e
+        # SKIP_KEYCLOAK=true skips the bitnami/keycloak helm install in
+        # `setup-test-e2e`. The OIDC IdP is only needed by the
+        # multi-cluster scenarios (run separately under e2e_pytest in
+        # the plugins repo). Pulling bitnamilegacy/keycloak +
+        # bitnamilegacy/postgresql + keycloak-config-cli on a fresh
+        # CI runner repeatedly busted the chart's `--timeout 5m` and
+        # this Go-based e2e suite does not exercise OIDC.
+        env:
+          SKIP_KEYCLOAK: "true"
         run: |
           go mod tidy
           make test-e2e GINKGO_FLAGS="-ginkgo.label-filter=${{ github.event.inputs.ginkgo_label_filter || '!heavy' }}"
