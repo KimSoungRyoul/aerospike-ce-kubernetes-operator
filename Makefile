@@ -103,15 +103,18 @@ run-local: manifests helm-sync-crds ## Deploy operator + cluster-manager UI into
 	@echo "==> [2/8] Building operator image..."
 	$(CONTAINER_TOOL) build --build-arg VERSION=$(VERSION) -t $(IMG) .
 	@echo ""
-	@echo "==> [3/8] Building cluster-manager backend image (FastAPI :8000)..."
-	$(CONTAINER_TOOL) build --target backend -f aerospike-cluster-manager/Dockerfile -t $(CLUSTER_MANAGER_API_IMG):latest aerospike-cluster-manager/
+	@echo "==> [3/8] Building cluster-manager api + web images..."
+	$(CONTAINER_TOOL) build -f aerospike-cluster-manager/Dockerfile.api -t $(CLUSTER_MANAGER_API_IMG):latest aerospike-cluster-manager/
+	$(CONTAINER_TOOL) build -f aerospike-cluster-manager/Dockerfile.web -t $(CLUSTER_MANAGER_WEB_IMG):latest aerospike-cluster-manager/
 	@echo ""
 	@echo "==> [4/8] Loading images into Kind cluster..."
 	$(CONTAINER_TOOL) save $(SAVE_FORMAT_FLAG) $(IMG) -o /tmp/acko-operator.tar
 	$(KIND) load image-archive /tmp/acko-operator.tar --name kind
 	$(CONTAINER_TOOL) save $(SAVE_FORMAT_FLAG) $(CLUSTER_MANAGER_API_IMG):latest -o /tmp/acko-ui-api.tar
 	$(KIND) load image-archive /tmp/acko-ui-api.tar --name kind
-	@rm -f /tmp/acko-operator.tar /tmp/acko-ui-api.tar
+	$(CONTAINER_TOOL) save $(SAVE_FORMAT_FLAG) $(CLUSTER_MANAGER_WEB_IMG):latest -o /tmp/acko-ui-web.tar
+	$(KIND) load image-archive /tmp/acko-ui-web.tar --name kind
+	@rm -f /tmp/acko-operator.tar /tmp/acko-ui-api.tar /tmp/acko-ui-web.tar
 	@echo ""
 	@echo "==> [5/8] Installing cert-manager..."
 	helm install cert-manager jetstack/cert-manager --namespace cert-manager --create-namespace --set crds.enabled=true
@@ -228,6 +231,7 @@ LDFLAGS = -X github.com/ksr/aerospike-ce-kubernetes-operator/internal/version.Ve
 
 # Cluster Manager image (single image; helm `ui.api` deployment)
 CLUSTER_MANAGER_API_IMG ?= ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-api
+CLUSTER_MANAGER_WEB_IMG ?= ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-web
 CLUSTER_MANAGER_KIND_CLUSTER ?= kind
 CLUSTER_MANAGER_NAMESPACE ?= aerospike-operator
 NO_CACHE ?=
@@ -237,7 +241,8 @@ BUILD_NO_CACHE_FLAG = $(if $(NO_CACHE),--no-cache,)
 reload-cluster-manager: ## Build operator + cluster-manager api image, load into Kind, and redeploy via helm upgrade (use NO_CACHE=1 to disable cache)
 	@echo ">>> [1/5] Building images..."
 	$(CONTAINER_TOOL) build $(BUILD_NO_CACHE_FLAG) --build-arg VERSION=$(VERSION) -t $(IMG) .
-	$(CONTAINER_TOOL) build $(BUILD_NO_CACHE_FLAG) --target backend -f aerospike-cluster-manager/Dockerfile -t $(CLUSTER_MANAGER_API_IMG):latest aerospike-cluster-manager/
+	$(CONTAINER_TOOL) build $(BUILD_NO_CACHE_FLAG) -f aerospike-cluster-manager/Dockerfile.api -t $(CLUSTER_MANAGER_API_IMG):latest aerospike-cluster-manager/
+	$(CONTAINER_TOOL) build $(BUILD_NO_CACHE_FLAG) -f aerospike-cluster-manager/Dockerfile.web -t $(CLUSTER_MANAGER_WEB_IMG):latest aerospike-cluster-manager/
 	@echo ">>> [2/5] Loading images into Kind cluster '$(CLUSTER_MANAGER_KIND_CLUSTER)'"
 	$(CONTAINER_TOOL) save $(SAVE_FORMAT_FLAG) $(IMG) -o /tmp/acko-operator.tar
 	$(KIND) load image-archive /tmp/acko-operator.tar --name $(CLUSTER_MANAGER_KIND_CLUSTER)

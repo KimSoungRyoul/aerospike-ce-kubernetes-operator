@@ -532,7 +532,7 @@ ui:
     # against the API Service directly).
     enabled: true
     image:
-      repository: ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-ui
+      repository: ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-web
       tag: "latest"
       pullPolicy: IfNotPresent
     service:
