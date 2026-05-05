@@ -277,6 +277,31 @@ run: manifests generate fmt vet ## Run a controller from your host.
 docker-build: ## Build docker image with the manager.
 	$(CONTAINER_TOOL) build --build-arg VERSION=$(VERSION) -t ${IMG} .
 
+.PHONY: build-images
+build-images: ## Build operator + cluster-manager api + web images (no kind load, no helm). Use NO_CACHE=1 to disable cache.
+	@echo ">>> [1/3] Building operator image ($(IMG))..."
+	$(CONTAINER_TOOL) build $(BUILD_NO_CACHE_FLAG) --build-arg VERSION=$(VERSION) -t $(IMG) .
+	@echo ">>> [2/3] Building cluster-manager API image ($(CLUSTER_MANAGER_API_IMG):latest)..."
+	$(CONTAINER_TOOL) build $(BUILD_NO_CACHE_FLAG) -f aerospike-cluster-manager/Dockerfile.api -t $(CLUSTER_MANAGER_API_IMG):latest aerospike-cluster-manager/
+	@echo ">>> [3/3] Building cluster-manager web image ($(CLUSTER_MANAGER_WEB_IMG):latest)..."
+	$(CONTAINER_TOOL) build $(BUILD_NO_CACHE_FLAG) -f aerospike-cluster-manager/Dockerfile.web -t $(CLUSTER_MANAGER_WEB_IMG):latest aerospike-cluster-manager/
+	@echo ""
+	@echo ">>> Build complete. Images:"
+	@$(CONTAINER_TOOL) images --format '  {{.Repository}}:{{.Tag}} ({{.Size}})' \
+		| grep -E '$(IMG)|$(CLUSTER_MANAGER_API_IMG)|$(CLUSTER_MANAGER_WEB_IMG)' || true
+
+.PHONY: load-images
+load-images: ## Load all 3 images into a Kind cluster. Use KIND_CLUSTER=<name> (default: kind).
+	@echo ">>> Loading images into Kind cluster '$(or $(KIND_CLUSTER),kind)'..."
+	$(CONTAINER_TOOL) save $(SAVE_FORMAT_FLAG) $(IMG) -o /tmp/acko-operator.tar
+	$(KIND) load image-archive /tmp/acko-operator.tar --name $(or $(KIND_CLUSTER),kind)
+	$(CONTAINER_TOOL) save $(SAVE_FORMAT_FLAG) $(CLUSTER_MANAGER_API_IMG):latest -o /tmp/acko-ui-api.tar
+	$(KIND) load image-archive /tmp/acko-ui-api.tar --name $(or $(KIND_CLUSTER),kind)
+	$(CONTAINER_TOOL) save $(SAVE_FORMAT_FLAG) $(CLUSTER_MANAGER_WEB_IMG):latest -o /tmp/acko-ui-web.tar
+	$(KIND) load image-archive /tmp/acko-ui-web.tar --name $(or $(KIND_CLUSTER),kind)
+	@rm -f /tmp/acko-operator.tar /tmp/acko-ui-api.tar /tmp/acko-ui-web.tar
+	@echo ">>> Loaded into '$(or $(KIND_CLUSTER),kind)'."
+
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	$(CONTAINER_TOOL) push ${IMG}
