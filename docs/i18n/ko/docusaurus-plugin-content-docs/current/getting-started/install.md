@@ -383,7 +383,7 @@ Aerospike CE Kubernetes Operator와 Aerospike Cluster Manager는 함께 동작�
 - **오퍼레이터** (`aerospike-ce-kubernetes-operator`): `AerospikeCluster`와 `AerospikeClusterTemplate` 커스텀 리소스를 감시하고 원하는 상태를 조정하는 Kubernetes 컨트롤러입니다 -- StatefulSet, Service, ConfigMap을 생성하고 롤링 업데이트, 스케일링, 랙 관리를 수행합니다.
 - **클러스터 매니저** (`aerospike-cluster-manager`): Aerospike 클러스터(데이터 작업, 모니터링)와 Kubernetes API(CRD를 통한 클러스터 라이프사이클)를 모두 다루는 GUI를 제공하는 웹 애플리케이션(Next.js 프론트엔드 + FastAPI 백엔드)입니다.
 
-Helm 차트에서 `ui.enabled=true`를 설정하면 클러스터 매니저가 오퍼레이터와 동일한 네임스페이스에 별도 Deployment로 배포됩니다. 클러스터 매니저는 다음과 통신합니다:
+Helm 차트 0.4.0+에서는 클러스터 매니저가 기본으로 오퍼레이터와 동일한 네임스페이스에 별도 Deployment로 배포됩니다 (`ui.api.enabled` / `ui.web.enabled`로 개별 토글 가능). 클러스터 매니저는 다음과 통신합니다:
 1. **Aerospike 클러스터** — 데이터 작업(레코드 탐색, AQL, 인덱스 관리, UDF 관리)을 위해 Aerospike 와이어 프로토콜로 직접 통신
 2. **Kubernetes API** — 클러스터 라이프사이클 작업(`AerospikeCluster` CR의 생성, 스케일, 편집, 삭제)을 위해 통신하며, 이후 오퍼레이터가 조정
 
@@ -391,13 +391,14 @@ Helm 차트에서 `ui.enabled=true`를 설정하면 클러스터 매니저가 �
 
 ### UI 활성화
 
-Helm 설치 명령에 `--set ui.enabled=true`를 추가합니다:
+UI는 기본 활성화이므로 별도 플래그 없이 설치하면 함께 올라옵니다:
 
 ```bash
 helm install aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
-  -n aerospike-operator --create-namespace \
-  --set ui.enabled=true
+  -n aerospike-operator --create-namespace
 ```
+
+UI를 끄려면 `--set ui.api.enabled=false --set ui.web.enabled=false`.
 
 ### Port-Forward로 접근
 
@@ -421,7 +422,6 @@ kubectl -n aerospike-operator port-forward svc/<release>-aerospike-operator-ui 3
 ```bash
 helm install aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
   -n aerospike-operator --create-namespace \
-  --set ui.enabled=true \
   --set ui.ingress.enabled=true \
   --set ui.ingress.className=nginx \
   --set "ui.ingress.hosts[0].host=aerospike-admin.example.com" \
@@ -433,7 +433,8 @@ helm install aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosyst
 
 | 파라미터 | 기본값 | 설명 |
 |---------|--------|------|
-| `ui.enabled` | `false` | Cluster Manager UI 활성화 |
+| `ui.api.enabled` | `true` | Cluster Manager API (FastAPI) 컴포넌트 배포. `ui.web.enabled=false`와 함께 false로 설정하면 UI 전체 비활성. |
+| `ui.web.enabled` | `true` | Cluster Manager web (Next.js) 컴포넌트 배포. `ui.api.enabled=false`와 함께 false로 설정하면 UI 전체 비활성. |
 | `ui.replicaCount` | `1` | UI 레플리카 수 |
 | `ui.service.type` | `ClusterIP` | 서비스 타입 (`ClusterIP`, `NodePort`, `LoadBalancer`) |
 | `ui.service.frontendPort` | `3000` | Frontend(Next.js) 포트 |
@@ -452,7 +453,6 @@ helm install aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosyst
 ```bash
 helm install aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
   -n aerospike-operator --create-namespace \
-  --set ui.enabled=true \
   --set ui.postgresql.enabled=false \
   --set ui.env.databaseUrl="postgresql://user:pass@db-host:5432/aerospike_manager"
 ```

@@ -87,7 +87,7 @@ make run-local
 4. Build Cluster Manager image
 5. Load both images into the Kind cluster
 6. Install cert-manager
-7. Deploy operator + UI via `helm upgrade -i` with `ui.enabled=true`
+7. Deploy operator + UI via `helm upgrade -i` (UI is on by default)
 
 Once complete, access the UI:
 

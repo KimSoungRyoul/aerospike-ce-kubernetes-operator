@@ -445,7 +445,7 @@ kubectl get aerospikeclustertemplate
 
 ## Managing Templates via Cluster Manager UI
 
-When the Cluster Manager UI is enabled (`ui.enabled=true` and `ui.k8s.enabled=true`), templates can be managed from the web interface:
+When the Cluster Manager UI is enabled (default; requires `ui.k8s.enabled=true` for K8s management), templates can be managed from the web interface:
 
 - **Create** -- guided wizard for all template fields
 - **View** -- detail page showing resolved spec and referencing clusters

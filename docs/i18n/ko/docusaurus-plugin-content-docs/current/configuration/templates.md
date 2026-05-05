@@ -405,7 +405,7 @@ kubectl get aerospikeclustertemplate
 
 ## Cluster Manager UI를 통한 템플릿 관리
 
-Cluster Manager UI가 활성화된 경우 (`ui.enabled=true` 및 `ui.k8s.enabled=true`), 웹 인터페이스에서 템플릿을 관리할 수 있습니다:
+Cluster Manager UI가 활성화된 경우 (기본 활성화. K8s 관리 기능에는 `ui.k8s.enabled=true` 필요), 웹 인터페이스에서 템플릿을 관리할 수 있습니다:
 
 - **생성** -- 모든 템플릿 필드를 위한 가이드 마법사
 - **조회** -- 해석된 스펙과 참조 클러스터를 보여주는 상세 페이지

@@ -217,7 +217,7 @@ The operator will clear the annotation after performing the reconciliation. This
 
 **Reset via Aerospike Cluster Manager UI:**
 
-When the integrated UI is enabled (`ui.enabled: true` in Helm values), the Reconciliation Health dashboard shows a **Reset Circuit Breaker** button that triggers the annotation-based reset with a single click.
+When the integrated UI is enabled (default; requires `ui.web.enabled=true`), the Reconciliation Health dashboard shows a **Reset Circuit Breaker** button that triggers the annotation-based reset with a single click.
 
 ## Debugging Commands
 

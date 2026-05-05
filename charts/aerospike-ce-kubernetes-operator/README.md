@@ -101,11 +101,23 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/acko \
 
 ### With Cluster Manager UI
 
+The Cluster Manager UI (api + web) is deployed by default. A plain
+`helm install` of the chart already brings both Deployments up:
+
 ```bash
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/acko \
-  --version 0.1.0 \
+  --version 0.4.0 \
+  --namespace aerospike-operator --create-namespace
+```
+
+To skip the UI entirely (operator-only install), set both toggles
+to `false`:
+
+```bash
+helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/acko \
+  --version 0.4.0 \
   --namespace aerospike-operator --create-namespace \
-  --set ui.enabled=true
+  --set ui.api.enabled=false --set ui.web.enabled=false
 ```
 
 Access the UI:
@@ -117,25 +129,23 @@ kubectl port-forward svc/<release-name>-acko-ui 3000:3000 -n aerospike-operator
 #### Independent api / web toggles (chart 0.3.0+)
 
 The Cluster Manager ships as two Deployments — `api` (FastAPI) and `web`
-(Next.js). When `ui.enabled=true`, the per-component sub-toggles
-`ui.api.enabled` and `ui.web.enabled` (both defaulting to true) decide
-which Deployments are created. This lets you run API-only or Web-only
-modes without forking the chart.
+(Next.js). The per-component toggles `ui.api.enabled` and
+`ui.web.enabled` (both defaulting to true) decide which Deployments are
+created. This lets you run API-only or Web-only modes without forking
+the chart. (Chart 0.4.0+: the legacy `ui.enabled` master switch was
+removed — use these two toggles directly.)
 
 ```yaml
 # API only — Swagger / CLI / external UI talks to the API directly
 ui:
-  enabled: true
   web:
     enabled: false
 
 # Web only — point the web frontend at an external API instance
 ui:
-  enabled: true
   api:
     enabled: false
   web:
-    enabled: true
     env:
       apiUrl: "https://my-asm-api.example.com"
 ```
@@ -219,9 +229,8 @@ You can customize the UI with service annotations, resource defaults, and extra 
 
 ```bash
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/acko \
-  --version 0.1.0 \
+  --version 0.4.0 \
   --namespace aerospike-operator --create-namespace \
-  --set ui.enabled=true \
   --set ui.service.type=LoadBalancer \
   --set ui.service.annotations."service\.beta\.kubernetes\.io/aws-load-balancer-type"=nlb \
   --set ui.resources.requests.cpu=200m \
@@ -234,7 +243,6 @@ Extra environment variables can be passed via `ui.extraEnv`:
 
 ```yaml
 ui:
-  enabled: true
   extraEnv:
     - name: LOG_LEVEL
       value: DEBUG
@@ -249,14 +257,13 @@ ui:
 
 ```bash
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/acko \
-  --version 0.1.0 \
+  --version 0.4.0 \
   --namespace aerospike-operator --create-namespace \
   --set serviceMonitor.enabled=true \
   --set prometheusRule.enabled=true \
   --set grafanaDashboard.enabled=true \
   --set podDisruptionBudget.enabled=true \
-  --set cilium.enabled=true \
-  --set ui.enabled=true
+  --set cilium.enabled=true
 ```
 
 ### GitOps — ArgoCD example

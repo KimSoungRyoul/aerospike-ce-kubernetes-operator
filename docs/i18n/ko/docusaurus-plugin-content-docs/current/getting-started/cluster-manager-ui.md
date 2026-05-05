@@ -13,13 +13,16 @@ UI에는 클러스터 연결 프로파일을 저장하기 위한 PostgreSQL 사�
 
 ## 설치
 
-오퍼레이터 설치 시 UI를 활성화합니다.
+차트 0.4.0+에서는 Cluster Manager UI(api + web Deployment)가 기본으로
+배포됩니다. 별도 플래그 없이 설치하면 모두 함께 올라옵니다.
 
 ```bash
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
-  --namespace aerospike-operator --create-namespace \
-  --set ui.enabled=true
+  --namespace aerospike-operator --create-namespace
 ```
+
+UI를 완전히 끄려면 두 컴포넌트 토글을 모두 false로 설정합니다:
+`--set ui.api.enabled=false --set ui.web.enabled=false`.
 
 :::note RBAC 권한
 `ui.rbac.create=true`(기본값)일 때, Helm 차트가 생성하는 ClusterRole에는 `autoscaling` API 그룹의 `horizontalpodautoscalers` 리소스에 대한 전체 접근 권한이 포함됩니다. 이 권한은 UI에서 HPA를 생성, 조회, 삭제하는 데 필요합니다.
@@ -57,7 +60,6 @@ kubectl -n aerospike-operator port-forward svc/<릴리스명>-aerospike-ce-kuber
 ```bash
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
   --namespace aerospike-operator --create-namespace \
-  --set ui.enabled=true \
   --set ui.ingress.enabled=true \
   --set ui.ingress.className=nginx \
   --set "ui.ingress.hosts[0].host=aerospike-admin.example.com" \
@@ -71,7 +73,8 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kuber
 
 | 파라미터 | 설명 | 기본값 |
 |----------|------|--------|
-| `ui.enabled` | 클러스터 매니저 UI 활성화 | `false` |
+| `ui.api.enabled` | Cluster Manager API (FastAPI) 컴포넌트 배포. `ui.web.enabled=false`와 함께 false로 설정하면 UI를 완전히 끔 (operator-only). | `true` |
+| `ui.web.enabled` | Cluster Manager web (Next.js) 컴포넌트 배포. `ui.api.enabled=false`와 함께 false로 설정하면 UI를 완전히 끔 (operator-only). | `true` |
 | `ui.replicaCount` | UI 레플리카 수 | `1` |
 | `ui.image.repository` | UI 컨테이너 이미지 | `ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager` |
 | `ui.image.tag` | 이미지 태그 (비어 있으면 Chart appVersion 사용) | `""` |
@@ -316,7 +319,6 @@ Aerospike 클러스터에 등록된 사용자 정의 함수(Lua 모듈)를 업�
 ```bash
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
   --namespace aerospike-operator --create-namespace \
-  --set ui.enabled=true \
   --set ui.postgresql.enabled=false \
   --set ui.env.databaseUrl="postgresql://user:pass@db-host:5432/aerospike_manager"
 ```
@@ -353,7 +355,6 @@ UI Pod에 대한 트래픽을 제한합니다.
 ```bash
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
   --namespace aerospike-operator --create-namespace \
-  --set ui.enabled=true \
   --set ui.networkPolicy.enabled=true
 ```
 
@@ -366,7 +367,6 @@ UI, 모니터링, Ingress를 모두 활성화하여 오퍼레이터를 배포합
 ```bash
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
   --namespace aerospike-operator --create-namespace \
-  --set ui.enabled=true \
   --set ui.ingress.enabled=true \
   --set ui.ingress.className=nginx \
   --set "ui.ingress.hosts[0].host=aerospike-admin.example.com" \

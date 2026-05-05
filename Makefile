@@ -121,7 +121,6 @@ run-local: manifests helm-sync-crds ## Deploy operator + cluster-manager UI into
 	@echo "==> [6/7] Deploying operator and UI (api only) via Helm..."
 	helm upgrade -i aerospike-ce-kubernetes-operator ./charts/aerospike-ce-kubernetes-operator \
 		-n aerospike-operator --create-namespace \
-		--set ui.enabled=true \
 		--set image.tag=latest \
 		--set ui.api.image.repository=$(CLUSTER_MANAGER_API_IMG) \
 		--set ui.api.image.tag=latest \
@@ -204,7 +203,6 @@ reload-cluster-manager: ## Build operator + cluster-manager api image, load into
 	@echo ">>> [3/5] Upgrading Helm release"
 	helm upgrade aerospike-ce-kubernetes-operator ./charts/aerospike-ce-kubernetes-operator \
 		-n $(CLUSTER_MANAGER_NAMESPACE) --reuse-values \
-		--set ui.enabled=true \
 		--set image.tag=latest \
 		--set ui.api.image.repository=$(CLUSTER_MANAGER_API_IMG) \
 		--set ui.api.image.tag=latest \

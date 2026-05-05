@@ -232,22 +232,28 @@ UI image helpers (per-component).
 {{/*
 UI component enablement.
 
-`ui.enabled` is the master switch (false → no UI resources at all). When
-ui.enabled is true, ui.api.enabled / ui.web.enabled act as independent
-sub-toggles so an operator can deploy API-only (when an external UI talks
-to the FastAPI backend) or Web-only (when ui.web.env.apiUrl points to an
-external API instance).
+ui.api.enabled and ui.web.enabled are independent toggles. Set both to
+false to skip the UI entirely (operator-only install). Combinations:
 
-Defaults: both api.enabled and web.enabled are true, so the existing
-chart 0.2.x deployment behavior is preserved exactly when only ui.enabled
-is set in user values.
+  api.enabled=true,  web.enabled=true   (default) → both Deployments
+  api.enabled=true,  web.enabled=false           → API only (Swagger / external UI)
+  api.enabled=false, web.enabled=true            → Web only (point web.env.apiUrl at an external API)
+  api.enabled=false, web.enabled=false           → operator only (no UI resources)
+
+ui.anyEnabled returns "true" when at least one of api/web is on. Used
+to gate UI-shared resources (configmap, serviceaccount, ingress,
+networkpolicy) that are pointless without any UI Deployment.
 */}}
 {{- define "aerospike-ce-kubernetes-operator.ui.api.enabled" -}}
-{{- and .Values.ui.enabled .Values.ui.api.enabled -}}
+{{- .Values.ui.api.enabled -}}
 {{- end }}
 
 {{- define "aerospike-ce-kubernetes-operator.ui.web.enabled" -}}
-{{- and .Values.ui.enabled .Values.ui.web.enabled -}}
+{{- .Values.ui.web.enabled -}}
+{{- end }}
+
+{{- define "aerospike-ce-kubernetes-operator.ui.anyEnabled" -}}
+{{- or .Values.ui.api.enabled .Values.ui.web.enabled -}}
 {{- end }}
 
 {{/*
