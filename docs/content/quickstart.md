@@ -69,7 +69,6 @@ helm install cert-manager jetstack/cert-manager \
 helm install aerospike-ce-kubernetes-operator \
   oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
   -n aerospike-operator --create-namespace \
-  --set ui.enabled=true \
   --wait
 ```
 

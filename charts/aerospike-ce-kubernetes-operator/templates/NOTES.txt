@@ -6,15 +6,25 @@ Ensure acko-crds is installed separately before creating AerospikeCluster resour
   helm install acko-crds oci://ghcr.io/aerospike-ce-ecosystem/charts/acko-crds --version {{ .Chart.Version }}
 {{- end }}
 
-NOTE: 0.3.0 adds independent ui.api.enabled / ui.web.enabled toggles
-(both default to true). API-only and Web-only deployments are now
-first-class. Existing 0.2.0 values produce the same output unchanged.
+NOTE: 0.4.0 removes the redundant `ui.enabled` master switch. The
+per-component `ui.api.enabled` / `ui.web.enabled` toggles are now the
+only UI on/off controls.
+  Migration: replace `ui.enabled: false` with both
+    ui.api.enabled: false
+    ui.web.enabled: false
+  Setting either (or both) to true reinstates the corresponding
+  Deployment plus the shared resources (configmap, serviceaccount,
+  ingress, networkpolicy).
+
+NOTE: 0.3.0 added independent ui.api.enabled / ui.web.enabled toggles
+(both default to true). API-only and Web-only deployments are
+first-class.
 
 NOTE: 0.2.0 introduces a breaking rename of the UI value keys.
   ui.backend.*           -> ui.api.*
   ui.frontend.*          -> REMOVED (legacy frontend deleted)
   ui.frontendRenewal.*   -> ui.web.*
-  ui.frontendRenewal.enabled -> REMOVED (web is always deployed when ui.enabled=true)
+  ui.frontendRenewal.enabled -> REMOVED (web is always deployed when at least one UI toggle is on)
   ui.ingress.target enum: frontend|frontendRenewal|backend -> web|api (default: web)
 Selector labels changed (ui-backend -> ui-api, ui-frontend-renewal -> ui-web).
 When upgrading from 0.1.x, uninstall and reinstall the chart — selector mutation
@@ -92,20 +102,13 @@ Namespace: {{ .Release.Namespace }}
    Kubernetes NetworkPolicy is enabled for the operator.
 {{- end }}
 
-{{- if .Values.ui.enabled }}
+{{- if eq (include "aerospike-ce-kubernetes-operator.ui.anyEnabled" .) "true" }}
 
 ------------------------------------------------------------------------
   Aerospike Cluster Manager (Web UI)
 ------------------------------------------------------------------------
 
 The Aerospike Cluster Manager is ENABLED ({{ if (eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true") }}api={{ end }}{{ if and (eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true") (eq (include "aerospike-ce-kubernetes-operator.ui.web.enabled" .) "true") }}, {{ end }}{{ if (eq (include "aerospike-ce-kubernetes-operator.ui.web.enabled" .) "true") }}web={{ end }}).
-
-{{- if and (ne (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true") (ne (include "aerospike-ce-kubernetes-operator.ui.web.enabled" .) "true") }}
-
-WARNING: ui.enabled=true but both ui.api.enabled and ui.web.enabled are false.
-No UI components will be deployed. Either set ui.enabled=false to skip the UI
-entirely, or enable at least one of ui.api.enabled / ui.web.enabled.
-{{- end }}
 
 {{- if eq (include "aerospike-ce-kubernetes-operator.ui.web.enabled" .) "true" }}
 {{- if .Values.ui.ingress.enabled }}

@@ -149,7 +149,8 @@ The Aerospike Cluster Manager is a full-stack web dashboard deployed alongside t
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `ui.enabled` | bool | `true` | Enable the Aerospike Cluster Manager web UI. |
+| `ui.api.enabled` | bool | `true` | Deploy the Cluster Manager API (FastAPI) component. Set to false together with `ui.web.enabled=false` to skip the UI entirely. |
+| `ui.web.enabled` | bool | `true` | Deploy the Cluster Manager web (Next.js) component. Set to false together with `ui.api.enabled=false` to skip the UI entirely. |
 | `ui.replicaCount` | int | `1` | Number of UI replicas. |
 | `ui.image.repository` | string | `ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager` | UI container image repository. |
 | `ui.image.tag` | string | `"latest"` | UI container image tag. UI is versioned independently from the operator. |

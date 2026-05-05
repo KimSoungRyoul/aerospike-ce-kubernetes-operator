@@ -11,11 +11,16 @@ title: Cluster Manager UI
 
 ## Installation
 
+The Cluster Manager UI (api + web Deployments) is enabled by default in
+chart 0.4.0+. A plain install brings everything up:
+
 ```bash
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
-  --namespace aerospike-operator --create-namespace \
-  --set ui.enabled=true
+  --namespace aerospike-operator --create-namespace
 ```
+
+To skip the UI entirely, set both component toggles to false:
+`--set ui.api.enabled=false --set ui.web.enabled=false`.
 
 :::note RBAC permissions
 When `ui.rbac.create=true` (the default), the ClusterRole created by the Helm chart includes full access to `horizontalpodautoscalers` resources in the `autoscaling` API group. This permission is required for the UI to create, view, and delete HPAs.
@@ -521,7 +526,8 @@ After modifying a template, existing clusters that reference it are not automati
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `ui.enabled` | Enable the UI | `false` |
+| `ui.api.enabled` | Deploy the Cluster Manager API (FastAPI). Combine with `ui.web.enabled=false` for both-off (operator-only). | `true` |
+| `ui.web.enabled` | Deploy the Cluster Manager web (Next.js). Combine with `ui.api.enabled=false` for both-off (operator-only). | `true` |
 | `ui.replicaCount` | UI replica count | `1` |
 | `ui.image.repository` | UI container image | `ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager` |
 | `ui.image.tag` | Image tag | `latest` |
@@ -578,7 +584,6 @@ Tune the connection pool for the embedded PostgreSQL sidecar or an external Post
 ```bash
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
   --namespace aerospike-operator --create-namespace \
-  --set ui.enabled=true \
   --set ui.env.dbPoolSize=10 \
   --set ui.env.dbPoolOverflow=20 \
   --set ui.env.dbPoolTimeout=60
@@ -607,7 +612,6 @@ Configure the timeout for UI requests to the Kubernetes API server:
 # Enable structured JSON logging (recommended when integrating with Loki, Elasticsearch, etc.)
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
   --namespace aerospike-operator --create-namespace \
-  --set ui.enabled=true \
   --set ui.env.logFormat=json \
   --set ui.env.logLevel=INFO
 ```
@@ -625,7 +629,6 @@ The ServiceMonitor uses the default Prometheus path `/metrics`. No separate `pat
 ```bash
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
   --namespace aerospike-operator --create-namespace \
-  --set ui.enabled=true \
   --set ui.metrics.serviceMonitor.enabled=true \
   --set ui.metrics.serviceMonitor.labels.release=prometheus
 ```

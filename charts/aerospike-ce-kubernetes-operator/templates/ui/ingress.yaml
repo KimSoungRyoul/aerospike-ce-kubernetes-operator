@@ -1,14 +1,14 @@
-{{- if and .Values.ui.enabled .Values.ui.ingress.enabled }}
+{{- if and (eq (include "aerospike-ce-kubernetes-operator.ui.anyEnabled" .) "true") .Values.ui.ingress.enabled }}
 {{- $target := .Values.ui.ingress.target | default "web" -}}
 {{- $targetServiceName := "" -}}
 {{- if eq $target "api" -}}
 {{- if ne (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true" -}}
-{{- fail "ui.ingress.target=api but ui.api.enabled=false (or ui.enabled=false). Either enable the API or change ui.ingress.target to web." -}}
+{{- fail "ui.ingress.target=api but ui.api.enabled=false. Either enable the API or change ui.ingress.target to web." -}}
 {{- end -}}
 {{- $targetServiceName = include "aerospike-ce-kubernetes-operator.ui.api.fullname" . -}}
 {{- else if eq $target "web" -}}
 {{- if ne (include "aerospike-ce-kubernetes-operator.ui.web.enabled" .) "true" -}}
-{{- fail "ui.ingress.target=web but ui.web.enabled=false (or ui.enabled=false). Either enable the web or change ui.ingress.target to api." -}}
+{{- fail "ui.ingress.target=web but ui.web.enabled=false. Either enable the web or change ui.ingress.target to api." -}}
 {{- end -}}
 {{- $targetServiceName = include "aerospike-ce-kubernetes-operator.ui.web.fullname" . -}}
 {{- else -}}

@@ -142,7 +142,8 @@ Aerospike Cluster Manager는 오퍼레이터와 함께 배포되는 풀스택 �
 
 | 키 | 타입 | 기본값 | 설명 |
 |-----|------|---------|-------------|
-| `ui.enabled` | bool | `false` | Aerospike Cluster Manager 웹 UI 활성화. |
+| `ui.api.enabled` | bool | `true` | Cluster Manager API (FastAPI) 컴포넌트 배포. `ui.web.enabled=false`와 함께 false로 설정하면 UI를 완전히 끔. |
+| `ui.web.enabled` | bool | `true` | Cluster Manager web (Next.js) 컴포넌트 배포. `ui.api.enabled=false`와 함께 false로 설정하면 UI를 완전히 끔. |
 | `ui.replicaCount` | int | `1` | UI 레플리카 수. |
 | `ui.image.repository` | string | `ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager` | UI 컨테이너 이미지 리포지토리. |
 | `ui.image.tag` | string | `"latest"` | UI 컨테이너 이미지 태그. UI는 오퍼레이터와 독립적으로 버전 관리. |

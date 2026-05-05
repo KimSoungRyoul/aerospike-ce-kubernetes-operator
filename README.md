@@ -14,7 +14,7 @@ Deploy, scale, and perform rolling updates of Aerospike CE clusters via a custom
 - Pod Disruption Budget for safe maintenance
 - Mesh heartbeat auto-configuration
 - Rack-node selection with zone/region affinity and rackLabel scheduling
-- Optional web UI (Aerospike Cluster Manager) deployable via Helm (`ui.enabled=true`)
+- Optional web UI (Aerospike Cluster Manager) deployable via Helm (enabled by default; toggled via `ui.api.enabled` / `ui.web.enabled`)
 
 ### CE Limitations
 

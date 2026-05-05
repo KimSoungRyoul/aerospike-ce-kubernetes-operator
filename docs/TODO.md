@@ -21,7 +21,7 @@ Production environments often separate the **management cluster** (where the ope
    - Network connectivity requirements between clusters
 
 2. **Management Cluster Setup**
-   - Install ACKO operator with `ui.enabled=true`
+   - Install ACKO operator (UI is on by default; toggle via `ui.api.enabled` / `ui.web.enabled`)
    - Configure RBAC for cross-cluster access
    - kubeconfig / ServiceAccount token management for remote clusters
 

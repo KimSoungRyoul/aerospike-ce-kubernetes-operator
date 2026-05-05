@@ -1,4 +1,4 @@
-{{- if and .Values.ui.enabled .Values.ui.networkPolicy.enabled }}
+{{- if and (eq (include "aerospike-ce-kubernetes-operator.ui.anyEnabled" .) "true") .Values.ui.networkPolicy.enabled }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

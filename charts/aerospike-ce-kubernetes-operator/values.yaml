@@ -272,17 +272,14 @@ podLabels: {}
 # provide ui.env.databaseUrl).
 # =============================================================================
 ui:
-  # -- Enable the Aerospike Cluster Manager web UI.
-  # Master switch — when false, neither api nor web is deployed regardless of
-  # the per-component `api.enabled` / `web.enabled` toggles below. When true,
-  # those toggles act as independent on/off switches:
-  #   ui.enabled=true,  api.enabled=true,  web.enabled=true   (default) → both
-  #   ui.enabled=true,  api.enabled=true,  web.enabled=false           → API only (use Swagger / external UI)
-  #   ui.enabled=true,  api.enabled=false, web.enabled=true            → Web only (point web.env.apiUrl at an external API)
-  #   ui.enabled=false, *,                  *                           → operator only
+  # -- Aerospike Cluster Manager web UI deployment toggles.
+  # ui.api.enabled and ui.web.enabled are independent. Combinations:
+  #   api.enabled=true,  web.enabled=true   (default) → both Deployments
+  #   api.enabled=true,  web.enabled=false           → API only (Swagger / external UI)
+  #   api.enabled=false, web.enabled=true            → Web only (point web.env.apiUrl at an external API)
+  #   api.enabled=false, web.enabled=false           → operator only (no UI resources)
   # Access via:
   #   kubectl port-forward svc/<release>-aerospike-ce-kubernetes-operator-ui-web 3100:3100
-  enabled: true
 
   # -- Number of replicas for each UI Deployment (api / web)
   replicaCount: 1
@@ -294,7 +291,7 @@ ui:
   # API (FastAPI) — port 8000 internally, Service port 80
   # =============================================================================
   api:
-    # -- Deploy the API component when ui.enabled is also true.
+    # -- Deploy the API (FastAPI) component.
     # Set to false to deploy only the web frontend (then set
     # `ui.web.env.apiUrl` to your external API endpoint).
     enabled: true
@@ -444,7 +441,7 @@ ui:
   # Web (Next.js 14 + proxy.js sidecar) — port 3100
   # =============================================================================
   web:
-    # -- Deploy the web component when ui.enabled is also true.
+    # -- Deploy the web (Next.js) component.
     # Set to false to deploy only the API backend (use Swagger / CLI tools
     # against the API Service directly).
     enabled: true
