@@ -266,6 +266,18 @@ Each cluster needs its own ingress host, and each host needs its own TLS certifi
 
 Cross-origin requirements: every API ingress must allow `Origin: https://app.example.com` (the common cluster) in CORS, otherwise the browser fan-out to dev/prod will be blocked. The chart sets this from `multiCluster.clusters[].apiUrl` (and from the web ingress host).
 
+### **MANDATORY**: mask `access_token` in ingress access logs
+
+The SPA opens its event stream as `EventSource` with the access token on the URL (`/api/events/stream?cluster=<id>&access_token=<jwt>`). `EventSource` cannot set custom headers, so the token has to ride on the query string. The FastAPI access log already masks it, but **every ingress controller / load balancer in front of the API must also mask the `access_token` and `id_token` query parameters in its access logs.** Otherwise tokens land in plaintext on whoever rotates the ingress logs.
+
+Examples:
+
+- **nginx-ingress**: set `nginx.ingress.kubernetes.io/configuration-snippet` to redact the params with `set $masked_args $args; if ($masked_args ~* "access_token=[^&]*") { set $masked_args "access_token=***"; }` then reference `$masked_args` in the log format.
+- **Envoy / Istio**: configure a `Lua` `EnvoyFilter` on the request flow that rewrites the `access_token` and `id_token` query values before the access log encoder sees them.
+- **Cloud LB access logs (GCP / AWS)**: tokens *will* be logged. Either disable URL logging on the SSE path, or terminate TLS at an in-cluster proxy that masks before forwarding to the cloud LB.
+
+Long-term, this exposure is tracked as a follow-up ADR (per-stream signed nonce or a transport upgrade that allows header-based subscription auth).
+
 ---
 
 ## Troubleshooting
