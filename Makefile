@@ -93,32 +93,35 @@ setup-kind: ## Delete existing Kind cluster and create a fresh one with kind-con
 .PHONY: run-local
 run-local: manifests helm-sync-crds ## Deploy operator + cluster-manager UI into a fresh Kind cluster via Helm
 	@echo ""
-	@echo "==> [0/7] Refreshing Helm sub-chart dependency (CRD bundle)..."
+	@echo "==> [0/8] Refreshing Helm sub-chart dependency (CRD bundle)..."
 	helm dep update charts/aerospike-ce-kubernetes-operator
 	@echo ""
-	@echo "==> [1/7] Creating fresh Kind cluster..."
+	@echo "==> [1/8] Creating fresh Kind cluster..."
 	-@$(KIND) delete cluster --name kind 2>/dev/null || true
 	KIND_EXPERIMENTAL_PROVIDER=$(KIND_PROVIDER) $(KIND) create cluster --config kind-config.yaml --name kind
 	@echo ""
-	@echo "==> [2/7] Building operator image..."
+	@echo "==> [2/8] Building operator image..."
 	$(CONTAINER_TOOL) build --build-arg VERSION=$(VERSION) -t $(IMG) .
 	@echo ""
-	@echo "==> [3/7] Building cluster-manager backend image (FastAPI :8000)..."
+	@echo "==> [3/8] Building cluster-manager backend image (FastAPI :8000)..."
 	$(CONTAINER_TOOL) build --target backend -f aerospike-cluster-manager/Dockerfile -t $(CLUSTER_MANAGER_API_IMG):latest aerospike-cluster-manager/
 	@echo ""
-	@echo "==> [4/7] Loading images into Kind cluster..."
+	@echo "==> [4/8] Loading images into Kind cluster..."
 	$(CONTAINER_TOOL) save $(SAVE_FORMAT_FLAG) $(IMG) -o /tmp/acko-operator.tar
 	$(KIND) load image-archive /tmp/acko-operator.tar --name kind
 	$(CONTAINER_TOOL) save $(SAVE_FORMAT_FLAG) $(CLUSTER_MANAGER_API_IMG):latest -o /tmp/acko-ui-api.tar
 	$(KIND) load image-archive /tmp/acko-ui-api.tar --name kind
 	@rm -f /tmp/acko-operator.tar /tmp/acko-ui-api.tar
 	@echo ""
-	@echo "==> [5/7] Installing cert-manager..."
+	@echo "==> [5/8] Installing cert-manager..."
 	helm install cert-manager jetstack/cert-manager --namespace cert-manager --create-namespace --set crds.enabled=true
 	@echo "    Waiting for cert-manager webhook..."
 	kubectl wait --for=condition=Available deployment/cert-manager-webhook -n cert-manager --timeout=120s
 	@echo ""
-	@echo "==> [6/7] Deploying operator and UI (api only) via Helm..."
+	@echo "==> [6/8] Installing Keycloak (local OIDC IdP)..."
+	$(MAKE) install-keycloak
+	@echo ""
+	@echo "==> [7/8] Deploying operator and UI (api only) via Helm..."
 	helm upgrade -i aerospike-ce-kubernetes-operator ./charts/aerospike-ce-kubernetes-operator \
 		-n aerospike-operator --create-namespace \
 		--set image.tag=latest \
@@ -127,13 +130,43 @@ run-local: manifests helm-sync-crds ## Deploy operator + cluster-manager UI into
 		--set ui.api.image.pullPolicy=IfNotPresent \
 		--set ui.web.enabled=false
 	@echo ""
-	@echo "==> [7/7] Waiting for operator deployment to be ready..."
+	@echo "==> [8/8] Waiting for operator deployment to be ready..."
 	kubectl -n aerospike-operator wait --for=condition=Available deployment --all --timeout=180s
 	@echo ""
 	@echo "==> ACKO local development stack is running!"
 	@echo "    Operator:    deployed in namespace 'aerospike-operator'"
 	@echo "    Backend API: kubectl port-forward -n aerospike-operator svc/aerospike-ce-kubernetes-operator-ui-api 8000:80"
+	@echo "    Keycloak:    kubectl port-forward -n keycloak svc/keycloak 8080:80 (admin/admin, realm acko)"
 	@echo ""
+
+# install-keycloak — install (or upgrade) Keycloak with the acko realm preloaded.
+# Reusable target shared by run-local and setup-test-e2e.
+# Idempotent: re-running upgrades the chart and re-applies the realm ConfigMap.
+.PHONY: install-keycloak
+install-keycloak: ## Install bitnami/keycloak with the acko realm imported (local OIDC IdP)
+	@echo "    Adding bitnami helm repo..."
+	helm repo add bitnami https://charts.bitnami.com/bitnami 2>/dev/null || true
+	helm repo update bitnami
+	@echo "    Creating namespace 'keycloak' (idempotent)..."
+	kubectl create namespace keycloak --dry-run=client -o yaml | kubectl apply -f -
+	@echo "    Loading acko-realm.json into ConfigMap..."
+	kubectl create configmap acko-realm \
+		--from-file=acko-realm.json=scripts/keycloak/acko-realm.json \
+		-n keycloak --dry-run=client -o yaml | kubectl apply -f -
+	@echo "    helm upgrade --install keycloak..."
+	helm upgrade --install keycloak bitnami/keycloak \
+		--namespace keycloak \
+		--set auth.adminUser=admin \
+		--set auth.adminPassword=admin \
+		--set keycloakConfigCli.enabled=true \
+		--set keycloakConfigCli.existingConfigmap=acko-realm \
+		--set service.type=ClusterIP \
+		--set proxy=edge \
+		--wait --timeout 5m
+	@echo "    Waiting for Keycloak deployment..."
+	kubectl wait --for=condition=Available deployment/keycloak \
+		-n keycloak --timeout=300s
+	@echo "    Keycloak ready: http://keycloak.keycloak.svc.cluster.local/realms/acko"
 
 .PHONY: stop-local
 stop-local: ## Delete the Kind cluster used for local development
@@ -153,6 +186,12 @@ setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
 			echo "Creating Kind cluster '$(KIND_CLUSTER)' with provider '$(KIND_PROVIDER)'..."; \
 			KIND_EXPERIMENTAL_PROVIDER=$(KIND_PROVIDER) $(KIND) create cluster --config kind-config.yaml --name $(KIND_CLUSTER) ;; \
 	esac
+	@if [ "$(SKIP_KEYCLOAK)" != "true" ]; then \
+		echo "==> Installing Keycloak (local OIDC IdP) for e2e..."; \
+		$(MAKE) install-keycloak; \
+	else \
+		echo "==> Skipping Keycloak install (SKIP_KEYCLOAK=true)"; \
+	fi
 
 .PHONY: test-e2e
 test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
