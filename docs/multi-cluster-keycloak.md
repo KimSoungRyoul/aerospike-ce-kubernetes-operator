@@ -197,16 +197,24 @@ ui:
         clientId: acko-spa
 multiCluster:
   enabled: true
+  defaultClusterId: dev
   clusters:
-    - name: dev
-      label: Development
-      apiBaseUrl: https://api.dev.example.com
-      requiredRole: acko:dev   # optional — omit for "any authenticated user"
-    - name: prod
-      label: Production
-      apiBaseUrl: https://api.prod.example.com
-      requiredRole: acko:prod
+    - id: dev
+      displayName: Development
+      apiUrl: https://api.dev.example.com
+      labels:
+        env: dev
+    - id: prod
+      displayName: Production
+      apiUrl: https://api.prod.example.com
+      labels:
+        env: prod
 ```
+
+> Note: cluster-scoped role gating (`acko:dev` / `acko:prod`) lives on
+> the API side, not the registry. Configure it per-environment via
+> `ui.api.auth.oidc.requiredRoles` in each operator cluster's
+> `values-operator.yaml` (see below).
 
 ```sh
 helm install acko-web oci://ghcr.io/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator \
@@ -256,7 +264,7 @@ Each cluster needs its own ingress host, and each host needs its own TLS certifi
 | dev     | `api.dev.example.com` | LetsEncrypt via cert-manager |
 | prod    | `api.prod.example.com` | LetsEncrypt via cert-manager |
 
-Cross-origin requirements: every API ingress must allow `Origin: https://app.example.com` (the common cluster) in CORS, otherwise the browser fan-out to dev/prod will be blocked. The chart sets this from `multiCluster.clusters[].apiBaseUrl` (and from the web ingress host).
+Cross-origin requirements: every API ingress must allow `Origin: https://app.example.com` (the common cluster) in CORS, otherwise the browser fan-out to dev/prod will be blocked. The chart sets this from `multiCluster.clusters[].apiUrl` (and from the web ingress host).
 
 ---
 
@@ -279,7 +287,7 @@ Cross-origin requirements: every API ingress must allow `Origin: https://app.exa
 
 ### CORS preflight fails on browser fan-out
 
-- The dev/prod API ingress is rejecting `OPTIONS` from `app.example.com`. Verify the API chart values include the common cluster host in `ui.api.cors.allowedOrigins`. If the chart fills this from `multiCluster.clusters[].apiBaseUrl`, double-check the URL has no trailing slash mismatch.
+- The dev/prod API ingress is rejecting `OPTIONS` from `app.example.com`. Verify the API chart values include the common cluster host in `ui.api.cors.allowedOrigins`. If the chart fills this from `multiCluster.clusters[].apiUrl`, double-check the URL has no trailing slash mismatch.
 
 ### Cluster registry shows empty list
 
@@ -290,7 +298,7 @@ Cross-origin requirements: every API ingress must allow `Origin: https://app.exa
 
 ### Token works on dev but not prod (or vice versa)
 
-- Audience is shared (`acko-api`) but cluster-scoped roles are not. Ensure the user has both `acko:dev` and `acko:prod` if they need access to both, or remove the `requiredRole` gate to fall back to "any authenticated user".
+- Audience is shared (`acko-api`) but cluster-scoped roles are not. Ensure the user has both `acko:dev` and `acko:prod` if they need access to both, or clear `ui.api.auth.oidc.requiredRoles` on the relevant operator cluster to fall back to "any authenticated user".
 
 ---
 

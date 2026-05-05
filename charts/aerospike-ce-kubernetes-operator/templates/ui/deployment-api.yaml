@@ -132,6 +132,8 @@ spec:
               value: {{ join "," .Values.ui.api.auth.oidc.requiredRoles | quote }}
             - name: OIDC_JWKS_CACHE_TTL
               value: {{ .Values.ui.api.auth.oidc.jwksCacheTTL | quote }}
+            - name: OIDC_EXCLUDE_PATHS
+              value: {{ join "," .Values.ui.api.auth.oidc.excludePaths | quote }}
             {{- end }}
             {{- with .Values.ui.api.logging.handlers }}
             - name: LOG_HANDLERS

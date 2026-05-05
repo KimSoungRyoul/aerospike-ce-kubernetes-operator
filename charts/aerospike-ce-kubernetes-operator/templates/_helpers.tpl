@@ -325,8 +325,10 @@ preconditions are not met, so the helper is safe to call unconditionally.
 */}}
 
 {{- define "aerospike-ce-kubernetes-operator.validate.multiClusterVsApiUrl" -}}
+{{- if eq (include "aerospike-ce-kubernetes-operator.ui.web.enabled" .) "true" -}}
 {{- if and (eq (include "aerospike-ce-kubernetes-operator.multiCluster.enabled" .) "true") .Values.ui.web.env.apiUrl -}}
 {{- fail "multiCluster.enabled=true conflicts with ui.web.env.apiUrl: routing is ambiguous. Either disable multi-cluster (and use ui.web.env.apiUrl for a single API) or clear ui.web.env.apiUrl and rely on the cluster registry." -}}
+{{- end -}}
 {{- end -}}
 {{- end }}
 
@@ -337,17 +339,21 @@ preconditions are not met, so the helper is safe to call unconditionally.
 {{- end }}
 
 {{- define "aerospike-ce-kubernetes-operator.validate.apiOidcIssuerUrl" -}}
+{{- if eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true" -}}
 {{- if eq (include "aerospike-ce-kubernetes-operator.api.oidc.enabled" .) "true" -}}
 {{- if not .Values.ui.api.auth.oidc.issuerUrl -}}
 {{- fail "ui.api.auth.oidc.enabled=true requires ui.api.auth.oidc.issuerUrl to be set (e.g. https://keycloak.example.com/realms/acko)." -}}
 {{- end -}}
 {{- end -}}
+{{- end -}}
 {{- end }}
 
 {{- define "aerospike-ce-kubernetes-operator.validate.webOidcClientId" -}}
+{{- if eq (include "aerospike-ce-kubernetes-operator.ui.web.enabled" .) "true" -}}
 {{- if eq (include "aerospike-ce-kubernetes-operator.web.oidc.enabled" .) "true" -}}
 {{- if not .Values.ui.web.auth.oidc.clientId -}}
 {{- fail "ui.web.auth.oidc.enabled=true requires ui.web.auth.oidc.clientId to be set (the SPA's public client ID registered in the IdP)." -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end }}
