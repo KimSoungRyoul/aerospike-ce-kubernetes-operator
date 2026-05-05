@@ -1,0 +1,84 @@
+# =============================================================================
+# Preset: "common" cluster (web-only)
+# =============================================================================
+# Renders only the web SPA + multi-cluster registry + OIDC ConfigMap.
+# Use this preset for the cluster that hosts the unified UI front-door
+# (browser entrypoint) while dev/prod clusters host operator + api separately.
+#
+# Required user overrides:
+#   multiCluster.defaultClusterId
+#   multiCluster.clusters[*].apiUrl
+#   ui.web.auth.oidc.issuerUrl
+#   ui.web.auth.oidc.redirectUri
+#
+# Apply with:
+#   helm install <name> . -f values-common.yaml \
+#     --set multiCluster.defaultClusterId=dev \
+#     --set ui.web.auth.oidc.issuerUrl=https://kc.example.com/realms/acko \
+#     --set ui.web.auth.oidc.redirectUri=https://acko.example.com/
+# =============================================================================
+
+# Operator + CRDs are provided by the dev/prod clusters.
+operator:
+  enabled: false
+
+crds:
+  install: false
+
+defaultTemplates:
+  enabled: false
+
+webhook:
+  enabled: false
+
+# Multi-cluster registry feeds the SPA's cluster selector.
+multiCluster:
+  enabled: true
+  defaultClusterId: ""
+  clusters: []
+  # Example:
+  # clusters:
+  #   - id: dev
+  #     displayName: "Dev"
+  #     apiUrl: "https://dev-api.example.com"
+  #     labels:
+  #       env: dev
+  #   - id: prod
+  #     displayName: "Prod"
+  #     apiUrl: "https://prod-api.example.com"
+  #     labels:
+  #       env: prod
+
+ui:
+  api:
+    # API is hosted on dev/prod clusters; common renders web only.
+    enabled: false
+  web:
+    enabled: true
+    auth:
+      oidc:
+        # OIDC is mandatory for the public-facing common cluster.
+        enabled: true
+        issuerUrl: ""
+        clientId: "acko-spa"
+        redirectUri: ""
+        scopes:
+          - openid
+          - profile
+          - email
+  ingress:
+    enabled: true
+    target: web
+    hosts:
+      - host: acko.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+  # Persistent Postgres / DB sidecar belongs on the api side, not on common.
+  postgresql:
+    enabled: false
+  persistence:
+    enabled: false
+  k8s:
+    # Web-only cluster has no in-cluster ACKO operator to talk to.
+    enabled: false

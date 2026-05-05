@@ -1,3 +1,4 @@
+{{- if eq (include "aerospike-ce-kubernetes-operator.operator.enabled" .) "true" }}
 {{- if .Values.webhook.enabled }}
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
@@ -30,4 +31,5 @@ webhooks:
         resources:
           - aerospikeclusters
     sideEffects: None
+{{- end }}
 {{- end }}

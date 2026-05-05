@@ -3,6 +3,57 @@
 # =============================================================================
 
 # =============================================================================
+# Operator (controller-manager) deployment toggle
+# =============================================================================
+# Setting `operator.enabled=false` disables every operator-related resource:
+# the controller Deployment, ServiceAccount/RBAC, webhook configurations,
+# cert-manager Certificate, metrics Service/ServiceMonitor, PrometheusRule,
+# Grafana dashboard, HPA, PDB, NetworkPolicy/CiliumNetworkPolicy, and the
+# default AerospikeClusterTemplates. The chart then renders only the UI
+# (api / web) and shared resources you have enabled.
+#
+# Useful for the multi-cluster topology where one "common" cluster hosts only
+# the web frontend and dev/prod clusters host operator + api individually.
+# Default `true` preserves backwards compatibility for single-cluster installs.
+operator:
+  # -- Deploy the controller-manager (operator) and all of its supporting
+  # resources. Disable to render UI-only / web-only installs.
+  enabled: true
+
+# =============================================================================
+# Multi-cluster topology (cluster registry served to the web UI)
+# =============================================================================
+# Provides a static cluster registry to the web frontend so a single SPA can
+# pivot between multiple ACKO API endpoints (typically one per environment).
+# When enabled, a ConfigMap named `<release>-cluster-registry` is rendered
+# with key `cluster-registry.json` and mounted into the web pod so the SPA
+# can fetch it via `/cluster-registry.json` at boot. Mutually exclusive with
+# `ui.web.env.apiUrl` (single-API override) — using both is ambiguous and
+# fails template rendering.
+multiCluster:
+  # -- Enable multi-cluster registry rendering.
+  enabled: false
+  # -- Default cluster ID the SPA selects on first load. Must match one of
+  # the entries in `clusters` below.
+  defaultClusterId: ""
+  # -- List of clusters available to the web UI. Each entry is shipped as-is
+  # in `cluster-registry.json` and is consumed by the SPA's cluster selector.
+  # Schema: { id, displayName, apiUrl, labels{} }
+  # Example:
+  #   clusters:
+  #     - id: dev
+  #       displayName: "Dev"
+  #       apiUrl: "https://dev-api.example.com"
+  #       labels:
+  #         env: dev
+  #     - id: prod
+  #       displayName: "Prod"
+  #       apiUrl: "https://prod-api.example.com"
+  #       labels:
+  #         env: prod
+  clusters: []
+
+# =============================================================================
 # Aerospike Images (used by default templates and UI wizard)
 # =============================================================================
 # Override these for air-gapped environments where Docker Hub is unreachable.
@@ -410,6 +461,41 @@ ui:
       headers: ""
 
     # =============================================================================
+    # OIDC (FastAPI bearer-token validation)
+    # =============================================================================
+    # Enables JWT bearer-token authentication on the FastAPI backend. The
+    # api validates tokens against a Keycloak (or any OIDC-compliant) IdP
+    # using a JWKS cache. The web SPA acquires the token via PKCE and
+    # forwards it as `Authorization: Bearer <token>`.
+    auth:
+      oidc:
+        # -- Enable OIDC bearer-token authentication on the API.
+        # When false the API stays open (current behaviour, BC).
+        enabled: false
+        # -- OIDC issuer URL (used to discover JWKS / token endpoints).
+        # Required when `enabled=true`. Example:
+        #   issuerUrl: "https://keycloak.example.com/realms/acko"
+        issuerUrl: ""
+        # -- Expected `aud` claim. Tokens with a different audience are
+        # rejected.
+        audience: "acko-api"
+        # -- Required role claims. A token must contain at least one of
+        # these in its realm/client roles. Empty list = no role check
+        # (any authenticated user is accepted).
+        # Example: ["acko-admin", "acko-operator"]
+        requiredRoles: []
+        # -- JWKS cache TTL (Go-style duration string). Lower values
+        # tighten key-rotation propagation at the cost of more JWKS HTTP
+        # calls.
+        jwksCacheTTL: "10m"
+        # -- Paths bypassed by the auth middleware. Health/openapi/docs
+        # must remain reachable for liveness probes and Swagger UI.
+        excludePaths:
+          - /api/health
+          - /api/openapi.json
+          - /api/docs
+
+    # =============================================================================
     # Logging — pluggable handlers via LOG_HANDLERS or full dictConfig.
     # See aerospike-cluster-manager docs/logging.md for examples.
     # =============================================================================
@@ -480,6 +566,33 @@ ui:
       initialDelaySeconds: 5
       periodSeconds: 10
       timeoutSeconds: 5
+
+    # =============================================================================
+    # OIDC (web SPA — Authorization Code + PKCE)
+    # =============================================================================
+    # When enabled, the chart writes `web-oidc-config.json` into a ConfigMap
+    # mounted on the web pod so the SPA can fetch it at boot and configure
+    # keycloak-js (or the equivalent OIDC client) without a rebuild.
+    auth:
+      oidc:
+        # -- Enable OIDC login on the web SPA. When false the UI starts in
+        # anonymous mode (current behaviour, BC).
+        enabled: false
+        # -- OIDC issuer URL (same realm as the API). Required when
+        # `enabled=true`.
+        issuerUrl: ""
+        # -- Public client ID registered in Keycloak for the SPA. Defaults
+        # to `acko-spa`.
+        clientId: "acko-spa"
+        # -- Redirect URI registered in the IdP. Typically the web origin
+        # (e.g. https://acko.example.com/). Required when `enabled=true`.
+        redirectUri: ""
+        # -- OAuth2 / OIDC scopes requested at login. `openid` is mandatory
+        # for OIDC; `profile`/`email` are useful for displaying user info.
+        scopes:
+          - openid
+          - profile
+          - email
 
   # =============================================================================
   # Service Account & RBAC

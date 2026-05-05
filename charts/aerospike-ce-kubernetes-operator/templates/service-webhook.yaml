@@ -1,3 +1,4 @@
+{{- if eq (include "aerospike-ce-kubernetes-operator.operator.enabled" .) "true" }}
 {{- if .Values.webhook.enabled }}
 apiVersion: v1
 kind: Service
@@ -14,4 +15,5 @@ spec:
       targetPort: {{ .Values.webhook.port }}
   selector:
     {{- include "aerospike-ce-kubernetes-operator.selectorLabels" . | nindent 4 }}
+{{- end }}
 {{- end }}

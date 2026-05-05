@@ -1,0 +1,54 @@
+# =============================================================================
+# Preset: "operator" cluster (api + operator)
+# =============================================================================
+# Renders the controller-manager, CRDs, webhook, and the FastAPI backend
+# with OIDC bearer-token validation. The web SPA is hosted by the "common"
+# cluster (see values-common.yaml).
+#
+# Required user overrides:
+#   ui.api.auth.oidc.issuerUrl
+#   ui.ingress.hosts[*].host    # e.g. dev-api.example.com
+#
+# Apply with:
+#   helm install <name> . -f values-operator.yaml \
+#     --set ui.api.auth.oidc.issuerUrl=https://kc.example.com/realms/acko \
+#     --set ui.ingress.hosts[0].host=dev-api.example.com
+# =============================================================================
+
+operator:
+  enabled: true
+
+crds:
+  install: true
+
+ui:
+  api:
+    enabled: true
+    auth:
+      oidc:
+        # OIDC is mandatory: the api is exposed via Ingress and accessed
+        # cross-cluster from the SPA.
+        enabled: true
+        issuerUrl: ""
+        audience: "acko-api"
+        requiredRoles: []
+        jwksCacheTTL: "10m"
+        excludePaths:
+          - /api/health
+          - /api/openapi.json
+          - /api/docs
+  web:
+    # Web UI is hosted on the common cluster.
+    enabled: false
+  ingress:
+    enabled: true
+    target: api
+    hosts:
+      - host: dev-api.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+
+# multiCluster registry is irrelevant on api-side clusters.
+multiCluster:
+  enabled: false

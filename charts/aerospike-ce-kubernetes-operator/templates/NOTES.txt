@@ -1,4 +1,96 @@
+{{- /* Run all validation gates first; they fail-fast on bad value combos. */ -}}
+{{- include "aerospike-ce-kubernetes-operator.validate" . -}}
 Aerospike CE Kubernetes Operator has been installed.
+
+------------------------------------------------------------------------
+  Install Mode
+------------------------------------------------------------------------
+
+operator.enabled : {{ include "aerospike-ce-kubernetes-operator.operator.enabled" . }}
+ui.api.enabled   : {{ include "aerospike-ce-kubernetes-operator.ui.api.enabled" . }}
+ui.web.enabled   : {{ include "aerospike-ce-kubernetes-operator.ui.web.enabled" . }}
+multiCluster.enabled : {{ include "aerospike-ce-kubernetes-operator.multiCluster.enabled" . }}
+ui.api.auth.oidc.enabled : {{ include "aerospike-ce-kubernetes-operator.api.oidc.enabled" . }}
+ui.web.auth.oidc.enabled : {{ include "aerospike-ce-kubernetes-operator.web.oidc.enabled" . }}
+
+{{- if ne (include "aerospike-ce-kubernetes-operator.operator.enabled" .) "true" }}
+
+NOTE: operator.enabled=false — the controller-manager, webhook, RBAC, and
+default AerospikeClusterTemplates are NOT rendered. Use this mode for the
+"common" cluster in a multi-cluster topology where dev/prod clusters host
+the operator and the common cluster only serves the web UI.
+
+Recommended preset: values-common.yaml
+{{- end }}
+
+{{- if eq (include "aerospike-ce-kubernetes-operator.multiCluster.enabled" .) "true" }}
+
+------------------------------------------------------------------------
+  Multi-cluster topology
+------------------------------------------------------------------------
+
+A cluster registry has been rendered as ConfigMap
+"{{ include "aerospike-ce-kubernetes-operator.clusterRegistryConfigMapName" . }}"
+and mounted into the web pod at /cluster-registry.json.
+
+Default cluster: {{ default "(unset)" .Values.multiCluster.defaultClusterId }}
+Registered clusters:
+{{- range .Values.multiCluster.clusters }}
+  - {{ .id }} ({{ .displayName | default .id }}) → {{ .apiUrl }}
+{{- end }}
+
+Verify the registry once the web pod is running:
+
+  kubectl port-forward svc/{{ include "aerospike-ce-kubernetes-operator.ui.web.fullname" . }} {{ .Values.ui.web.service.port }}:{{ .Values.ui.web.service.port }} -n {{ .Release.Namespace }}
+  curl http://localhost:{{ .Values.ui.web.service.port }}/cluster-registry.json
+
+End-to-end routing test:
+
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+The test pod (`{{ include "aerospike-ce-kubernetes-operator.ui.fullname" . }}-test-multicluster`)
+fetches /cluster-registry.json and probes each registered apiUrl + /api/health.
+{{- end }}
+
+{{- if or (eq (include "aerospike-ce-kubernetes-operator.api.oidc.enabled" .) "true") (eq (include "aerospike-ce-kubernetes-operator.web.oidc.enabled" .) "true") }}
+
+------------------------------------------------------------------------
+  OIDC (Keycloak) prerequisites
+------------------------------------------------------------------------
+
+This release expects an external OIDC issuer (Keycloak or compatible).
+Before traffic flows you must configure on the IdP side:
+
+  Realm        : matches ui.{api,web}.auth.oidc.issuerUrl path segment
+{{- if eq (include "aerospike-ce-kubernetes-operator.api.oidc.enabled" .) "true" }}
+  API audience : {{ .Values.ui.api.auth.oidc.audience }}
+                  (token `aud` claim must equal this; otherwise rejected)
+{{- if .Values.ui.api.auth.oidc.requiredRoles }}
+  API roles    : at least one of {{ join ", " .Values.ui.api.auth.oidc.requiredRoles }}
+{{- end }}
+{{- end }}
+{{- if eq (include "aerospike-ce-kubernetes-operator.web.oidc.enabled" .) "true" }}
+  SPA client   : {{ .Values.ui.web.auth.oidc.clientId }} (public, PKCE, no secret)
+                  redirectUri = {{ .Values.ui.web.auth.oidc.redirectUri }}
+                  scopes      = {{ join ", " .Values.ui.web.auth.oidc.scopes }}
+  Web OIDC config served at /web-oidc-config.json (ConfigMap
+  "{{ include "aerospike-ce-kubernetes-operator.webOidcConfigMapName" . }}").
+{{- end }}
+
+For local development, a Keycloak realm can be bootstrapped via the
+`scripts/keycloak/` helpers in this repository (see Stream D documentation
+in project-hub for `acko-realm.json`).
+{{- end }}
+
+------------------------------------------------------------------------
+  Default values vs presets
+------------------------------------------------------------------------
+
+  Default values.yaml   : single-cluster install (operator + api + web)
+  values-common.yaml    : web-only ("common" front-door cluster)
+  values-operator.yaml  : api + operator (per-environment dev/prod cluster)
+
+
 {{- if not .Values.crds.install }}
 
 NOTE: CRD installation is disabled (crds.install=false).
