@@ -54,16 +54,13 @@ jobs:
           VERSION="${LATEST_TAG#v}"
           IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
 
-          # Analyze commits for conventional commit types
+          # daily-release auto-bumps minor (feat) or patch only.
+          # Major bump is manual: a maintainer tags the new major version themselves.
+          # `feat!:` / `BREAKING CHANGE` markers surface in release notes, not in version.
           COMMITS=$(git log "${LATEST_TAG}..HEAD" --pretty=format:"%s")
-          HAS_BREAKING=$(echo "$COMMITS" | grep -cE '^[a-z]+(\(.+\))?!:|BREAKING CHANGE' || true)
-          HAS_FEAT=$(echo "$COMMITS" | grep -cE '^feat(\(.+\))?:' || true)
+          HAS_FEAT=$(echo "$COMMITS" | grep -cE '^feat(\(.+\))?!?:' || true)
 
-          if [ "$HAS_BREAKING" -gt 0 ]; then
-            MAJOR=$((MAJOR + 1))
-            MINOR=0
-            PATCH=0
-          elif [ "$HAS_FEAT" -gt 0 ]; then
+          if [ "$HAS_FEAT" -gt 0 ]; then
             MINOR=$((MINOR + 1))
             PATCH=0
           else
