@@ -156,21 +156,52 @@ process_volumes() {
                 rm -rf "${path:?}"/*
                 ;;
             dd)
+                # Pure dd path — failure means the device is unwritable. Do
+                # NOT swallow stderr or chain `|| true`; either of those
+                # defeats `set -e` and lets the init container "succeed"
+                # while leaving Aerospike with a dirty volume.
                 echo "[${label}] Zeroing first 1MB of ${path}..."
-                dd if=/dev/zero of="${path}" bs=1M count=1 conv=notrunc 2>/dev/null
+                if ! dd if=/dev/zero of="${path}" bs=1M count=1 conv=notrunc; then
+                    echo "ERROR: dd failed to zero ${path}; refusing to start Aerospike on a dirty volume." >&2
+                    exit 1
+                fi
                 ;;
             blkdiscard)
+                # blkdiscard is opportunistic: it requires kernel + device
+                # support (e.g. SSDs with TRIM, thin-provisioned volumes) and
+                # legitimately fails on filesystems / loopback / older HDDs.
+                # When discard is unavailable we still MUST guarantee the
+                # device is writable, so we follow up with a 1MB dd that is
+                # not allowed to fail.
                 echo "[${label}] Discarding blocks on ${path}..."
-                blkdiscard "${path}" 2>/dev/null || echo "blkdiscard failed for ${path}, continuing..."
+                if ! blkdiscard "${path}"; then
+                    echo "WARN: blkdiscard not supported on ${path}; falling back to dd verification." >&2
+                fi
+                if ! dd if=/dev/zero of="${path}" bs=1M count=1 conv=notrunc; then
+                    echo "ERROR: post-blkdiscard dd verification failed on ${path}." >&2
+                    exit 1
+                fi
                 ;;
             headerCleanup)
+                # Pure headerCleanup must succeed — Aerospike refuses to
+                # start when stale superblock headers are present.
                 echo "[${label}] Cleaning Aerospike headers on ${path}..."
-                dd if=/dev/zero of="${path}" bs=4096 count=1 conv=notrunc 2>/dev/null
+                if ! dd if=/dev/zero of="${path}" bs=4096 count=1 conv=notrunc; then
+                    echo "ERROR: dd header cleanup failed on ${path}." >&2
+                    exit 1
+                fi
                 ;;
             blkdiscardWithHeaderCleanup)
+                # Combined path: blkdiscard is opportunistic, but the
+                # follow-up header dd is mandatory.
                 echo "[${label}] Discarding blocks and cleaning headers on ${path}..."
-                blkdiscard "${path}" 2>/dev/null || echo "blkdiscard failed for ${path}, continuing..."
-                dd if=/dev/zero of="${path}" bs=4096 count=1 conv=notrunc 2>/dev/null
+                if ! blkdiscard "${path}"; then
+                    echo "WARN: blkdiscard not supported on ${path}; relying on header cleanup only." >&2
+                fi
+                if ! dd if=/dev/zero of="${path}" bs=4096 count=1 conv=notrunc; then
+                    echo "ERROR: dd header cleanup failed on ${path} after blkdiscard." >&2
+                    exit 1
+                fi
                 ;;
             *)
                 echo "[${label}] Skipping ${path} (method: ${method})"

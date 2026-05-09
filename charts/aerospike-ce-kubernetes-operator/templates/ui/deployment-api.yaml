@@ -10,9 +10,17 @@ metadata:
   labels:
     {{- include "aerospike-ce-kubernetes-operator.ui.api.labels" . | nindent 4 }}
 spec:
-  {{- if not .Values.ui.autoscaling.enabled }}
+  {{- /*
+    Render `replicas` UNLESS an HPA is actually managing this Deployment.
+    The HPA at templates/ui/hpa.yaml only targets the web Deployment, so the
+    API never has an HPA. Skipping `replicas` here would let the apiserver
+    default to 1 with nothing to scale it, regardless of `ui.replicaCount`.
+    Suppress `replicas` only when BOTH the web HPA is active AND web is
+    enabled (i.e. the HPA resource was actually rendered) — but even then
+    the API is unmanaged, so we still emit replicas. Net effect: replicas
+    is always emitted for the API Deployment until a per-API HPA exists.
+  */}}
   replicas: {{ .Values.ui.replicaCount }}
-  {{- end }}
   strategy:
     {{- if .Values.ui.postgresql.enabled }}
     type: Recreate

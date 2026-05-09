@@ -21,9 +21,14 @@ metadata:
   labels:
     {{- include "aerospike-ce-kubernetes-operator.labels" $ | nindent 4 }}
     app.kubernetes.io/component: cluster-template
-  annotations:
-    "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-weight": "10"
+  # Intentionally NOT a Helm hook: hook resources are not part of the release
+  # manifest, so `helm uninstall` would leave these AerospikeClusterTemplates
+  # behind. A subsequent `helm install` then collides on the leaked names, and
+  # toggling defaultTemplates.enabled false→true also breaks because Helm has
+  # no record of the prior install. The CRD-existence precondition is enforced
+  # by `aerospike-ce-kubernetes-operator.validate.defaultTemplatesNeedCRDs`
+  # in _helpers.tpl, so we no longer need post-install/post-upgrade hooks to
+  # stage creation after CRD installation.
 spec:
   {{- toYaml $merged | nindent 2 }}
 {{- end }}
