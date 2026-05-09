@@ -155,15 +155,20 @@ func (v *AerospikeClusterTemplateValidator) validate(tmpl *AerospikeClusterTempl
 		// validateAerospikeConfig in aerospikecluster_webhook.go). Without this,
 		// a templateRef could silently inject these stanzas via
 		// namespaceDefaults or service defaults, bypassing the CE webhook.
+		//
+		// namespaceDefaults additionally must reject enterpriseOnlyNamespaceKeys
+		// (compression, strong-consistency, durable-delete, ...): the cluster
+		// webhook checks those per-namespace, but namespaceDefaults is applied
+		// as a base to every namespace and would otherwise be a silent bypass.
 		if spec.AerospikeConfig.NamespaceDefaults != nil {
 			allErrors = append(allErrors,
 				validateTemplateConfigBannedKeys("spec.aerospikeConfig.namespaceDefaults",
-					spec.AerospikeConfig.NamespaceDefaults.Value)...)
+					spec.AerospikeConfig.NamespaceDefaults.Value, true)...)
 		}
 		if spec.AerospikeConfig.Service != nil {
 			allErrors = append(allErrors,
 				validateTemplateConfigBannedKeys("spec.aerospikeConfig.service",
-					spec.AerospikeConfig.Service.Value)...)
+					spec.AerospikeConfig.Service.Value, false)...)
 		}
 	}
 
@@ -180,11 +185,18 @@ func (v *AerospikeClusterTemplateValidator) validate(tmpl *AerospikeClusterTempl
 // Mirrors the CE constraints enforced in validateAerospikeConfig on the
 // AerospikeCluster webhook:
 //   - top-level "xdr" and "tls" keys are forbidden,
-//   - "security" sub-keys listed in enterpriseOnlySecurityKeys are forbidden.
+//   - "security" sub-keys listed in enterpriseOnlySecurityKeys are forbidden,
+//   - when isNamespaceDefaults is true, top-level keys listed in
+//     enterpriseOnlyNamespaceKeys are forbidden (compression, strong-
+//     consistency, durable-delete, ...). These keys would otherwise leak into
+//     every namespace via namespaceDefaults base merging and silently bypass
+//     the per-namespace check in validateNamespaceConfig.
 //
 // fieldPath is the user-facing JSONPath prefix used in error messages
-// (e.g. "spec.aerospikeConfig.namespaceDefaults").
-func validateTemplateConfigBannedKeys(fieldPath string, cfg map[string]any) []string {
+// (e.g. "spec.aerospikeConfig.namespaceDefaults"). isNamespaceDefaults must
+// be true only for the namespaceDefaults path; service / other paths set
+// false to keep the existing checks unchanged.
+func validateTemplateConfigBannedKeys(fieldPath string, cfg map[string]any, isNamespaceDefaults bool) []string {
 	if cfg == nil {
 		return nil
 	}
@@ -206,6 +218,15 @@ func validateTemplateConfigBannedKeys(fieldPath string, cfg map[string]any) []st
 						"%s.security.%s is not allowed in CE edition (%s)",
 						fieldPath, enterpriseKey, reason))
 				}
+			}
+		}
+	}
+	if isNamespaceDefaults {
+		for enterpriseKey, reason := range enterpriseOnlyNamespaceKeys {
+			if _, found := cfg[enterpriseKey]; found {
+				errs = append(errs, fmt.Sprintf(
+					"%s.%s is not allowed in CE edition (%s); namespaceDefaults is applied as a base to every namespace",
+					fieldPath, enterpriseKey, reason))
 			}
 		}
 	}
