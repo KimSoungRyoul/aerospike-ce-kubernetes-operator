@@ -20,12 +20,15 @@ func TestIsDynamic_Comprehensive(t *testing.T) {
 		{"network fabric send-threads", "network.fabric.send-threads", true},
 
 		// Namespace context — dynamic params
-		{"namespace memory-size", "namespace.memory-size", true},
 		{"namespace default-ttl", "namespace.default-ttl", true},
 		{"namespace high-water-disk-pct", "namespace.high-water-disk-pct", true},
 		{"namespace stop-writes-pct", "namespace.stop-writes-pct", true},
-		{"namespace replication-factor", "namespace.replication-factor", true},
 		{"namespace rack-id", "namespace.rack-id", true},
+
+		// Namespace context — NOT dynamic (require synchronized cold restart;
+		// applying via set-config would cause replicas to drift / data loss).
+		{"namespace memory-size is NOT dynamic", "namespace.memory-size", false},
+		{"namespace replication-factor is NOT dynamic", "namespace.replication-factor", false},
 
 		// Logging context — dynamic params
 		{"logging any", "logging.any", true},

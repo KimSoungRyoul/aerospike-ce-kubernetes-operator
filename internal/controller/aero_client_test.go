@@ -109,10 +109,11 @@ func TestGetAerospikeClientWithRetry_MethodSignature(t *testing.T) {
 
 func TestBuildQuiesceCommand(t *testing.T) {
 	tests := []struct {
-		name    string
-		cluster *ackov1alpha1.AerospikeCluster
-		port    int
-		want    []string
+		name     string
+		cluster  *ackov1alpha1.AerospikeCluster
+		port     int
+		password string
+		want     []string
 	}{
 		{
 			name:    "no ACL — basic asinfo command",
@@ -127,7 +128,7 @@ func TestBuildQuiesceCommand(t *testing.T) {
 			want:    []string{"asinfo", "-v", "quiesce:", "-h", "localhost", "-p", "4000"},
 		},
 		{
-			name: "ACL enabled — includes -U flag",
+			name: "ACL enabled — includes -U and -P flags",
 			cluster: &ackov1alpha1.AerospikeCluster{
 				Spec: ackov1alpha1.AerospikeClusterSpec{
 					AerospikeAccessControl: &ackov1alpha1.AerospikeAccessControlSpec{
@@ -141,11 +142,12 @@ func TestBuildQuiesceCommand(t *testing.T) {
 					},
 				},
 			},
-			port: 3000,
-			want: []string{"asinfo", "-v", "quiesce:", "-h", "localhost", "-p", "3000", "-U", "admin"},
+			port:     3000,
+			password: "s3cret",
+			want:     []string{"asinfo", "-v", "quiesce:", "-h", "localhost", "-p", "3000", "-U", "admin", "-P", "s3cret"},
 		},
 		{
-			name: "ACL enabled but no admin user — no -U flag",
+			name: "ACL enabled but no admin user — no auth flags",
 			cluster: &ackov1alpha1.AerospikeCluster{
 				Spec: ackov1alpha1.AerospikeClusterSpec{
 					AerospikeAccessControl: &ackov1alpha1.AerospikeAccessControlSpec{
@@ -166,7 +168,7 @@ func TestBuildQuiesceCommand(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildQuiesceCommand(tc.cluster, tc.port)
+			got := buildQuiesceCommand(tc.cluster, tc.port, tc.password)
 			if len(got) != len(tc.want) {
 				t.Fatalf("buildQuiesceCommand() returned %d args, want %d: got %v, want %v",
 					len(got), len(tc.want), got, tc.want)

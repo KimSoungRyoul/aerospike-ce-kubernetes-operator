@@ -169,8 +169,20 @@ func (r *AerospikeClusterReconciler) quiesceNode(
 
 	port := getServicePort(cluster)
 
+	// Resolve admin password for ACL-enabled clusters. asinfo requires both
+	// -U and -P together; passing -U alone causes asinfo to prompt for a
+	// password on stdin and hang/fail without a TTY.
+	var adminPassword string
+	if adminUser := utils.FindAdminUser(cluster.Spec.AerospikeAccessControl); adminUser != nil {
+		pw, err := r.getPasswordFromSecret(ctx, cluster.Namespace, adminUser.SecretName)
+		if err != nil {
+			return fmt.Errorf("getting admin password for quiesce: %w", err)
+		}
+		adminPassword = pw
+	}
+
 	// Build the asinfo command. If ACL is enabled, include auth flags.
-	cmd := buildQuiesceCommand(cluster, port)
+	cmd := buildQuiesceCommand(cluster, port, adminPassword)
 
 	// Apply quiesce-specific timeout to prevent blocking pod deletion indefinitely.
 	execCtx, cancel := context.WithTimeout(ctx, quiesceTimeout)
@@ -214,8 +226,14 @@ func (r *AerospikeClusterReconciler) quiesceNode(
 }
 
 // buildQuiesceCommand constructs the asinfo command to quiesce a node.
-// If ACL is enabled, authentication flags are included.
-func buildQuiesceCommand(cluster *ackov1alpha1.AerospikeCluster, port int) []string {
+// If ACL is enabled, both -U and -P authentication flags are included.
+// Passing -U without -P would cause asinfo to prompt for a password on stdin
+// and hang/fail without a TTY, so the caller must resolve adminPassword from
+// the same Secret used by getPasswordFromSecret. An empty adminPassword with
+// an admin user present results in -U only (preserved for callers that need
+// to inspect the command shape, e.g. tests), but the production caller
+// (quiesceNode) always supplies it.
+func buildQuiesceCommand(cluster *ackov1alpha1.AerospikeCluster, port int, adminPassword string) []string {
 	cmd := []string{
 		"asinfo",
 		"-v", "quiesce:",
@@ -224,11 +242,11 @@ func buildQuiesceCommand(cluster *ackov1alpha1.AerospikeCluster, port int) []str
 	}
 
 	// Add authentication flags if ACL is enabled.
-	// We use the admin user name only; the password is read from the node's
-	// local security context since asinfo running inside the pod can use
-	// file-based auth or the default credentials.
 	if adminUser := utils.FindAdminUser(cluster.Spec.AerospikeAccessControl); adminUser != nil {
 		cmd = append(cmd, "-U", adminUser.Name)
+		if adminPassword != "" {
+			cmd = append(cmd, "-P", adminPassword)
+		}
 	}
 
 	return cmd

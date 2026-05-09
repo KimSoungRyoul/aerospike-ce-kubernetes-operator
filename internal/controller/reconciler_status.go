@@ -144,6 +144,11 @@ func (r *AerospikeClusterReconciler) updateStatusAndPhase(
 				return fetchErr
 			}
 			refetched.Status = *computedStatus
+			// The conflict may be due to a Generation bump from a concurrent
+			// spec update. Without re-aligning ObservedGeneration to the
+			// refetched object's Generation, we would persist a stale value
+			// and falsely advertise that we have observed the new spec.
+			refetched.Status.ObservedGeneration = refetched.Generation
 			latest = refetched
 			return err
 		}
@@ -291,7 +296,10 @@ func (r *AerospikeClusterReconciler) populateStatus(
 	cluster.Status.Size = readyCount
 	cluster.Status.Health = fmt.Sprintf("%d/%d", readyCount, cluster.Spec.Size)
 	cluster.Status.ObservedGeneration = cluster.Generation
-	cluster.Status.AerospikeConfig = cluster.Spec.AerospikeConfig
+	// DeepCopy to give Status an independent snapshot. A shallow alias would
+	// allow later mutations of cluster.Spec.AerospikeConfig (e.g.
+	// InjectAccessAddressPlaceholders) to leak into Status.
+	cluster.Status.AerospikeConfig = cluster.Spec.AerospikeConfig.DeepCopy()
 
 	// Build a deterministic selector string for HPA.
 	cluster.Status.Selector = buildSelectorString(utils.SelectorLabelsForCluster(cluster.Name))

@@ -39,12 +39,16 @@ var dynamicParams = map[string]bool{
 	"network.fabric.send-threads":              true,
 
 	// Namespace context (requires namespace name)
+	// NOTE: namespace.replication-factor and namespace.memory-size (renamed to
+	// data-size in CE 8.1) are NOT dynamic — they require a synchronized cold
+	// restart. Applying them via set-config would cause replicas to drift and
+	// risk data loss, so they are intentionally omitted; the diff engine falls
+	// back to a cold restart for these params.
 	"namespace.default-ttl":                 true,
 	"namespace.high-water-disk-pct":         true,
 	"namespace.high-water-memory-pct":       true,
 	"namespace.stop-writes-pct":             true,
 	"namespace.stop-writes-sys-memory-pct":  true,
-	"namespace.memory-size":                 true,
 	"namespace.migrate-order":               true,
 	"namespace.migrate-retransmit-ms":       true,
 	"namespace.migrate-sleep":               true,
@@ -54,7 +58,6 @@ var dynamicParams = map[string]bool{
 	"namespace.prefer-uniform-balance":      true,
 	"namespace.rack-id":                     true,
 	"namespace.read-page-cache":             true,
-	"namespace.replication-factor":          true,
 	"namespace.transaction-pending-limit":   true,
 	"namespace.write-commit-level-override": true,
 
