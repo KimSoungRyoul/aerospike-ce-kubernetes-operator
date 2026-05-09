@@ -359,15 +359,25 @@ func (r *AerospikeClusterReconciler) cleanupRemovedRacks(
 		// context cancellation honored. If pods are still running after the
 		// timeout we fall through and let the next reconcile retry — better
 		// than indefinitely blocking the reconcile loop.
+		//
+		// If the rackID cannot be parsed from the STS name we refuse to
+		// proceed: a partial cleanup that deletes PVCs without first
+		// confirming pods are gone re-introduces the "PVC deleted while pods
+		// alive" hazard. Returning an error lets the reconcile loop retry on
+		// the next pass; a human can also intervene via logs/events.
 		rackIDStr := strings.TrimPrefix(stsName, cluster.Name+"-")
 		rackID, convErr := strconv.Atoi(rackIDStr)
-		if convErr == nil {
-			waitErr := r.waitForRackPodsTerminated(ctx, cluster, rackID, stsName)
-			if waitErr != nil {
-				log.V(1).Info("Pods for removed rack still terminating; deferring PVC and ConfigMap cleanup to next reconcile",
-					"statefulset", stsName, "err", waitErr)
-				continue
-			}
+		if convErr != nil {
+			return fmt.Errorf("cannot derive rackID from StatefulSet name %q (cluster %q): %w; "+
+				"refusing rack cleanup to avoid deleting PVCs while pods may still be running",
+				stsName, cluster.Name, convErr)
+		}
+
+		waitErr := r.waitForRackPodsTerminated(ctx, cluster, rackID, stsName)
+		if waitErr != nil {
+			log.V(1).Info("Pods for removed rack still terminating; deferring PVC and ConfigMap cleanup to next reconcile",
+				"statefulset", stsName, "err", waitErr)
+			continue
 		}
 
 		// Step 3a: Delete cascade-delete PVCs now that pods are gone.
@@ -380,15 +390,13 @@ func (r *AerospikeClusterReconciler) cleanupRemovedRacks(
 
 		// Step 3b: Delete the associated ConfigMap for the removed rack.
 		// The ConfigMap name is derived from the StatefulSet name suffix (rackID).
-		if convErr == nil {
-			cmName := utils.ConfigMapName(cluster.Name, rackID)
-			cm := &corev1.ConfigMap{}
-			if getErr := r.Get(ctx, types.NamespacedName{Name: cmName, Namespace: cluster.Namespace}, cm); getErr == nil {
-				if delErr := r.Delete(ctx, cm); delErr != nil && !errors.IsNotFound(delErr) {
-					log.Error(delErr, "Failed to delete ConfigMap for removed rack", "configmap", cmName)
-				} else {
-					log.Info("Deleted ConfigMap for removed rack", "configmap", cmName)
-				}
+		cmName := utils.ConfigMapName(cluster.Name, rackID)
+		cm := &corev1.ConfigMap{}
+		if getErr := r.Get(ctx, types.NamespacedName{Name: cmName, Namespace: cluster.Namespace}, cm); getErr == nil {
+			if delErr := r.Delete(ctx, cm); delErr != nil && !errors.IsNotFound(delErr) {
+				log.Error(delErr, "Failed to delete ConfigMap for removed rack", "configmap", cmName)
+			} else {
+				log.Info("Deleted ConfigMap for removed rack", "configmap", cmName)
 			}
 		}
 	}
