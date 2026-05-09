@@ -140,7 +140,9 @@ func TestApplyAerospikeConfig_NamespaceDefaults(t *testing.T) {
 		},
 	}
 
-	applyAerospikeConfig(tmplConfig, cluster)
+	if err := applyAerospikeConfig(tmplConfig, cluster); err != nil {
+		t.Fatalf("applyAerospikeConfig() unexpected error: %v", err)
+	}
 
 	nsList, ok := cluster.Spec.AerospikeConfig.Value["namespaces"].([]any)
 	if !ok || len(nsList) == 0 {
@@ -230,7 +232,9 @@ func TestApplyTemplate_Resources(t *testing.T) {
 
 	// Resources should be applied when not set in cluster spec.
 	templateSpec := &ackov1alpha1.AerospikeClusterTemplateSpec{}
-	ApplyTemplate(templateSpec, cluster)
+	if err := ApplyTemplate(templateSpec, cluster); err != nil {
+		t.Fatalf("ApplyTemplate() unexpected error: %v", err)
+	}
 
 	// With nil resources in template, nothing should be set.
 	if cluster.Spec.PodSpec != nil && cluster.Spec.PodSpec.AerospikeContainerSpec != nil &&
@@ -693,7 +697,9 @@ func TestApplyTemplate_ImageAndSizeApplied(t *testing.T) {
 		Size:  &size,
 	}
 	cluster := newCluster()
-	ApplyTemplate(tmplSpec, cluster)
+	if err := ApplyTemplate(tmplSpec, cluster); err != nil {
+		t.Fatalf("ApplyTemplate() unexpected error: %v", err)
+	}
 
 	if cluster.Spec.Image != testImageCE8 {
 		t.Errorf("expected image to be applied, got %q", cluster.Spec.Image)
@@ -723,7 +729,9 @@ func TestApplyTemplate_ClusterValuesTakePrecedenceOverTemplate(t *testing.T) {
 		AccessType: ackov1alpha1.AerospikeNetworkTypeHostInternal,
 	}
 
-	ApplyTemplate(tmplSpec, cluster)
+	if err := ApplyTemplate(tmplSpec, cluster); err != nil {
+		t.Fatalf("ApplyTemplate() unexpected error: %v", err)
+	}
 
 	if cluster.Spec.Image != testImageCE8Old {
 		t.Errorf("expected cluster image to be preserved, got %q", cluster.Spec.Image)
@@ -736,5 +744,132 @@ func TestApplyTemplate_ClusterValuesTakePrecedenceOverTemplate(t *testing.T) {
 	}
 	if cluster.Spec.AerospikeNetworkPolicy.AccessType != ackov1alpha1.AerospikeNetworkTypeHostInternal {
 		t.Errorf("expected cluster network policy to be preserved")
+	}
+}
+
+// --- post-merge CE re-validation tests (P0-3) ---
+
+// TestValidateMergedSpecCE_RejectsEnterpriseImage covers the defence-in-depth
+// re-validation that runs after ApplyTemplate. Even if a CE constraint were
+// bypassed at admission time (failurePolicy=Ignore, future code path that
+// produces an enterprise tag, ...), the resolver must refuse to materialise
+// an Enterprise image into the cluster spec.
+func TestValidateMergedSpecCE_RejectsEnterpriseImage(t *testing.T) {
+	spec := &ackov1alpha1.AerospikeClusterSpec{
+		Size:  3,
+		Image: "aerospike/aerospike-server-enterprise:8.1",
+	}
+	errs := validateMergedSpecCE(spec)
+	if len(errs) == 0 {
+		t.Fatal("expected error for enterprise image in merged spec")
+	}
+}
+
+// TestValidateMergedSpecCE_RejectsOversizedCluster pins the post-merge size
+// check (defence in depth — also enforced at admission).
+func TestValidateMergedSpecCE_RejectsOversizedCluster(t *testing.T) {
+	spec := &ackov1alpha1.AerospikeClusterSpec{
+		Size:  99,
+		Image: testImageCE8,
+	}
+	errs := validateMergedSpecCE(spec)
+	if len(errs) == 0 {
+		t.Fatal("expected error for size=99 in merged spec")
+	}
+}
+
+// TestValidateMergedSpecCE_RejectsXdrInConfig pins that an xdr stanza in the
+// merged aerospikeConfig is rejected by the post-merge validator.
+func TestValidateMergedSpecCE_RejectsXdrInConfig(t *testing.T) {
+	spec := &ackov1alpha1.AerospikeClusterSpec{
+		Size:  3,
+		Image: testImageCE8,
+		AerospikeConfig: &ackov1alpha1.AerospikeConfigSpec{
+			Value: map[string]any{
+				"xdr": map[string]any{},
+			},
+		},
+	}
+	errs := validateMergedSpecCE(spec)
+	if len(errs) == 0 {
+		t.Fatal("expected error for xdr in merged config")
+	}
+}
+
+// TestValidateMergedSpecCE_RejectsEnterpriseNamespaceKey covers the per-namespace
+// enterprise-only key check on the merged namespaces list. Without this, a
+// strong-consistency value reaching merged config (via overrides ->
+// namespaceDefaults -> applyNamespaceDefaults) would slip past per-namespace
+// checks.
+func TestValidateMergedSpecCE_RejectsEnterpriseNamespaceKey(t *testing.T) {
+	spec := &ackov1alpha1.AerospikeClusterSpec{
+		Size:  3,
+		Image: testImageCE8,
+		AerospikeConfig: &ackov1alpha1.AerospikeConfigSpec{
+			Value: map[string]any{
+				"namespaces": []any{
+					map[string]any{
+						"name":               "test",
+						"strong-consistency": true,
+					},
+				},
+			},
+		},
+	}
+	errs := validateMergedSpecCE(spec)
+	if len(errs) == 0 {
+		t.Fatal("expected error for strong-consistency in merged namespace")
+	}
+}
+
+// TestValidateMergedSpecCE_AcceptsValidCESpec ensures the post-merge check
+// does not over-reject a normal CE configuration.
+func TestValidateMergedSpecCE_AcceptsValidCESpec(t *testing.T) {
+	spec := &ackov1alpha1.AerospikeClusterSpec{
+		Size:  3,
+		Image: testImageCE8,
+		AerospikeConfig: &ackov1alpha1.AerospikeConfigSpec{
+			Value: map[string]any{
+				"namespaces": []any{
+					map[string]any{
+						"name":               "test",
+						"replication-factor": 1,
+					},
+				},
+			},
+		},
+	}
+	if errs := validateMergedSpecCE(spec); len(errs) > 0 {
+		t.Errorf("unexpected errors for valid CE spec: %v", errs)
+	}
+}
+
+// --- applyAerospikeConfig non-map service guard (P1-3) ---
+
+// TestApplyAerospikeConfig_RefusesNonMapService pins the defensive type
+// check: if cluster.Spec.AerospikeConfig.service is somehow not a map (a
+// future bypass of the cluster webhook), applyAerospikeConfig must error
+// rather than silently overwrite the user's value with template defaults.
+func TestApplyAerospikeConfig_RefusesNonMapService(t *testing.T) {
+	cluster := &ackov1alpha1.AerospikeCluster{}
+	cluster.Spec.AerospikeConfig = &ackov1alpha1.AerospikeConfigSpec{
+		Value: map[string]any{
+			"service": "this-should-be-a-map",
+		},
+	}
+	tmplConfig := &ackov1alpha1.TemplateAerospikeConfig{
+		Service: &ackov1alpha1.AerospikeConfigSpec{
+			Value: map[string]any{"proto-fd-max": 25000},
+		},
+	}
+
+	err := applyAerospikeConfig(tmplConfig, cluster)
+	if err == nil {
+		t.Fatal("expected error for non-map service value")
+	}
+
+	// Make sure we did NOT overwrite the user's payload with the template merge.
+	if got, ok := cluster.Spec.AerospikeConfig.Value["service"].(string); !ok || got != "this-should-be-a-map" {
+		t.Errorf("expected original service value preserved, got %v", cluster.Spec.AerospikeConfig.Value["service"])
 	}
 }

@@ -246,6 +246,33 @@ func (v *AerospikeClusterValidator) ValidateCreate(ctx context.Context, cluster 
 func (v *AerospikeClusterValidator) ValidateUpdate(ctx context.Context, oldCluster, cluster *AerospikeCluster) (admission.Warnings, error) {
 	aerospikeclusterlog.Info("Validating update", "name", cluster.Name)
 
+	// templateRef is immutable.
+	//
+	// Swapping the referenced template on a live cluster would silently
+	// re-base every templated default (storage class, scheduling, image,
+	// size, ...) and could cross between operator-managed configurations
+	// without any progressive rollout. The merged spec is written into the
+	// snapshot at admission time and consumed by the controller; a swap
+	// here is effectively a hidden mass-edit.
+	//
+	// Default policy is immutable. If a future change introduces a
+	// supported swap workflow it should require an explicit annotation +
+	// no overrides, not a free swap.
+	oldRef, newRef := oldCluster.Spec.TemplateRef, cluster.Spec.TemplateRef
+	switch {
+	case oldRef == nil && newRef != nil:
+		return nil, fmt.Errorf(
+			"spec.templateRef is immutable: cannot add templateRef to an existing cluster; create a new cluster that references the template")
+	case oldRef != nil && newRef == nil:
+		return nil, fmt.Errorf(
+			"spec.templateRef is immutable: cannot remove templateRef from a cluster that was created with one (was %q)",
+			oldRef.Name)
+	case oldRef != nil && newRef != nil && oldRef.Name != newRef.Name:
+		return nil, fmt.Errorf(
+			"spec.templateRef is immutable: cannot change templateRef from %q to %q; create a new cluster instead",
+			oldRef.Name, newRef.Name)
+	}
+
 	// Don't allow changing operations while one is InProgress
 	if oldCluster.Status.OperationStatus != nil &&
 		oldCluster.Status.OperationStatus.Phase == AerospikePhaseInProgress {
@@ -512,11 +539,91 @@ func (v *AerospikeClusterValidator) validate(cluster *AerospikeCluster) (admissi
 		allErrors = append(allErrors, "spec.overrides can only be set when spec.templateRef is specified")
 	}
 
+	// Validate the contents of spec.overrides against CE constraints. Without
+	// this, users could set spec.overrides.image to an Enterprise tag, or push
+	// an xdr/tls/security-enterprise stanza via overrides.aerospikeConfig and
+	// silently bypass the same checks the cluster-spec path enforces. The
+	// template webhook validates these fields at template-create time, but
+	// overrides only flow through the cluster webhook, so this check is the
+	// only line of defence for them.
+	if cluster.Spec.Overrides != nil {
+		allErrors = append(allErrors, v.validateOverrides(cluster.Spec.Overrides)...)
+	}
+
 	if len(allErrors) > 0 {
 		return warnings, fmt.Errorf("validation failed: %s", strings.Join(allErrors, "; "))
 	}
 
 	return warnings, nil
+}
+
+// validateOverrides applies the same CE constraints to spec.overrides that
+// the AerospikeClusterTemplate webhook applies to template specs at create
+// time:
+//   - image must not reference an Enterprise build,
+//   - size must be in the CE-allowed range (1–8) when explicitly set,
+//   - aerospikeConfig.namespaceDefaults must not contain enterprise-only
+//     namespace keys (compression, strong-consistency, ...) or xdr/tls/
+//     enterprise security sub-keys,
+//   - aerospikeConfig.service must not contain xdr/tls/enterprise security
+//     sub-keys.
+//
+// nil sections are skipped silently — overrides intentionally allows partial
+// patches and most fields are optional.
+func (v *AerospikeClusterValidator) validateOverrides(overrides *AerospikeClusterTemplateSpec) []string {
+	if overrides == nil {
+		return nil
+	}
+	var errs []string
+
+	// Image: same rules as spec.image — reject the enterprise repository name
+	// and any "ee-"/"ent-"/contains-"enterprise" tag.
+	if overrides.Image != "" {
+		imageLower := strings.ToLower(overrides.Image)
+		switch {
+		case strings.Contains(imageLower, "aerospike-server-enterprise"):
+			errs = append(errs, fmt.Sprintf(
+				"spec.overrides.image %q references the enterprise repository "+
+					"(aerospike-server-enterprise); CE clusters must use a CE image "+
+					"such as aerospike:ce-8.1.1.1",
+				overrides.Image))
+		case strings.Contains(imageLower, "enterprise") || isEnterpriseTag(overrides.Image):
+			errs = append(errs, fmt.Sprintf(
+				"spec.overrides.image %q is an Enterprise Edition image; only Community Edition images are allowed",
+				overrides.Image))
+		}
+	}
+
+	// Size: respect the CE 1–8 bound when the override sets a value.
+	if overrides.Size != nil {
+		size := *overrides.Size
+		if size < 1 || size > maxCEClusterSize {
+			errs = append(errs, fmt.Sprintf(
+				"spec.overrides.size %d must be between 1 and %d (CE limit)", size, maxCEClusterSize))
+		}
+	}
+
+	// aerospikeConfig: reject enterprise-only stanzas/keys reachable from the
+	// override map. Mirrors the template webhook's check (V-T xdr/tls/security/
+	// enterpriseOnlyNamespaceKeys) — see validateTemplateConfigBannedKeys.
+	if overrides.AerospikeConfig != nil {
+		if overrides.AerospikeConfig.NamespaceDefaults != nil {
+			errs = append(errs, validateTemplateConfigBannedKeys(
+				"spec.overrides.aerospikeConfig.namespaceDefaults",
+				overrides.AerospikeConfig.NamespaceDefaults.Value,
+				true,
+			)...)
+		}
+		if overrides.AerospikeConfig.Service != nil {
+			errs = append(errs, validateTemplateConfigBannedKeys(
+				"spec.overrides.aerospikeConfig.service",
+				overrides.AerospikeConfig.Service.Value,
+				false,
+			)...)
+		}
+	}
+
+	return errs
 }
 
 // validateAerospikeConfig checks the Aerospike configuration map.
@@ -556,9 +663,16 @@ func (v *AerospikeClusterValidator) validateAerospikeConfig(config map[string]an
 				warnings = append(warnings, nsWarnings...)
 			}
 		case map[string]any:
-			if len(ns) > maxCENamespaces {
-				errors = append(errors, fmt.Sprintf("aerospikeConfig.namespaces count %d exceeds CE maximum of %d", len(ns), maxCENamespaces))
-			}
+			// Reject the map shape outright. Previously we only counted entries
+			// here, which silently skipped per-namespace validation
+			// (enterprise-only keys, replication-factor bounds) — a CE bypass.
+			// configgen also expects a list (named blocks emitted in order),
+			// so the map form is structurally wrong even for a valid CE config.
+			errors = append(errors, fmt.Sprintf(
+				"aerospikeConfig.namespaces must be a list of namespace maps "+
+					"(e.g. [{name: foo, ...}, {name: bar, ...}]), got map with %d entries; "+
+					"per-namespace validation cannot run on the map form",
+				len(ns)))
 		}
 	}
 

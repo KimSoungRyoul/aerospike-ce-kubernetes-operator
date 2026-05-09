@@ -139,6 +139,26 @@ func (v *AerospikeClusterTemplateValidator) validate(tmpl *AerospikeClusterTempl
 		}
 	}
 
+	// V-T06: Image must not reference an Enterprise build (the canonical
+	// Docker Hub repo is `aerospike-server-enterprise`; "ee-" / "ent-" /
+	// generic "enterprise" substrings also indicate EE builds). Without this,
+	// any cluster pointing at this template silently inherits an EE image,
+	// bypassing the AerospikeCluster CE check.
+	//
+	// V-T07: Size must be 1–8 (CE limit) when the template explicitly supplies
+	// a default — same bound as spec.size on AerospikeCluster.
+	//
+	// V-T08: Monitoring port must be in the valid TCP range when set —
+	// catching templates that would later produce an invalid Service/SM.
+	//
+	// internal/template/validation.go has a ValidateTemplateSpec helper that
+	// implements the same checks, but we cannot call it here without an
+	// import cycle (internal/template -> api/v1alpha1). Inline the three
+	// checks instead so the template webhook actually enforces them.
+	allErrors = append(allErrors, validateTemplateImageCE(spec.Image)...)
+	allErrors = append(allErrors, validateTemplateSizeCE(spec.Size)...)
+	allErrors = append(allErrors, validateTemplateMonitoringPort(spec.Monitoring)...)
+
 	// Validate aerospikeConfig if present: heartbeat mode must be mesh for CE.
 	if spec.AerospikeConfig != nil {
 		if spec.AerospikeConfig.Network != nil && spec.AerospikeConfig.Network.Heartbeat != nil {
@@ -231,6 +251,66 @@ func validateTemplateConfigBannedKeys(fieldPath string, cfg map[string]any, isNa
 		}
 	}
 	return errs
+}
+
+// validateTemplateImageCE rejects template images that reference an
+// Enterprise build. Mirrors the cluster-spec image check in
+// validateSizeAndImage (aerospikecluster_webhook.go) so the same constraints
+// apply whether a user supplies the image directly or via a template.
+//
+// Empty image is allowed: clusters that reference the template are required
+// to supply spec.image themselves and the cluster webhook validates it.
+func validateTemplateImageCE(image string) []string {
+	if image == "" {
+		return nil
+	}
+	imageLower := strings.ToLower(image)
+	switch {
+	case strings.Contains(imageLower, "aerospike-server-enterprise"):
+		return []string{fmt.Sprintf(
+			"spec.image %q references the enterprise repository "+
+				"(aerospike-server-enterprise); CE clusters must use a CE image "+
+				"such as aerospike:ce-8.1.1.1",
+			image)}
+	case strings.Contains(imageLower, "enterprise") || isEnterpriseTag(image):
+		return []string{fmt.Sprintf(
+			"spec.image %q is an Enterprise Edition image; only Community Edition images are allowed",
+			image)}
+	}
+	return nil
+}
+
+// validateTemplateSizeCE enforces the CE size bound (1–8) when the template
+// explicitly supplies a Size value. Nil Size is allowed (the cluster will
+// then need to provide its own).
+//
+// The CRD already declares Minimum=1/Maximum=8 on Size, so this is defence
+// in depth — webhook errors are clearer than CRD validation errors and run
+// before anything else.
+func validateTemplateSizeCE(size *int32) []string {
+	if size == nil {
+		return nil
+	}
+	if *size < 1 || *size > maxCEClusterSize {
+		return []string{fmt.Sprintf(
+			"spec.size must be between 1 and %d (CE limit), got %d", maxCEClusterSize, *size)}
+	}
+	return nil
+}
+
+// validateTemplateMonitoringPort enforces a valid TCP port range on
+// monitoring.port when the template supplies a non-zero value. A zero port
+// means "use the cluster default" and is left to the cluster webhook /
+// defaulter.
+func validateTemplateMonitoringPort(m *AerospikeMonitoringSpec) []string {
+	if m == nil || m.Port == 0 {
+		return nil
+	}
+	if m.Port < 1 || m.Port > 65535 {
+		return []string{fmt.Sprintf(
+			"spec.monitoring.port must be between 1 and 65535, got %d", m.Port)}
+	}
+	return nil
 }
 
 // templateResourcesEqualRequestsLimits checks if CPU and memory requests equal limits.
