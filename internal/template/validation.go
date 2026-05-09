@@ -144,40 +144,9 @@ func ValidateTemplateSpec(spec *ackov1alpha1.AerospikeClusterTemplateSpec) ([]st
 	}
 
 	// V-T06: Image must be a CE image — enterprise images are rejected.
-	//
-	// CE constraint enforcement: when AerospikeClusterTemplate.spec.image points
-	// at an enterprise build, every cluster that references this template would
-	// silently inherit an enterprise image. Previously this was a warning only,
-	// so the constraint could be bypassed via templateRef. We now reject:
-	//   1. images whose lower-cased reference contains "aerospike-server-enterprise"
-	//      (the canonical enterprise repository name on Docker Hub), and
-	//   2. images whose tag/repository contains a generic "enterprise" substring.
-	// CE images typically contain a "ce-" tag prefix (e.g. aerospike:ce-8.1.1.1);
-	// retagged custom-registry CE images that omit "ce-" are reported as a
-	// warning so users can confirm but are not blocked.
-	if spec.Image != "" {
-		imageLower := strings.ToLower(spec.Image)
-		switch {
-		case strings.Contains(imageLower, "aerospike-server-enterprise"):
-			errs = append(errs, fmt.Sprintf(
-				"template image %q references the enterprise repository "+
-					"(aerospike-server-enterprise); CE clusters must use a CE image (CE constraint)",
-				spec.Image,
-			))
-		case strings.Contains(imageLower, "enterprise"):
-			errs = append(errs, fmt.Sprintf(
-				"template image %q appears to be an enterprise image (contains 'enterprise'); "+
-					"CE clusters must use a CE image (CE constraint)",
-				spec.Image,
-			))
-		case !strings.Contains(spec.Image, "ce-"):
-			warnings = append(warnings, fmt.Sprintf(
-				"template image %q may not be a CE image; CE images typically contain 'ce-' (e.g., aerospike:ce-8.1.1.1). "+
-					"Retagged or custom-registry CE images that omit 'ce-' will also trigger this warning.",
-				spec.Image,
-			))
-		}
-	}
+	imgErrs, imgWarnings := validateTemplateImage(spec.Image)
+	errs = append(errs, imgErrs...)
+	warnings = append(warnings, imgWarnings...)
 
 	// V-T07: Size must be in the CE-allowed range (1–8) when specified.
 	if spec.Size != nil {
@@ -193,5 +162,47 @@ func ValidateTemplateSpec(spec *ackov1alpha1.AerospikeClusterTemplateSpec) ([]st
 		}
 	}
 
+	return errs, warnings
+}
+
+// validateTemplateImage enforces the CE-only image constraint for templates.
+//
+// CE constraint enforcement: when AerospikeClusterTemplate.spec.image points
+// at an enterprise build, every cluster that references this template would
+// silently inherit an enterprise image. Previously this was a warning only,
+// so the constraint could be bypassed via templateRef. We now reject:
+//  1. images whose lower-cased reference contains "aerospike-server-enterprise"
+//     (the canonical enterprise repository name on Docker Hub), and
+//  2. images whose tag/repository contains a generic "enterprise" substring.
+//
+// CE images typically contain a "ce-" tag prefix (e.g. aerospike:ce-8.1.1.1);
+// retagged custom-registry CE images that omit "ce-" are reported as a
+// warning so users can confirm but are not blocked.
+func validateTemplateImage(image string) (errs []string, warnings []string) {
+	if image == "" {
+		return nil, nil
+	}
+
+	imageLower := strings.ToLower(image)
+	switch {
+	case strings.Contains(imageLower, "aerospike-server-enterprise"):
+		errs = append(errs, fmt.Sprintf(
+			"template image %q references the enterprise repository "+
+				"(aerospike-server-enterprise); CE clusters must use a CE image (CE constraint)",
+			image,
+		))
+	case strings.Contains(imageLower, "enterprise"):
+		errs = append(errs, fmt.Sprintf(
+			"template image %q appears to be an enterprise image (contains 'enterprise'); "+
+				"CE clusters must use a CE image (CE constraint)",
+			image,
+		))
+	case !strings.Contains(image, "ce-"):
+		warnings = append(warnings, fmt.Sprintf(
+			"template image %q may not be a CE image; CE images typically contain 'ce-' (e.g., aerospike:ce-8.1.1.1). "+
+				"Retagged or custom-registry CE images that omit 'ce-' will also trigger this warning.",
+			image,
+		))
+	}
 	return errs, warnings
 }
