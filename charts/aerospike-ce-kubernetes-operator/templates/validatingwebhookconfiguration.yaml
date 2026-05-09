@@ -31,5 +31,25 @@ webhooks:
         resources:
           - aerospikeclusters
     sideEffects: None
+  - admissionReviewVersions:
+      - v1
+    clientConfig:
+      service:
+        name: {{ include "aerospike-ce-kubernetes-operator.webhookServiceName" . }}
+        namespace: {{ .Release.Namespace }}
+        path: /validate-acko-io-v1alpha1-aerospikeclustertemplate
+    failurePolicy: Fail
+    name: vtemplate.acko.io
+    rules:
+      - apiGroups:
+          - acko.io
+        apiVersions:
+          - v1alpha1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - aerospikeclustertemplates
+    sideEffects: None
 {{- end }}
 {{- end }}
