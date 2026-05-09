@@ -17,6 +17,7 @@ limitations under the License.
 package template
 
 import (
+	"fmt"
 	"maps"
 
 	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
@@ -24,9 +25,14 @@ import (
 
 // applyAerospikeConfig merges template aerospikeConfig defaults into the cluster's aerospikeConfig.
 // Cluster-level settings always take precedence over template defaults.
-func applyAerospikeConfig(tmplConfig *ackov1alpha1.TemplateAerospikeConfig, cluster *ackov1alpha1.AerospikeCluster) {
+//
+// Returns an error when the cluster's aerospikeConfig.service exists with a
+// non-map type (which the cluster webhook rejects, but check defensively
+// here so a future bypass of the webhook does not silently coerce a non-map
+// service value into a fresh empty map and discard the user's data).
+func applyAerospikeConfig(tmplConfig *ackov1alpha1.TemplateAerospikeConfig, cluster *ackov1alpha1.AerospikeCluster) error {
 	if tmplConfig == nil {
-		return
+		return nil
 	}
 
 	if cluster.Spec.AerospikeConfig == nil {
@@ -42,6 +48,21 @@ func applyAerospikeConfig(tmplConfig *ackov1alpha1.TemplateAerospikeConfig, clus
 
 	// Apply service defaults (template is base, cluster overrides).
 	if tmplConfig.Service != nil && len(tmplConfig.Service.Value) > 0 {
+		// Defensive type check: the cluster webhook already rejects
+		// aerospikeConfig.service when it isn't a map, but if that path is
+		// ever bypassed (failurePolicy=Ignore on a future deployment, an
+		// unrelated mutation between admission and reconcile, ...) we must
+		// not silently overwrite the user's value with our merged map.
+		// getOrCreateSection would return a fresh empty map in that case
+		// and the deepMerge below would discard the original payload.
+		if existing, exists := config["service"]; exists {
+			if _, ok := existing.(map[string]any); !ok {
+				return fmt.Errorf(
+					"aerospikeConfig.service has type %T, expected map; refusing to overwrite with template defaults",
+					existing,
+				)
+			}
+		}
 		existing := getOrCreateSection(config, "service")
 		config["service"] = deepMergeMapBaseFirst(tmplConfig.Service.Value, existing)
 	}
@@ -74,6 +95,7 @@ func applyAerospikeConfig(tmplConfig *ackov1alpha1.TemplateAerospikeConfig, clus
 	if tmplConfig.NamespaceDefaults != nil && len(tmplConfig.NamespaceDefaults.Value) > 0 {
 		applyNamespaceDefaults(config, tmplConfig.NamespaceDefaults.Value)
 	}
+	return nil
 }
 
 // applyNamespaceDefaults merges defaults into each namespace entry in aerospikeConfig.

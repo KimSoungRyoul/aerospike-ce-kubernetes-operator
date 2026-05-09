@@ -551,6 +551,76 @@ func TestAerospikeClusterTemplateValidate(t *testing.T) {
 	}
 }
 
+// --- V-T06/V-T07/V-T08 wiring tests (P0-2) ---
+//
+// These checks were implemented in internal/template/validation.go but were
+// only called from tests, never from the template webhook itself. Without
+// the webhook wiring, an AerospikeClusterTemplate could be created with an
+// enterprise image, an out-of-range size, or a malformed monitoring port,
+// and silently propagate that to every cluster that referenced it.
+
+// TestAerospikeClusterTemplateValidate_EnterpriseImageRejected pins V-T06.
+func TestAerospikeClusterTemplateValidate_EnterpriseImageRejected(t *testing.T) {
+	v := &AerospikeClusterTemplateValidator{}
+	tmpl := &AerospikeClusterTemplate{
+		ObjectMeta: metav1.ObjectMeta{Name: "ee-image", Namespace: "default"},
+		Spec: AerospikeClusterTemplateSpec{
+			Image: "aerospike/aerospike-server-enterprise:8.1",
+		},
+	}
+	_, err := v.ValidateCreate(context.Background(), tmpl)
+	if err == nil {
+		t.Fatal("expected error for enterprise template image")
+	}
+	if !strings.Contains(err.Error(), "enterprise") {
+		t.Errorf("expected 'enterprise' in error, got: %v", err)
+	}
+}
+
+// TestAerospikeClusterTemplateValidate_SizeOutOfRangeRejected pins V-T07.
+// CRD validation already enforces 1<=size<=8 but the webhook check also
+// runs before CRD pruning and produces a clearer error.
+func TestAerospikeClusterTemplateValidate_SizeOutOfRangeRejected(t *testing.T) {
+	v := &AerospikeClusterTemplateValidator{}
+	bigSize := int32(99)
+	tmpl := &AerospikeClusterTemplate{
+		ObjectMeta: metav1.ObjectMeta{Name: "big-size", Namespace: "default"},
+		Spec: AerospikeClusterTemplateSpec{
+			Size: &bigSize,
+		},
+	}
+	_, err := v.ValidateCreate(context.Background(), tmpl)
+	if err == nil {
+		t.Fatal("expected error for spec.size=99")
+	}
+	if !strings.Contains(err.Error(), "size must be between 1 and 8") {
+		t.Errorf("expected size range error, got: %v", err)
+	}
+}
+
+// TestAerospikeClusterTemplateValidate_MonitoringPortOutOfRangeRejected
+// pins V-T08.
+func TestAerospikeClusterTemplateValidate_MonitoringPortOutOfRangeRejected(t *testing.T) {
+	v := &AerospikeClusterTemplateValidator{}
+	tmpl := &AerospikeClusterTemplate{
+		ObjectMeta: metav1.ObjectMeta{Name: "bad-port", Namespace: "default"},
+		Spec: AerospikeClusterTemplateSpec{
+			Monitoring: &AerospikeMonitoringSpec{
+				Enabled:       true,
+				ExporterImage: "aerospike/aerospike-prometheus-exporter:1.0.0",
+				Port:          70000,
+			},
+		},
+	}
+	_, err := v.ValidateCreate(context.Background(), tmpl)
+	if err == nil {
+		t.Fatal("expected error for monitoring.port=70000")
+	}
+	if !strings.Contains(err.Error(), "monitoring.port") {
+		t.Errorf("expected monitoring.port error, got: %v", err)
+	}
+}
+
 func TestAerospikeClusterTemplateValidateDelete(t *testing.T) {
 	v := &AerospikeClusterTemplateValidator{}
 	tmpl := &AerospikeClusterTemplate{

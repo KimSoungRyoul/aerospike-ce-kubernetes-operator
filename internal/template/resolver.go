@@ -19,6 +19,7 @@ package template
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -33,7 +34,108 @@ import (
 const (
 	// AnnotationResyncTemplate triggers a manual template resync when set to "true".
 	AnnotationResyncTemplate = "acko.io/resync-template"
+
+	// maxCEClusterSize is the CE node-count cap. Mirrors the constant of the
+	// same name in api/v1alpha1; duplicated here to avoid an import cycle
+	// (api/v1alpha1 already imports nothing from internal/template, but
+	// re-exposing the constant from api/v1alpha1 isn't necessary either —
+	// keeping a short package-local copy is the simplest path).
+	maxCEClusterSize = 8
 )
+
+// enterpriseOnlySecurityKeysCE lists security sub-keys that are
+// Enterprise-only on the CE edition (mirror of the map of the same name in
+// api/v1alpha1). Kept package-local to avoid circular imports.
+var enterpriseOnlySecurityKeysCE = map[string]string{
+	"tls":    "TLS within the security stanza is Enterprise-only",
+	"ldap":   "LDAP authentication is Enterprise-only",
+	"log":    "security audit logging is Enterprise-only",
+	"syslog": "security syslog sink is Enterprise-only",
+}
+
+// enterpriseOnlyNamespaceKeysCE lists namespace-level Aerospike config keys
+// that are Enterprise-only (mirror of api/v1alpha1.enterpriseOnlyNamespaceKeys).
+// Used by the post-merge re-validator in validateMergedConfigCE.
+var enterpriseOnlyNamespaceKeysCE = map[string]string{
+	"compression":              "data compression is Enterprise-only",
+	"compression-level":        "data compression is Enterprise-only",
+	"durable-delete":           "durable deletes is Enterprise-only",
+	"fast-restart":             "fast restart is Enterprise-only",
+	"index-type":               "index-type flash/pmem is Enterprise-only",
+	"sindex-type":              "sindex-type flash/pmem is Enterprise-only",
+	"rack-id":                  "rack-id in namespace is Enterprise-only; use operator rackConfig instead",
+	"strong-consistency":       "strong consistency is Enterprise-only",
+	"tomb-raider-eligible-age": "tomb-raider is Enterprise-only",
+	"tomb-raider-period":       "tomb-raider is Enterprise-only",
+}
+
+// isEnterpriseTag returns true for image tags that indicate an Enterprise
+// Edition build (e.g., "aerospike:ee-8.0.0.1_1", "aerospike:ent-8.0.0").
+// Mirrors api/v1alpha1.isEnterpriseTag — duplicated to avoid an import
+// cycle.
+func isEnterpriseTag(image string) bool {
+	parts := strings.SplitN(image, ":", 2)
+	if len(parts) != 2 {
+		return false
+	}
+	tagLower := strings.ToLower(parts[1])
+	return strings.HasPrefix(tagLower, "ee-") || strings.HasPrefix(tagLower, "ent-")
+}
+
+// validateMergedConfigCE reapplies the CE-specific aerospikeConfig checks
+// (xdr/tls absent, no enterprise security sub-keys, no enterprise namespace
+// keys) on the materialised cluster config map. Mirrors the CE checks
+// performed by the cluster webhook on the raw aerospikeConfig.
+func validateMergedConfigCE(config map[string]any) []string {
+	if config == nil {
+		return nil
+	}
+	var errs []string
+
+	if _, exists := config["xdr"]; exists {
+		errs = append(errs, "merged aerospikeConfig must not contain 'xdr' section (XDR is Enterprise-only)")
+	}
+	if _, exists := config["tls"]; exists {
+		errs = append(errs, "merged aerospikeConfig must not contain 'tls' section (TLS is Enterprise-only)")
+	}
+	if secSection, exists := config["security"]; exists {
+		if secMap, ok := secSection.(map[string]any); ok {
+			for enterpriseKey, reason := range enterpriseOnlySecurityKeysCE {
+				if _, found := secMap[enterpriseKey]; found {
+					errs = append(errs, fmt.Sprintf(
+						"merged aerospikeConfig.security.%s is not allowed in CE edition (%s)",
+						enterpriseKey, reason))
+				}
+			}
+		}
+	}
+	// Per-namespace enterprise-only key check. namespaceDefaults already
+	// flowed through the template+overrides check, but the merged namespaces
+	// list is what configgen actually consumes.
+	if nsSection, exists := config["namespaces"]; exists {
+		if nsList, ok := nsSection.([]any); ok {
+			for i, nsEntry := range nsList {
+				nsMap, ok := nsEntry.(map[string]any)
+				if !ok {
+					continue
+				}
+				nsName := "<unknown>"
+				if name, ok := nsMap["name"].(string); ok {
+					nsName = name
+				}
+				for enterpriseKey, reason := range enterpriseOnlyNamespaceKeysCE {
+					if _, found := nsMap[enterpriseKey]; found {
+						errs = append(errs, fmt.Sprintf(
+							"merged namespace[%d] %q: '%s' is not allowed (%s)",
+							i, nsName, enterpriseKey, reason))
+					}
+				}
+			}
+		}
+	}
+
+	return errs
+}
 
 // ResolveResult holds the outcome of template resolution.
 type ResolveResult struct {
@@ -100,9 +202,14 @@ func NeedsResync(cluster *ackov1alpha1.AerospikeCluster) bool {
 // ApplyTemplate applies the resolved template spec (after merge with overrides)
 // to the cluster's spec in-memory. The API server object is not modified.
 // Only fields not already explicitly set in the cluster spec are applied.
-func ApplyTemplate(resolvedTemplateSpec *ackov1alpha1.AerospikeClusterTemplateSpec, cluster *ackov1alpha1.AerospikeCluster) {
+//
+// Returns an error when applying aerospikeConfig fails (e.g. the cluster's
+// aerospikeConfig.service exists with a non-map type and the template
+// supplies service defaults — see applyAerospikeConfig). Other apply* steps
+// are total functions and never fail.
+func ApplyTemplate(resolvedTemplateSpec *ackov1alpha1.AerospikeClusterTemplateSpec, cluster *ackov1alpha1.AerospikeCluster) error {
 	if resolvedTemplateSpec == nil {
-		return
+		return nil
 	}
 
 	// Apply scheduling (pod anti-affinity, tolerations, node affinity).
@@ -111,8 +218,12 @@ func ApplyTemplate(resolvedTemplateSpec *ackov1alpha1.AerospikeClusterTemplateSp
 	// Apply storage defaults.
 	applyStorage(resolvedTemplateSpec.Storage, cluster)
 
-	// Apply Aerospike config defaults.
-	applyAerospikeConfig(resolvedTemplateSpec.AerospikeConfig, cluster)
+	// Apply Aerospike config defaults. May fail if the cluster's existing
+	// aerospikeConfig.service value isn't a map (defensive check; the
+	// cluster webhook normally rejects such specs at admission).
+	if err := applyAerospikeConfig(resolvedTemplateSpec.AerospikeConfig, cluster); err != nil {
+		return err
+	}
 
 	// Apply resource defaults.
 	if resolvedTemplateSpec.Resources != nil {
@@ -132,6 +243,7 @@ func ApplyTemplate(resolvedTemplateSpec *ackov1alpha1.AerospikeClusterTemplateSp
 	applySize(resolvedTemplateSpec.Size, cluster)
 	applyMonitoring(resolvedTemplateSpec.Monitoring, cluster)
 	applyNetworkPolicy(resolvedTemplateSpec.AerospikeNetworkPolicy, cluster)
+	return nil
 }
 
 // Resolve is the main entry point for template resolution in the reconciler.
@@ -188,7 +300,9 @@ func Resolve(
 	}
 
 	// Apply the effective template spec to the in-memory cluster spec.
-	ApplyTemplate(effectiveSpec, cluster)
+	if err := ApplyTemplate(effectiveSpec, cluster); err != nil {
+		return result, fmt.Errorf("applying template %q to cluster spec: %w", cluster.Spec.TemplateRef.Name, err)
+	}
 
 	// Post-template required field check: image and size must be resolvable after
 	// applying both the cluster spec and the template. If either is still unset,
@@ -206,5 +320,68 @@ func Resolve(
 		)
 	}
 
+	// Defence-in-depth: re-validate the materialised cluster spec against CE
+	// constraints. The cluster webhook + template webhook already enforce
+	// these on the wire, but the merged spec is the actual artefact that
+	// configgen / the StatefulSet will consume — if a webhook is bypassed
+	// (e.g. failurePolicy=Ignore on a future deployment) or a future merge
+	// rule introduces a bypass, this catches it before any pod is created.
+	if errs := validateMergedSpecCE(&cluster.Spec); len(errs) > 0 {
+		return result, fmt.Errorf(
+			"resolved spec violates CE constraints after applying template %q: %s",
+			cluster.Spec.TemplateRef.Name,
+			strings.Join(errs, "; "),
+		)
+	}
+
 	return result, nil
+}
+
+// validateMergedSpecCE re-runs the core CE constraints on a fully-merged
+// AerospikeClusterSpec. Returns a list of error messages; an empty list
+// means the spec is acceptable.
+//
+// Checks (kept intentionally narrow — these are the bypassable ones):
+//   - image is a CE image (no "aerospike-server-enterprise" repo, no
+//     "enterprise" / "ee-" / "ent-" tag),
+//   - size is in [1, maxCEClusterSize],
+//   - aerospikeConfig top-level has no xdr/tls stanzas,
+//   - aerospikeConfig.security has no enterprise-only sub-keys,
+//   - aerospikeConfig.namespaces[*] has no enterprise-only namespace keys
+//     (compression, strong-consistency, durable-delete, ...).
+//
+// Errors are returned (not warnings) because they describe configurations
+// that would either be rejected by the CE server at start-up or violate the
+// CE licence. They must not silently flow through to a StatefulSet.
+func validateMergedSpecCE(spec *ackov1alpha1.AerospikeClusterSpec) []string {
+	if spec == nil {
+		return nil
+	}
+	var errs []string
+
+	// Image
+	if image := spec.Image; image != "" {
+		imageLower := strings.ToLower(image)
+		switch {
+		case strings.Contains(imageLower, "aerospike-server-enterprise"):
+			errs = append(errs, fmt.Sprintf(
+				"merged spec.image %q references the enterprise repository (aerospike-server-enterprise)", image))
+		case strings.Contains(imageLower, "enterprise") || isEnterpriseTag(image):
+			errs = append(errs, fmt.Sprintf(
+				"merged spec.image %q is an Enterprise Edition image", image))
+		}
+	}
+
+	// Size
+	if spec.Size < 1 || spec.Size > maxCEClusterSize {
+		errs = append(errs, fmt.Sprintf(
+			"merged spec.size %d must be between 1 and %d (CE limit)", spec.Size, maxCEClusterSize))
+	}
+
+	// aerospikeConfig
+	if spec.AerospikeConfig != nil {
+		errs = append(errs, validateMergedConfigCE(spec.AerospikeConfig.Value)...)
+	}
+
+	return errs
 }
