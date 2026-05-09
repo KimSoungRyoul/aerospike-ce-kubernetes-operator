@@ -220,13 +220,15 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 
 {{/*
 UI image helpers (per-component).
+Tag defaults to .Chart.AppVersion when ui.api.image.tag / ui.web.image.tag is
+empty, so users get a concrete pinned tag out of the box rather than ":latest".
 */}}
 {{- define "aerospike-ce-kubernetes-operator.ui.api.image" -}}
-{{- printf "%s:%s" .Values.ui.api.image.repository (.Values.ui.api.image.tag | toString) -}}
+{{- printf "%s:%s" .Values.ui.api.image.repository (default .Chart.AppVersion .Values.ui.api.image.tag | toString) -}}
 {{- end }}
 
 {{- define "aerospike-ce-kubernetes-operator.ui.web.image" -}}
-{{- printf "%s:%s" .Values.ui.web.image.repository (.Values.ui.web.image.tag | toString) -}}
+{{- printf "%s:%s" .Values.ui.web.image.repository (default .Chart.AppVersion .Values.ui.web.image.tag | toString) -}}
 {{- end }}
 
 {{/*

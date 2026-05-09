@@ -29,6 +29,12 @@ spec:
       {{- end }}
       securityContext:
         runAsNonRoot: true
+        # Pin runAsUser/runAsGroup to the distroless static:nonroot UID/GID
+        # (65532) so the kubelet does not have to fall back to the image's
+        # USER directive. Defense-in-depth against a base-image change that
+        # might silently switch to a different non-root UID.
+        runAsUser: 65532
+        runAsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
       containers:

@@ -33,9 +33,12 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["list"]
+  # secrets:list removed; UI must request specific secret names via get.
+  # The previous cluster-wide list permission would have exposed every
+  # secret in the cluster (including unrelated workload credentials) to a
+  # compromised UI pod. If a UI feature genuinely needs to enumerate
+  # secrets in an Aerospike namespace, follow up with a namespace-scoped
+  # Role per Aerospike namespace instead of restoring this ClusterRole entry.
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["create", "list"]
