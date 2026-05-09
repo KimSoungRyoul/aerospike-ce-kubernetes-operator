@@ -247,16 +247,20 @@ cilium:
 # =============================================================================
 podDisruptionBudget:
   # -- Create a PodDisruptionBudget for the operator deployment.
-  # Enabled by default so that voluntary node drains (kubectl drain, cluster
-  # autoscaler scale-in) cannot evict the only operator pod and leave Aerospike
-  # clusters unmanaged. Even with replicaCount=1 the PDB blocks voluntary
-  # eviction until the replacement pod is Ready on another node.
+  # Enabled by default so that voluntary disruptions (cluster autoscaler
+  # scale-in, controlled rollouts) respect a budget and don't take the
+  # operator offline simultaneously with Aerospike pods that need it.
   enabled: true
-  # -- Minimum available pods (mutually exclusive with maxUnavailable)
-  minAvailable: 1
+  # -- Minimum available pods (mutually exclusive with maxUnavailable).
+  # Leave empty unless you scale `replicaCount` above 1; setting
+  # minAvailable=1 with replicaCount=1 makes the operator pod un-evictable
+  # and blocks `kubectl drain` indefinitely.
+  minAvailable: ""
   # -- Maximum unavailable pods (mutually exclusive with minAvailable).
-  # Uncomment and remove minAvailable to use.
-  maxUnavailable: ""
+  # Default of 1 allows exactly one operator pod to be evicted at a time,
+  # which is the only safe value when replicaCount=1 (drain proceeds; the
+  # scheduler recreates the pod on another node).
+  maxUnavailable: 1
 
 # =============================================================================
 # Horizontal Pod Autoscaler
