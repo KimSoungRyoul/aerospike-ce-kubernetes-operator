@@ -666,8 +666,15 @@ ui:
     database: aerospike_manager
     # -- Database user
     username: aerospike
-    # -- Database password (used for embedded sidecar only)
-    password: aerospike
+    # -- Database password (used for embedded sidecar only).
+    # When empty (default), the chart auto-generates a 24-character random
+    # password on first install via Helm's `lookup` + `randAlphaNum`. The
+    # generated value is preserved across `helm upgrade` by re-reading the
+    # existing Secret, so the password remains stable for the life of the
+    # release. To override, set this to your own value or supply a complete
+    # Secret via `ui.postgresql.existingSecret`. The previous default of
+    # "aerospike" was a well-known credential and is no longer shipped.
+    password: ""
     # -- Use an existing Secret instead of creating one.
     # The Secret must contain POSTGRES_PASSWORD and DATABASE_URL keys.
     existingSecret: ""
