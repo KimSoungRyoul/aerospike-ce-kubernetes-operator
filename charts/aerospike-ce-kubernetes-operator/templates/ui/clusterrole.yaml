@@ -33,12 +33,12 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["get", "list", "watch"]
-  # secrets:list removed; UI must request specific secret names via get.
-  # The previous cluster-wide list permission would have exposed every
-  # secret in the cluster (including unrelated workload credentials) to a
-  # compromised UI pod. If a UI feature genuinely needs to enumerate
-  # secrets in an Aerospike namespace, follow up with a namespace-scoped
-  # Role per Aerospike namespace instead of restoring this ClusterRole entry.
+  # secrets:list intentionally NOT granted at cluster scope — the previous
+  # cluster-wide list permission would have exposed every Secret in the
+  # cluster (including unrelated workload credentials) to a compromised UI
+  # pod. The UI's ACL picker (/api/k8s/secrets) needs secrets:[get,list] in
+  # .Release.Namespace only; that is granted via the namespace-scoped Role
+  # in templates/ui/role.yaml + rolebinding.yaml.
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["create", "list"]
