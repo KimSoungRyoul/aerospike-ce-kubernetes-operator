@@ -374,6 +374,12 @@ func determineRestartReason(
 
 // recordPodRestartStatus records the restart reason/time for the pod via a status patch.
 // Uses MergePatch instead of full Update to reduce conflict risk during concurrent operations.
+//
+// The cluster is re-fetched fresh before constructing the MergePatch base so that
+// the patch ResourceVersion is current. Using the in-flight `cluster` object would
+// risk a stale ResourceVersion when other reconcilers have written status during
+// the in-progress reconcile (mirrors the pattern in markDirtyVolumes /
+// updateDynamicConfigStatus).
 func (r *AerospikeClusterReconciler) recordPodRestartStatus(
 	ctx context.Context,
 	cluster *ackov1alpha1.AerospikeCluster,
@@ -383,16 +389,22 @@ func (r *AerospikeClusterReconciler) recordPodRestartStatus(
 	log := logf.FromContext(ctx)
 	now := metav1.Now()
 
-	patch := client.MergeFrom(cluster.DeepCopy())
-	if cluster.Status.Pods == nil {
-		cluster.Status.Pods = make(map[string]ackov1alpha1.AerospikePodStatus)
+	latest, err := r.refetchCluster(ctx, types.NamespacedName{Name: cluster.Name, Namespace: cluster.Namespace})
+	if err != nil {
+		log.V(1).Info("Failed to refetch cluster for pod restart status (non-fatal)", "pod", podName, "err", err)
+		return
 	}
-	podStatus := cluster.Status.Pods[podName]
+
+	patch := client.MergeFrom(latest.DeepCopy())
+	if latest.Status.Pods == nil {
+		latest.Status.Pods = make(map[string]ackov1alpha1.AerospikePodStatus)
+	}
+	podStatus := latest.Status.Pods[podName]
 	podStatus.LastRestartReason = &reason
 	podStatus.LastRestartTime = &now
-	cluster.Status.Pods[podName] = podStatus
+	latest.Status.Pods[podName] = podStatus
 
-	if err := r.Status().Patch(ctx, cluster, patch); err != nil {
+	if err := r.Status().Patch(ctx, latest, patch); err != nil {
 		log.V(1).Info("Failed to record pod restart status (non-fatal)", "pod", podName, "err", err)
 	}
 }

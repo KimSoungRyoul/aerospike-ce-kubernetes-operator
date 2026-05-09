@@ -6,6 +6,7 @@ import (
 	"maps"
 	"strconv"
 	"strings"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -13,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
@@ -83,6 +85,15 @@ func (r *AerospikeClusterReconciler) reconcileStatefulSet(
 	} else if err != nil {
 		return false, fmt.Errorf("getting StatefulSet %s: %w", stsName, err)
 	}
+
+	// Snapshot the StatefulSet immediately after Get so we can compute a
+	// MergeFrom patch later. Using Update (full object write) on `existing`
+	// after intervening network I/O (migration check, scale-down readiness)
+	// can race against external StatefulSet status updates and 409 — with
+	// MaxConcurrentReconciles=2 those 409s also trip the reconcile circuit
+	// breaker. The MergeFrom patch sends only the fields we changed and is
+	// resilient to concurrent status writes from kube-controller-manager.
+	stsSnapshot := existing.DeepCopy()
 
 	// Update only if replicas or config hash changed
 	oldReplicas := int32(0)
@@ -163,8 +174,12 @@ func (r *AerospikeClusterReconciler) reconcileStatefulSet(
 	// VolumeClaimTemplates are immutable after StatefulSet creation.
 	// Always preserve the existing VCTs; they can only be set during buildStatefulSet.
 	log.Info("Updating StatefulSet", "name", stsName, "targetReplicas", targetReplicas)
-	if err := r.Update(ctx, existing); err != nil {
-		return false, fmt.Errorf("updating StatefulSet %s: %w", stsName, err)
+	// Patch with MergeFrom against the snapshot taken immediately after Get,
+	// so concurrent StatefulSet status updates from kube-controller-manager do
+	// not cause 409 (which would otherwise trip the reconcile circuit breaker
+	// under MaxConcurrentReconciles=2).
+	if err := r.Patch(ctx, existing, client.MergeFrom(stsSnapshot)); err != nil {
+		return false, fmt.Errorf("patching StatefulSet %s: %w", stsName, err)
 	}
 	r.Recorder.Eventf(cluster, corev1.EventTypeNormal, EventStatefulSetUpdated,
 		"StatefulSet %s updated: replicas=%d", stsName, targetReplicas)
@@ -318,39 +333,116 @@ func (r *AerospikeClusterReconciler) cleanupRemovedRacks(
 
 	// Note: when a rack is removed, its per-rack Storage spec is no longer in the CR.
 	// We fall back to the cluster-level storage spec for cascadeDelete resolution.
+	//
+	// Ordering is critical for safety:
+	//   1. Delete the StatefulSet first so pods begin graceful termination.
+	//   2. Wait for all rack pods to terminate. Deleting PVCs while pods are
+	//      still running risks data loss (Aerospike may flush to a backing
+	//      store that is being unmounted) and crashes pods that are still
+	//      accepting transactions.
+	//   3. Only then delete cascade-delete PVCs and the rack ConfigMap.
 	for i := range stsList.Items {
 		sts := &stsList.Items[i]
-		if !currentRackNames[sts.Name] {
-			log.Info("Deleting removed rack StatefulSet", "name", sts.Name)
-			// Delete PVCs for removed rack before deleting the StatefulSet,
-			// but only for volumes that have cascadeDelete enabled.
-			storageSpec := cluster.Spec.Storage
-			if err := storage.DeleteCascadeDeletePVCs(ctx, r.Client, cluster.Namespace, sts.Name, storageSpec); err != nil {
-				log.Error(err, "Failed to delete cascade PVCs for removed rack", "statefulset", sts.Name)
-				r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventPVCCleanupFailed,
-					"Failed to delete cascade PVCs for removed rack %s: %v", sts.Name, err)
-			}
-			// Delete the associated ConfigMap for the removed rack.
-			// The ConfigMap name is derived from the StatefulSet name suffix (rackID).
-			rackIDStr := strings.TrimPrefix(sts.Name, cluster.Name+"-")
-			if rackID, convErr := strconv.Atoi(rackIDStr); convErr == nil {
-				cmName := utils.ConfigMapName(cluster.Name, rackID)
-				cm := &corev1.ConfigMap{}
-				if getErr := r.Get(ctx, types.NamespacedName{Name: cmName, Namespace: cluster.Namespace}, cm); getErr == nil {
-					if delErr := r.Delete(ctx, cm); delErr != nil && !errors.IsNotFound(delErr) {
-						log.Error(delErr, "Failed to delete ConfigMap for removed rack", "configmap", cmName)
-					} else {
-						log.Info("Deleted ConfigMap for removed rack", "configmap", cmName)
-					}
-				}
-			}
-			if err := r.Delete(ctx, sts); err != nil && !errors.IsNotFound(err) {
-				return err
+		if currentRackNames[sts.Name] {
+			continue
+		}
+
+		log.Info("Deleting removed rack StatefulSet", "name", sts.Name)
+		stsName := sts.Name
+
+		// Step 1: Delete the StatefulSet first to start pod termination.
+		if err := r.Delete(ctx, sts); err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+
+		// Step 2: Wait for pods to terminate. Bounded to 30 retries × 1s with
+		// context cancellation honored. If pods are still running after the
+		// timeout we fall through and let the next reconcile retry — better
+		// than indefinitely blocking the reconcile loop.
+		//
+		// If the rackID cannot be parsed from the STS name we refuse to
+		// proceed: a partial cleanup that deletes PVCs without first
+		// confirming pods are gone re-introduces the "PVC deleted while pods
+		// alive" hazard. Returning an error lets the reconcile loop retry on
+		// the next pass; a human can also intervene via logs/events.
+		rackIDStr := strings.TrimPrefix(stsName, cluster.Name+"-")
+		rackID, convErr := strconv.Atoi(rackIDStr)
+		if convErr != nil {
+			return fmt.Errorf("cannot derive rackID from StatefulSet name %q (cluster %q): %w; "+
+				"refusing rack cleanup to avoid deleting PVCs while pods may still be running",
+				stsName, cluster.Name, convErr)
+		}
+
+		waitErr := r.waitForRackPodsTerminated(ctx, cluster, rackID, stsName)
+		if waitErr != nil {
+			log.V(1).Info("Pods for removed rack still terminating; deferring PVC and ConfigMap cleanup to next reconcile",
+				"statefulset", stsName, "err", waitErr)
+			continue
+		}
+
+		// Step 3a: Delete cascade-delete PVCs now that pods are gone.
+		storageSpec := cluster.Spec.Storage
+		if err := storage.DeleteCascadeDeletePVCs(ctx, r.Client, cluster.Namespace, stsName, storageSpec); err != nil {
+			log.Error(err, "Failed to delete cascade PVCs for removed rack", "statefulset", stsName)
+			r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventPVCCleanupFailed,
+				"Failed to delete cascade PVCs for removed rack %s: %v", stsName, err)
+		}
+
+		// Step 3b: Delete the associated ConfigMap for the removed rack.
+		// The ConfigMap name is derived from the StatefulSet name suffix (rackID).
+		cmName := utils.ConfigMapName(cluster.Name, rackID)
+		cm := &corev1.ConfigMap{}
+		if getErr := r.Get(ctx, types.NamespacedName{Name: cmName, Namespace: cluster.Namespace}, cm); getErr == nil {
+			if delErr := r.Delete(ctx, cm); delErr != nil && !errors.IsNotFound(delErr) {
+				log.Error(delErr, "Failed to delete ConfigMap for removed rack", "configmap", cmName)
+			} else {
+				log.Info("Deleted ConfigMap for removed rack", "configmap", cmName)
 			}
 		}
 	}
 
 	return nil
+}
+
+// waitForRackPodsTerminated polls until all pods for the given rack are gone,
+// or until the bounded timeout (30 attempts × 1s) elapses, or until the
+// context is cancelled. Returns nil when all pods have terminated, or an
+// error describing why the wait ended early.
+func (r *AerospikeClusterReconciler) waitForRackPodsTerminated(
+	ctx context.Context,
+	cluster *ackov1alpha1.AerospikeCluster,
+	rackID int,
+	stsName string,
+) error {
+	log := logf.FromContext(ctx)
+
+	const (
+		maxAttempts = 30
+		pollEvery   = 1 * time.Second
+	)
+
+	for attempt := range maxAttempts {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		pods, err := r.listRackPods(ctx, cluster, rackID)
+		if err != nil {
+			// Transient list error: log and keep polling rather than giving up.
+			log.V(1).Info("listRackPods failed while waiting for pod termination",
+				"statefulset", stsName, "attempt", attempt, "err", err)
+		} else if len(pods) == 0 {
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(pollEvery):
+		}
+	}
+
+	return fmt.Errorf("timed out waiting for pods of removed rack %s to terminate", stsName)
 }
 
 // getScaleDownBatchSize returns the effective scale-down batch size.
