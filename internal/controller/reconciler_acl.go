@@ -233,7 +233,9 @@ func (r *AerospikeClusterReconciler) reconcileUsers(
 			}
 			// Protect the previously-configured admin user during a rename to avoid
 			// locking the operator out before the new admin user is established.
-			if prevAdminUser != nil && user.User == prevAdminUser.Name && prevAdminUser.Name != adminUser.Name {
+			// Guard adminUser != nil: if the new spec has no admin user, this rename
+			// branch should be skipped (the previous admin will be dropped normally).
+			if prevAdminUser != nil && adminUser != nil && user.User == prevAdminUser.Name && prevAdminUser.Name != adminUser.Name {
 				log.Info("Skipping drop of previous admin user during rename — ensure new admin is operational before next reconcile",
 					"previousAdmin", prevAdminUser.Name, "newAdmin", adminUser.Name)
 				r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventACLSyncError,
