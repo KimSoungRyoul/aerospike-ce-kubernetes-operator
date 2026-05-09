@@ -85,8 +85,12 @@ replicaCount: 1
 image:
   # -- Container image repository
   repository: ghcr.io/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator
-  # -- Container image tag
-  tag: "latest"
+  # -- Container image tag. Leave empty to fall through to .Chart.AppVersion
+  # so installs are pinned to the chart's matching operator release. Avoid
+  # using "latest" — it makes deployments unreproducible and silently
+  # interacts with imagePullPolicy: IfNotPresent (cached :latest never gets
+  # refreshed).
+  tag: ""
   # -- Image pull policy: Always, IfNotPresent, or Never
   pullPolicy: IfNotPresent
 
@@ -112,14 +116,17 @@ serviceAccount:
 # =============================================================================
 # Resource Limits
 # =============================================================================
-# -- CPU and memory resource requests/limits for the operator pod
+# -- CPU and memory resource requests/limits for the operator pod.
+# Memory is aligned with config/manager/manager.yaml (kustomize manifest);
+# the previous 256Mi limit / 128Mi request risked OOMKill once
+# MaxConcurrentReconciles=2 fans out across many AerospikeClusters.
 resources:
   limits:
     cpu: 500m
-    memory: 256Mi
+    memory: 512Mi
   requests:
     cpu: 100m
-    memory: 128Mi
+    memory: 256Mi
 
 # =============================================================================
 # Webhook Configuration
@@ -239,8 +246,12 @@ cilium:
 # Pod Disruption Budget
 # =============================================================================
 podDisruptionBudget:
-  # -- Create a PodDisruptionBudget for the operator deployment
-  enabled: false
+  # -- Create a PodDisruptionBudget for the operator deployment.
+  # Enabled by default so that voluntary node drains (kubectl drain, cluster
+  # autoscaler scale-in) cannot evict the only operator pod and leave Aerospike
+  # clusters unmanaged. Even with replicaCount=1 the PDB blocks voluntary
+  # eviction until the replacement pod is Ready on another node.
+  enabled: true
   # -- Minimum available pods (mutually exclusive with maxUnavailable)
   minAvailable: 1
   # -- Maximum unavailable pods (mutually exclusive with minAvailable).
@@ -348,7 +359,9 @@ ui:
     enabled: true
     image:
       repository: ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-api
-      tag: "latest"
+      # -- Container image tag. Leave empty to fall through to
+      # .Chart.AppVersion (see ui.api.image helper in _helpers.tpl).
+      tag: ""
       pullPolicy: IfNotPresent
     service:
       type: ClusterIP
@@ -533,7 +546,9 @@ ui:
     enabled: true
     image:
       repository: ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-web
-      tag: "latest"
+      # -- Container image tag. Leave empty to fall through to
+      # .Chart.AppVersion (see ui.web.image helper in _helpers.tpl).
+      tag: ""
       pullPolicy: IfNotPresent
     service:
       type: ClusterIP

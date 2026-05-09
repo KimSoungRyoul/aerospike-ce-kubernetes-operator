@@ -1,0 +1,22 @@
+{{- if and (eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true") .Values.ui.rbac.create .Values.ui.k8s.enabled }}
+# Namespace-scoped Role granting the UI ServiceAccount permission to list and
+# read secrets in .Release.Namespace. This replaces the previously-removed
+# cluster-wide secrets:list permission on the UI ClusterRole.
+#
+# Why namespace-scoped: cluster-wide secrets:list would expose every Secret in
+# the cluster (including unrelated workload credentials) to a compromised UI
+# pod. Restricting to .Release.Namespace limits blast radius to where the UI
+# already runs, while still satisfying the cluster-manager API's
+# /api/k8s/secrets endpoint used by the ACL picker.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "aerospike-ce-kubernetes-operator.ui.fullname" . }}-secrets
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aerospike-ce-kubernetes-operator.ui.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+{{- end }}
