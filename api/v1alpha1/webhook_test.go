@@ -4707,3 +4707,300 @@ func TestValidateCreate_RejectsDuplicateServiceMonitor(t *testing.T) {
 		t.Errorf("error should point at conflicting AerospikeCluster %q, got: %v", "demo-other", err)
 	}
 }
+
+// --- spec.overrides CE constraint validation tests (P0-1) ---
+
+// TestValidate_OverridesEnterpriseImageRejected pins the CE-bypass fix: a
+// templated cluster could previously set spec.overrides.image to an
+// Enterprise tag and the cluster webhook would silently accept it. The
+// resolved spec then materialised an Enterprise image inside a CE cluster.
+func TestValidate_OverridesEnterpriseImageRejected(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:        3,
+			Image:       "aerospike:ce-8.1.1.1",
+			TemplateRef: &TemplateRef{Name: "prod"},
+			Overrides: &AerospikeClusterTemplateSpec{
+				Image: "aerospike/aerospike-server-enterprise:8.1",
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error for enterprise image in spec.overrides")
+	}
+	if !strings.Contains(err.Error(), "spec.overrides.image") {
+		t.Errorf("expected 'spec.overrides.image' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "enterprise") {
+		t.Errorf("expected 'enterprise' in error, got: %v", err)
+	}
+}
+
+// TestValidate_OverridesXdrInServiceRejected covers the templated-bypass for
+// xdr in spec.overrides.aerospikeConfig.service. Previously the cluster
+// webhook only validated TemplateRef presence on spec.overrides and never
+// scanned the contents.
+func TestValidate_OverridesXdrInServiceRejected(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:        3,
+			Image:       "aerospike:ce-8.1.1.1",
+			TemplateRef: &TemplateRef{Name: "prod"},
+			Overrides: &AerospikeClusterTemplateSpec{
+				AerospikeConfig: &TemplateAerospikeConfig{
+					Service: &AerospikeConfigSpec{
+						Value: map[string]any{
+							"xdr": map[string]any{"datacenters": []any{}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error for xdr in spec.overrides.aerospikeConfig.service")
+	}
+	if !strings.Contains(err.Error(), "spec.overrides.aerospikeConfig.service") {
+		t.Errorf("expected service path in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "xdr") {
+		t.Errorf("expected 'xdr' in error, got: %v", err)
+	}
+}
+
+// TestValidate_OverridesEnterpriseSecurityInNamespaceDefaultsRejected
+// covers the templated-bypass for enterprise security keys in
+// spec.overrides.aerospikeConfig.namespaceDefaults. namespaceDefaults is
+// merged as a base into every namespace, so a single overrides entry would
+// otherwise leak enterprise auth into every namespace.
+func TestValidate_OverridesEnterpriseSecurityInNamespaceDefaultsRejected(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:        3,
+			Image:       "aerospike:ce-8.1.1.1",
+			TemplateRef: &TemplateRef{Name: "prod"},
+			Overrides: &AerospikeClusterTemplateSpec{
+				AerospikeConfig: &TemplateAerospikeConfig{
+					NamespaceDefaults: &AerospikeConfigSpec{
+						Value: map[string]any{
+							"security": map[string]any{
+								"ldap": map[string]any{"server": "ldaps://example"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error for security.ldap in spec.overrides.aerospikeConfig.namespaceDefaults")
+	}
+	if !strings.Contains(err.Error(), "spec.overrides.aerospikeConfig.namespaceDefaults") {
+		t.Errorf("expected namespaceDefaults path in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "ldap") {
+		t.Errorf("expected 'ldap' in error, got: %v", err)
+	}
+}
+
+// TestValidate_OverridesSizeOutOfRangeRejected pins that overrides.size
+// must respect the CE 1–8 bound. Without this, a templated cluster with
+// overrides.size=99 would silently set spec.size=99 after the merge.
+func TestValidate_OverridesSizeOutOfRangeRejected(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	bigSize := int32(99)
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:        3,
+			Image:       "aerospike:ce-8.1.1.1",
+			TemplateRef: &TemplateRef{Name: "prod"},
+			Overrides: &AerospikeClusterTemplateSpec{
+				Size: &bigSize,
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error for spec.overrides.size=99")
+	}
+	if !strings.Contains(err.Error(), "spec.overrides.size") {
+		t.Errorf("expected 'spec.overrides.size' in error, got: %v", err)
+	}
+}
+
+// TestValidate_OverridesValidPasses ensures the new check does not
+// over-reject CE-valid overrides: a CE image and a size of 5 in an
+// overrides spec must still validate cleanly.
+func TestValidate_OverridesValidPasses(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	size := int32(5)
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:        3,
+			Image:       "aerospike:ce-8.1.1.1",
+			TemplateRef: &TemplateRef{Name: "prod"},
+			Overrides: &AerospikeClusterTemplateSpec{
+				Image: "aerospike:ce-8.1.1.1",
+				Size:  &size,
+			},
+		},
+	}
+
+	if _, err := v.validate(cluster); err != nil {
+		t.Fatalf("unexpected error for valid CE overrides: %v", err)
+	}
+}
+
+// --- templateRef immutability tests (P1-2) ---
+
+// TestValidateUpdate_TemplateRefSwapRejected pins that swapping templateRef
+// between two existing templates is rejected on update. Swapping would
+// silently re-base every templated default and could cross between
+// operator-managed configurations without a progressive rollout.
+func TestValidateUpdate_TemplateRefSwapRejected(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	oldCluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:        3,
+			Image:       "aerospike:ce-8.1.1.1",
+			TemplateRef: &TemplateRef{Name: "prod"},
+		},
+	}
+	newCluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:        3,
+			Image:       "aerospike:ce-8.1.1.1",
+			TemplateRef: &TemplateRef{Name: "staging"},
+		},
+	}
+
+	_, err := v.ValidateUpdate(context.Background(), oldCluster, newCluster)
+	if err == nil {
+		t.Fatal("expected error when changing templateRef")
+	}
+	if !strings.Contains(err.Error(), "templateRef is immutable") {
+		t.Errorf("expected 'templateRef is immutable' in error, got: %v", err)
+	}
+}
+
+// TestValidateUpdate_TemplateRefAddRejected covers the add path:
+// promoting a non-templated cluster to a templated one is also rejected.
+func TestValidateUpdate_TemplateRefAddRejected(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	oldCluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+		},
+	}
+	newCluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:        3,
+			Image:       "aerospike:ce-8.1.1.1",
+			TemplateRef: &TemplateRef{Name: "prod"},
+		},
+	}
+
+	_, err := v.ValidateUpdate(context.Background(), oldCluster, newCluster)
+	if err == nil {
+		t.Fatal("expected error when adding templateRef on update")
+	}
+	if !strings.Contains(err.Error(), "templateRef is immutable") {
+		t.Errorf("expected 'templateRef is immutable' in error, got: %v", err)
+	}
+}
+
+// TestValidateUpdate_TemplateRefRemoveRejected covers the remove path.
+func TestValidateUpdate_TemplateRefRemoveRejected(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	oldCluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:        3,
+			Image:       "aerospike:ce-8.1.1.1",
+			TemplateRef: &TemplateRef{Name: "prod"},
+		},
+	}
+	newCluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+		},
+	}
+
+	_, err := v.ValidateUpdate(context.Background(), oldCluster, newCluster)
+	if err == nil {
+		t.Fatal("expected error when removing templateRef on update")
+	}
+	if !strings.Contains(err.Error(), "templateRef is immutable") {
+		t.Errorf("expected 'templateRef is immutable' in error, got: %v", err)
+	}
+}
+
+// TestValidateUpdate_TemplateRefUnchangedAllowed pins that an update that
+// preserves templateRef is still allowed (the immutability check must not
+// over-reject identical refs).
+func TestValidateUpdate_TemplateRefUnchangedAllowed(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	oldCluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:        3,
+			Image:       "aerospike:ce-8.1.1.1",
+			TemplateRef: &TemplateRef{Name: "prod"},
+		},
+	}
+	newCluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:        4, // unrelated change
+			Image:       "aerospike:ce-8.1.1.1",
+			TemplateRef: &TemplateRef{Name: "prod"},
+		},
+	}
+
+	if _, err := v.ValidateUpdate(context.Background(), oldCluster, newCluster); err != nil {
+		t.Fatalf("unexpected error when templateRef unchanged: %v", err)
+	}
+}
+
+// --- namespaces-as-map rejection (P1-1) ---
+
+// TestValidate_NamespacesAsMapRejected covers the CE bypass: when
+// aerospikeConfig.namespaces was provided as a map, the cluster webhook
+// only counted entries and never ran per-namespace validation. A map-shaped
+// namespaces value with enterprise-only keys (compression,
+// strong-consistency, ...) would silently slip through to configgen.
+func TestValidate_NamespacesAsMapRejected(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeConfig: &AerospikeConfigSpec{
+				Value: map[string]any{
+					"namespaces": map[string]any{
+						"test": map[string]any{
+							"replication-factor": 1,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error when aerospikeConfig.namespaces is a map")
+	}
+	if !strings.Contains(err.Error(), "must be a list") {
+		t.Errorf("expected 'must be a list' in error, got: %v", err)
+	}
+}
