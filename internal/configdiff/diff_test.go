@@ -341,8 +341,11 @@ func TestIsDynamic(t *testing.T) {
 		{"namespace.high-water-disk-pct", true},
 		{"namespace.high-water-memory-pct", true},
 		{"namespace.stop-writes-pct", true},
-		{"namespace.memory-size", true},
-		{"namespace.replication-factor", true},
+		// memory-size and replication-factor are NOT dynamic — applying them
+		// via set-config can cause replicas to drift / data loss; they require
+		// a synchronized cold restart and must fall through to that path.
+		{"namespace.memory-size", false},
+		{"namespace.replication-factor", false},
 		{"network.heartbeat.interval", true},
 		{"network.heartbeat.timeout", true},
 		{"network.service.port", false},
