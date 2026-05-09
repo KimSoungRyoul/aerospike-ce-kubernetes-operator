@@ -148,6 +148,23 @@ func (v *AerospikeClusterTemplateValidator) validate(tmpl *AerospikeClusterTempl
 					"spec.aerospikeConfig.network.heartbeat.mode must be 'mesh' for CE (got %q)", mode))
 			}
 		}
+
+		// CE constraint: enterprise-only stanzas (xdr, tls) and enterprise-only
+		// security sub-keys must be rejected on the template paths just as they
+		// are on AerospikeCluster.spec.aerospikeConfig (see
+		// validateAerospikeConfig in aerospikecluster_webhook.go). Without this,
+		// a templateRef could silently inject these stanzas via
+		// namespaceDefaults or service defaults, bypassing the CE webhook.
+		if spec.AerospikeConfig.NamespaceDefaults != nil {
+			allErrors = append(allErrors,
+				validateTemplateConfigBannedKeys("spec.aerospikeConfig.namespaceDefaults",
+					spec.AerospikeConfig.NamespaceDefaults.Value)...)
+		}
+		if spec.AerospikeConfig.Service != nil {
+			allErrors = append(allErrors,
+				validateTemplateConfigBannedKeys("spec.aerospikeConfig.service",
+					spec.AerospikeConfig.Service.Value)...)
+		}
 	}
 
 	if len(allErrors) > 0 {
@@ -155,6 +172,44 @@ func (v *AerospikeClusterTemplateValidator) validate(tmpl *AerospikeClusterTempl
 	}
 
 	return warnings, nil
+}
+
+// validateTemplateConfigBannedKeys rejects enterprise-only Aerospike config
+// stanzas reachable from a template's namespaceDefaults or service map.
+//
+// Mirrors the CE constraints enforced in validateAerospikeConfig on the
+// AerospikeCluster webhook:
+//   - top-level "xdr" and "tls" keys are forbidden,
+//   - "security" sub-keys listed in enterpriseOnlySecurityKeys are forbidden.
+//
+// fieldPath is the user-facing JSONPath prefix used in error messages
+// (e.g. "spec.aerospikeConfig.namespaceDefaults").
+func validateTemplateConfigBannedKeys(fieldPath string, cfg map[string]any) []string {
+	if cfg == nil {
+		return nil
+	}
+	var errs []string
+
+	if _, exists := cfg["xdr"]; exists {
+		errs = append(errs, fmt.Sprintf(
+			"%s must not contain 'xdr' section (XDR is Enterprise-only)", fieldPath))
+	}
+	if _, exists := cfg["tls"]; exists {
+		errs = append(errs, fmt.Sprintf(
+			"%s must not contain 'tls' section (TLS is Enterprise-only)", fieldPath))
+	}
+	if secSection, exists := cfg["security"]; exists {
+		if secMap, ok := secSection.(map[string]any); ok {
+			for enterpriseKey, reason := range enterpriseOnlySecurityKeys {
+				if _, found := secMap[enterpriseKey]; found {
+					errs = append(errs, fmt.Sprintf(
+						"%s.security.%s is not allowed in CE edition (%s)",
+						fieldPath, enterpriseKey, reason))
+				}
+			}
+		}
+	}
+	return errs
 }
 
 // templateResourcesEqualRequestsLimits checks if CPU and memory requests equal limits.

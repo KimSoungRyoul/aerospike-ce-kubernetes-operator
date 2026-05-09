@@ -797,8 +797,20 @@ func (v *AerospikeClusterValidator) validateSizeAndImage(cluster *AerospikeClust
 	// Validate image content only when the image is provided.
 	if cluster.Spec.Image != "" {
 		imageLower := strings.ToLower(cluster.Spec.Image)
-		if strings.Contains(imageLower, "enterprise") || isEnterpriseTag(cluster.Spec.Image) {
-			imageErrors = append(imageErrors, fmt.Sprintf("spec.image %q is an Enterprise Edition image; only Community Edition images are allowed", cluster.Spec.Image))
+		// Strictest check first: explicit enterprise repository name on Docker
+		// Hub. Reported with a clear, repository-specific error so users can
+		// tell at a glance why CE rejected the image.
+		switch {
+		case strings.Contains(imageLower, "aerospike-server-enterprise"):
+			imageErrors = append(imageErrors, fmt.Sprintf(
+				"spec.image %q references the enterprise repository "+
+					"(aerospike-server-enterprise); CE clusters must use a CE image "+
+					"such as aerospike:ce-8.1.1.1",
+				cluster.Spec.Image))
+		case strings.Contains(imageLower, "enterprise") || isEnterpriseTag(cluster.Spec.Image):
+			imageErrors = append(imageErrors, fmt.Sprintf(
+				"spec.image %q is an Enterprise Edition image; only Community Edition images are allowed",
+				cluster.Spec.Image))
 		}
 		if !strings.Contains(cluster.Spec.Image, ":") {
 			imageWarnings = append(imageWarnings, fmt.Sprintf("spec.image %q has no tag; use an explicit version tag (e.g., aerospike:ce-8.1.1.1) for reproducible deployments", cluster.Spec.Image))
@@ -870,6 +882,12 @@ func hasVolumeForPath(storage *AerospikeStorageSpec, path string) bool {
 }
 
 // validateReplicationFactor validates that replication-factor does not exceed cluster size.
+//
+// When spec.size is 0 and spec.templateRef is set, the size will be supplied
+// later by the resolved template; in that case the rfInt > size cross-check is
+// skipped and deferred to reconcile-time (post-template-merge) validation, to
+// avoid spurious "replication-factor 3 exceeds cluster size 0" rejections when
+// users legitimately omit size on the cluster CR and rely on the template.
 func (v *AerospikeClusterValidator) validateReplicationFactor(cluster *AerospikeCluster) []string {
 	if cluster.Spec.AerospikeConfig == nil {
 		return nil
@@ -878,6 +896,8 @@ func (v *AerospikeClusterValidator) validateReplicationFactor(cluster *Aerospike
 	if !ok {
 		return nil
 	}
+	// Size is deferred to template resolution; skip the rfInt > size check.
+	sizeDeferredToTemplate := cluster.Spec.Size == 0 && cluster.Spec.TemplateRef != nil
 	var errors []string
 	for _, ns := range nsList {
 		nsMap, ok := ns.(map[string]any)
@@ -906,6 +926,11 @@ func (v *AerospikeClusterValidator) validateReplicationFactor(cluster *Aerospike
 		if rfInt < 1 {
 			errors = append(errors, fmt.Sprintf(
 				"namespace %q: replication-factor must be >= 1, got %d", nsName, rfInt))
+			continue
+		}
+		if sizeDeferredToTemplate {
+			// Cluster size is supplied by the referenced template; the
+			// reconciler will re-validate after template merge.
 			continue
 		}
 		if rfInt > int(cluster.Spec.Size) {
