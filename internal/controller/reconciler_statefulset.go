@@ -421,7 +421,7 @@ func (r *AerospikeClusterReconciler) waitForRackPodsTerminated(
 		pollEvery   = 1 * time.Second
 	)
 
-	for attempt := 0; attempt < maxAttempts; attempt++ {
+	for attempt := range maxAttempts {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
