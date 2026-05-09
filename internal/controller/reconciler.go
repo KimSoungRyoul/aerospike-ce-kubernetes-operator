@@ -816,10 +816,23 @@ func (r *AerospikeClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 // mapTemplateToCluster maps an AerospikeClusterTemplate change to all clusters
 // that reference it, so the controller can mark them as out-of-sync.
+//
+// IMPORTANT: This handler performs a cluster-wide List of AerospikeCluster
+// resources because AerospikeClusterTemplate is cluster-scoped and any
+// AerospikeCluster in any namespace may reference it. The operator therefore
+// REQUIRES cluster-wide List/Watch RBAC for `aerospikeclusters`
+// (granted by the ClusterRole in
+// charts/aerospike-ce-kubernetes-operator/templates/clusterrole-manager.yaml).
+// If the operator is ever repackaged to be namespace-scoped (Role-only), this
+// handler must be updated to either (a) scope the List to the operator's own
+// namespace via client.InNamespace, or (b) ensure cluster-wide List remains
+// granted; otherwise template change events will silently 403 and dependent
+// clusters will not be enqueued.
 func (r *AerospikeClusterReconciler) mapTemplateToCluster(ctx context.Context, obj client.Object) []reconcile.Request {
 	log := logf.FromContext(ctx)
 
 	// List all AerospikeClusters across all namespaces since templates are cluster-scoped.
+	// See note above: this depends on cluster-wide List RBAC.
 	clusterList := &ackov1alpha1.AerospikeClusterList{}
 	if err := r.List(ctx, clusterList); err != nil {
 		log.Error(err, "Failed to list clusters for template watch", "template", obj.GetName())

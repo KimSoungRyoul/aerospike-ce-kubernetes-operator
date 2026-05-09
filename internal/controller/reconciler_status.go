@@ -13,6 +13,7 @@ import (
 	aero "github.com/aerospike/aerospike-client-go/v8"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
@@ -126,10 +127,18 @@ func (r *AerospikeClusterReconciler) updateStatusAndPhase(
 
 	// Use RetryOnConflict for the final status write. On conflict, re-fetch the
 	// object and re-apply the computed status to avoid a full requeue cycle.
+	// Non-conflict errors are returned immediately without refetching, since
+	// RetryOnConflict won't retry them anyway and refetching would clobber
+	// concurrent writes by other reconcilers.
 	computedStatus := latest.Status.DeepCopy()
 	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		if err := r.Status().Update(ctx, latest); err != nil {
-			// Re-fetch on conflict and re-apply computed status.
+			// Only refetch on conflict — RetryOnConflict will not retry on
+			// other error types, so a refetch in those paths would be wasted
+			// work and could overwrite legitimate concurrent state changes.
+			if !apierrors.IsConflict(err) {
+				return err
+			}
 			refetched, fetchErr := r.refetchCluster(ctx, namespacedName)
 			if fetchErr != nil {
 				return fetchErr
