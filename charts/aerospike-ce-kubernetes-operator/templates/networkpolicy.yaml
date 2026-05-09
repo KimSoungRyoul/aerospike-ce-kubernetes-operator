@@ -23,11 +23,14 @@ spec:
         - port: 8443
           protocol: TCP
     {{- if .Values.webhook.enabled }}
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              webhooks: enabled
-      ports:
+    # Webhook port: ingress is intentionally unrestricted in standard NetworkPolicy.
+    # Admission requests originate from kube-apiserver, which has no labelable
+    # pod or namespace selector in core Kubernetes networking.k8s.io/v1. A
+    # `from:` selector here would drop every admission request and break
+    # cluster reconciliation. The Cilium variant (ciliumnetworkpolicy.yaml)
+    # restricts this to `fromEntities: kube-apiserver`; standard NetworkPolicy
+    # cannot express that and must allow ingress from all sources.
+    - ports:
         - port: {{ .Values.webhook.port }}
           protocol: TCP
     {{- end }}
