@@ -6,7 +6,6 @@ import (
 	"maps"
 	"strconv"
 	"strings"
-	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -350,21 +349,36 @@ func (r *AerospikeClusterReconciler) cleanupRemovedRacks(
 		log.Info("Deleting removed rack StatefulSet", "name", sts.Name)
 		stsName := sts.Name
 
-		// Step 1: Delete the StatefulSet first to start pod termination.
-		if err := r.Delete(ctx, sts); err != nil && !errors.IsNotFound(err) {
-			return err
+		// Step 1: Delete the StatefulSet with Foreground propagation so the
+		// StatefulSet object remains visible (with deletionTimestamp) until
+		// all of its pods have been terminated. This guarantees that the next
+		// reconcile pass still observes this sts in stsList and re-enters
+		// this branch for PVC/ConfigMap cleanup. With the default Background
+		// propagation, the sts disappears immediately and orphan PVCs would
+		// never be revisited, leaking storage.
+		if sts.DeletionTimestamp.IsZero() {
+			fg := metav1.DeletePropagationForeground
+			if err := r.Delete(ctx, sts, &client.DeleteOptions{PropagationPolicy: &fg}); err != nil && !errors.IsNotFound(err) {
+				return err
+			}
 		}
 
-		// Step 2: Wait for pods to terminate. Bounded to 30 retries × 1s with
-		// context cancellation honored. If pods are still running after the
-		// timeout we fall through and let the next reconcile retry — better
-		// than indefinitely blocking the reconcile loop.
+		// Step 2: Defer PVC/ConfigMap cleanup until pods are confirmed gone.
+		// We deliberately do NOT block the reconcile loop polling for pod
+		// termination — a long blocking poll holds the controller worker
+		// hostage and, if it times out, the StatefulSet is already gone so
+		// the next reconcile will not see this stsName again, leaking PVCs.
+		//
+		// Instead, we check once: if pods are still terminating, return nil
+		// without deleting PVCs/ConfigMap. The list-Pods on the next
+		// reconcile will re-enter this loop (StatefulSet may already be
+		// fully gone but the orphan PVCs/ConfigMap survive and are handled
+		// by the cleanup path keyed off rackID below).
 		//
 		// If the rackID cannot be parsed from the STS name we refuse to
 		// proceed: a partial cleanup that deletes PVCs without first
 		// confirming pods are gone re-introduces the "PVC deleted while pods
-		// alive" hazard. Returning an error lets the reconcile loop retry on
-		// the next pass; a human can also intervene via logs/events.
+		// alive" hazard.
 		rackIDStr := strings.TrimPrefix(stsName, cluster.Name+"-")
 		rackID, convErr := strconv.Atoi(rackIDStr)
 		if convErr != nil {
@@ -373,10 +387,15 @@ func (r *AerospikeClusterReconciler) cleanupRemovedRacks(
 				stsName, cluster.Name, convErr)
 		}
 
-		waitErr := r.waitForRackPodsTerminated(ctx, cluster, rackID, stsName)
-		if waitErr != nil {
+		pods, listErr := r.listRackPods(ctx, cluster, rackID)
+		if listErr != nil {
+			log.V(1).Info("listRackPods failed for removed rack; deferring PVC/ConfigMap cleanup to next reconcile",
+				"statefulset", stsName, "err", listErr)
+			continue
+		}
+		if len(pods) > 0 {
 			log.V(1).Info("Pods for removed rack still terminating; deferring PVC and ConfigMap cleanup to next reconcile",
-				"statefulset", stsName, "err", waitErr)
+				"statefulset", stsName, "remainingPods", len(pods))
 			continue
 		}
 
@@ -402,47 +421,6 @@ func (r *AerospikeClusterReconciler) cleanupRemovedRacks(
 	}
 
 	return nil
-}
-
-// waitForRackPodsTerminated polls until all pods for the given rack are gone,
-// or until the bounded timeout (30 attempts × 1s) elapses, or until the
-// context is cancelled. Returns nil when all pods have terminated, or an
-// error describing why the wait ended early.
-func (r *AerospikeClusterReconciler) waitForRackPodsTerminated(
-	ctx context.Context,
-	cluster *ackov1alpha1.AerospikeCluster,
-	rackID int,
-	stsName string,
-) error {
-	log := logf.FromContext(ctx)
-
-	const (
-		maxAttempts = 30
-		pollEvery   = 1 * time.Second
-	)
-
-	for attempt := range maxAttempts {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		pods, err := r.listRackPods(ctx, cluster, rackID)
-		if err != nil {
-			// Transient list error: log and keep polling rather than giving up.
-			log.V(1).Info("listRackPods failed while waiting for pod termination",
-				"statefulset", stsName, "attempt", attempt, "err", err)
-		} else if len(pods) == 0 {
-			return nil
-		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(pollEvery):
-		}
-	}
-
-	return fmt.Errorf("timed out waiting for pods of removed rack %s to terminate", stsName)
 }
 
 // getScaleDownBatchSize returns the effective scale-down batch size.

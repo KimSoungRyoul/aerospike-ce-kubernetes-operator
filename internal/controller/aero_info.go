@@ -51,27 +51,6 @@ func asinfoCommandOnNode(node *aero.Node, cmd string) (string, error) {
 	return "", fmt.Errorf("no result for command %q on node %s", cmd, node.GetName())
 }
 
-// isMigrating checks if the cluster has any pending migrations.
-func isMigrating(client *aero.Client) (bool, error) {
-	result, err := asinfoCommand(client, "cluster-stable:")
-	if err != nil {
-		return true, err
-	}
-
-	// cluster-stable: returns the cluster key when the cluster is stable
-	// (no migrations). When the cluster is unstable, the server returns the
-	// reason as an ERROR string in the result value (NOT as a Go error), e.g.
-	// "ERROR::has migrations". Treat any ERROR-prefixed payload as migrating.
-	trimmed := strings.TrimSpace(result)
-	if trimmed == "" {
-		return true, nil
-	}
-	if strings.HasPrefix(strings.ToUpper(trimmed), "ERROR") {
-		return true, nil
-	}
-	return false, nil
-}
-
 // isMigratingOnAnyNode checks whether any node in the cluster has outstanding
 // partition migrations. Uses migrate_partitions_remaining which is supported
 // in Aerospike CE 7.x and 8.x (migrate_progress_send/recv are removed in 8.x).

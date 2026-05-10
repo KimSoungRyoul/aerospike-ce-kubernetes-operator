@@ -23,6 +23,7 @@ const (
 	EventDynamicConfigStatusFailed = "DynamicConfigStatusFailed"
 	EventDynamicConfigDegraded     = "DynamicConfigDegraded"
 	EventDynamicConfigRollback     = "DynamicConfigRollback"
+	EventConfigDegradedSkip        = "ConfigDegradedSkip"
 
 	// StatefulSet / Rack management
 	EventStatefulSetCreated = "StatefulSetCreated"
