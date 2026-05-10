@@ -64,8 +64,6 @@ cd aerospike-ce-kubernetes-operator
 kind create cluster --config kind-config.yaml
 ```
 
-> **macOS + Podman**: this project standardizes on Podman (ADR 2026-02-01). If you use Podman instead of Docker, prefix the command with `KIND_EXPERIMENTAL_PROVIDER=podman` and ensure `podman machine start` has been run first.
-
 ### Step 2: Install cert-manager
 
 cert-manager is required for webhook TLS certificate management.
