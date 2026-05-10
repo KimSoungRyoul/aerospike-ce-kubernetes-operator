@@ -908,7 +908,16 @@ defaultTemplates:
   # -- Create pre-built AerospikeClusterTemplate resources.
   # Three tiers are provided: minimal (dev), soft-rack (stage), hard-rack (prod).
   # NOTE: AerospikeClusterTemplate is cluster-scoped. Templates are accessible from all namespaces.
-  enabled: true
+  #
+  # Default is false because the templates are AerospikeClusterTemplate custom
+  # resources that share the same `helm install` transaction as the CRDs subchart.
+  # Helm renders all manifests against the cluster's discovery cache, which
+  # does not yet know about the AerospikeClusterTemplate kind during the first
+  # install, so enabling this with crds.install=true causes "no matches for kind
+  # AerospikeClusterTemplate" install failures. After the operator is installed
+  # once and the CRDs are registered, set this to true (e.g. via `helm upgrade
+  # --set defaultTemplates.enabled=true`) to add the bundled templates.
+  enabled: false
 
   templates:
     minimal:
