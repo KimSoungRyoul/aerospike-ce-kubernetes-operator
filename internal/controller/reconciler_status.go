@@ -144,11 +144,14 @@ func (r *AerospikeClusterReconciler) updateStatusAndPhase(
 				return fetchErr
 			}
 			refetched.Status = *computedStatus
-			// The conflict may be due to a Generation bump from a concurrent
-			// spec update. Without re-aligning ObservedGeneration to the
-			// refetched object's Generation, we would persist a stale value
-			// and falsely advertise that we have observed the new spec.
-			refetched.Status.ObservedGeneration = refetched.Generation
+			// IMPORTANT: do NOT overwrite ObservedGeneration with refetched.Generation.
+			// The conflict often comes from a concurrent spec update (Generation bump).
+			// If we aligned ObservedGeneration to the new Generation here, we would
+			// falsely advertise that this reconcile has observed the new spec — when
+			// in fact computedStatus was built from the *previous* spec. Keeping the
+			// computed value lets the controller-runtime watch detect the gap
+			// (Generation > ObservedGeneration) and trigger a fresh reconcile that
+			// actually processes the new spec.
 			latest = refetched
 			return err
 		}
