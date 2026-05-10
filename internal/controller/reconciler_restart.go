@@ -153,12 +153,12 @@ func (r *AerospikeClusterReconciler) reconcileRollingRestart(
 	}
 
 	// Restart up to batchSize pods, continuing on individual pod failures.
-	restarted, failedPods := r.restartPodBatch(ctx, cluster, podsToRestart, sts, desiredHash,
+	restarted, failedPods, batchPods := r.restartPodBatch(ctx, cluster, podsToRestart, sts, desiredHash,
 		batchSize, oldConfig, newConfig, &aeroClient)
 
 	// Update PendingRestartPods to only include pods that were NOT successfully restarted.
 	if len(failedPods) > 0 || restarted > 0 {
-		remaining := filterUnrestarted(pendingNames, failedPods, restarted, podsToRestart)
+		remaining := filterUnrestarted(pendingNames, failedPods, restarted, batchPods)
 		cluster.Status.PendingRestartPods = remaining
 	}
 
@@ -193,7 +193,11 @@ type podDynamicUpdate struct {
 // Dynamic config updates count against the batch size limit. If any pod fails a cold/warm
 // restart after other pods were dynamically updated in the same batch, those dynamic
 // updates are rolled back for consistency.
-// Returns the count of successfully processed pods and names of failed pods.
+// Returns the count of successfully processed pods, names of failed pods, and the
+// actual batch slice considered (subset of podsToRestart up to batchSize). The caller
+// passes the batch back to filterUnrestarted so that pods which were never attempted
+// in this reconcile pass remain in the pending list rather than being mis-classified
+// as restarted.
 func (r *AerospikeClusterReconciler) restartPodBatch(
 	ctx context.Context,
 	cluster *ackov1alpha1.AerospikeCluster,
@@ -203,7 +207,7 @@ func (r *AerospikeClusterReconciler) restartPodBatch(
 	batchSize int32,
 	oldConfig, newConfig map[string]any,
 	aeroClient **aero.Client,
-) (int32, []string) {
+) (int32, []string, []*corev1.Pod) {
 	log := logf.FromContext(ctx)
 
 	restarted := int32(0)
@@ -233,7 +237,7 @@ func (r *AerospikeClusterReconciler) restartPodBatch(
 			allOk, updates, rbResult := r.tryDynamicConfigUpdateBatch(ctx, cluster, batchPods, oldConfig, newConfig, *aeroClient)
 			if allOk {
 				log.Info("2PC batch dynamic config update succeeded for all pods", "podCount", len(batchPods))
-				return int32(len(batchPods)), nil
+				return int32(len(batchPods)), nil, batchPods
 			}
 
 			// If rollback failed, set ConfigDegraded phase
@@ -283,7 +287,7 @@ func (r *AerospikeClusterReconciler) restartPodBatch(
 		}
 	}
 
-	return restarted, failedPods
+	return restarted, failedPods, batchPods
 }
 
 // restartPod attempts a warm restart first, falling back to cold restart.
@@ -589,8 +593,11 @@ func (r *AerospikeClusterReconciler) listRackPods(
 }
 
 // filterUnrestarted returns the pod names that were not successfully restarted.
-// This includes failed pods and pods that were pending but not attempted in the current batch.
-func filterUnrestarted(allPending []string, failedPods []string, restarted int32, podsToRestart []*corev1.Pod) []string {
+// This includes failed pods and pods that were pending but not attempted in the
+// current batch. Callers MUST pass the actual batch slice (not the full pending
+// queue) as batchPods — otherwise pods beyond the batch boundary may be
+// mis-classified as restarted.
+func filterUnrestarted(allPending []string, failedPods []string, restarted int32, batchPods []*corev1.Pod) []string {
 	// Build a set of successfully restarted pod names.
 	// Successfully restarted = attempted in batch AND not in failedPods.
 	failedSet := make(map[string]bool, len(failedPods))
@@ -599,7 +606,7 @@ func filterUnrestarted(allPending []string, failedPods []string, restarted int32
 	}
 
 	restartedSet := make(map[string]bool)
-	for _, pod := range podsToRestart {
+	for _, pod := range batchPods {
 		if !failedSet[pod.Name] {
 			restartedSet[pod.Name] = true
 		}
