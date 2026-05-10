@@ -56,9 +56,15 @@ brew install kind kubectl helm
 
 Skip this step if you already have a Kubernetes cluster.
 
+Clone this repo first — the `kind-config.yaml` referenced below lives at the repo root:
+
 ```sh
+git clone https://github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator.git
+cd aerospike-ce-kubernetes-operator
 kind create cluster --config kind-config.yaml
 ```
+
+> **macOS + Podman**: this project standardizes on Podman (ADR 2026-02-01). If you use Podman instead of Docker, prefix the command with `KIND_EXPERIMENTAL_PROVIDER=podman` and ensure `podman machine start` has been run first.
 
 ### Step 2: Install cert-manager
 
@@ -84,21 +90,26 @@ kubectl -n cert-manager wait --for=condition=Available deployment/cert-manager -
 #### Option A: From OCI Registry (Recommended)
 
 ```sh
-helm install aerospike-operator oci://ghcr.io/aerospike-ce-ecosystem/aerospike-operator \
-  --version 0.1.0 \
+helm install aerospike-operator \
+  oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  --version 1.3.3 \
   -n aerospike-operator --create-namespace
 ```
+
+Replace `1.3.3` with the latest release tag from [Releases](https://github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/releases).
 
 > Multi-cluster mode (common cluster + per-environment operator clusters with Keycloak OIDC): see [docs/multi-cluster-keycloak.md](docs/multi-cluster-keycloak.md).
 
 #### Option B: From Local Chart
 
 ```sh
-helm install aerospike-operator ./charts/aerospike-operator \
+helm install aerospike-operator ./charts/aerospike-ce-kubernetes-operator \
   -n aerospike-operator --create-namespace
 ```
 
-#### Option C: With Kustomize
+#### Option C: With Kustomize (development only)
+
+This path bypasses Helm and the standard install flow used by end users; prefer Option A or B unless you are iterating on operator code locally.
 
 ```sh
 # Build and push the operator image
