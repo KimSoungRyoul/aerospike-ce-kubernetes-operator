@@ -682,7 +682,10 @@ func (v *AerospikeClusterValidator) validateAerospikeConfig(config map[string]an
 	// aerospikeAccessControl is configured; the security section is intentionally
 	// skipped during config generation (configgen).
 	if secSection, exists := config["security"]; exists {
-		if secMap, ok := secSection.(map[string]any); ok {
+		secMap, ok := secSection.(map[string]any)
+		if !ok {
+			errors = append(errors, fmt.Sprintf("aerospikeConfig.security must be a map, got %T", secSection))
+		} else {
 			for enterpriseKey, reason := range enterpriseOnlySecurityKeys {
 				if _, found := secMap[enterpriseKey]; found {
 					errors = append(errors, fmt.Sprintf(
@@ -1419,7 +1422,9 @@ func (v *AerospikeClusterValidator) validateMonitoring(m *AerospikeMonitoringSpe
 	return errors, warnings
 }
 
-// validateNetworkPortUniqueness checks that service, heartbeat, and fabric ports are distinct.
+// validateNetworkPortUniqueness checks that service, heartbeat, and fabric
+// ports are valid TCP integers, distinct, and do not collide with another
+// Aerospike subsection's reserved port (e.g. service.port=3003 vs info).
 func (v *AerospikeClusterValidator) validateNetworkPortUniqueness(cluster *AerospikeCluster) []string {
 	netCfg, ok := cluster.Spec.AerospikeConfig.Value["network"].(map[string]any)
 	if !ok {
@@ -1431,20 +1436,27 @@ func (v *AerospikeClusterValidator) validateNetworkPortUniqueness(cluster *Aeros
 		port int
 	}
 
-	extractPort := func(section map[string]any) (int, bool) {
-		raw, exists := section["port"]
-		if !exists {
+	var errors []string
+
+	extractPort := func(sub string, raw any) (int, bool) {
+		switch x := raw.(type) {
+		case int:
+			return x, true
+		case float64:
+			return int(x), true
+		case int64:
+			return int(x), true
+		case string:
+			// String-typed ports were previously silently dropped; surface
+			// them so YAML shape mistakes (port: "3000") fail at admission.
+			errors = append(errors, fmt.Sprintf(
+				"aerospikeConfig.network.%s.port must be an integer, got string %q", sub, x))
+			return 0, false
+		default:
+			errors = append(errors, fmt.Sprintf(
+				"aerospikeConfig.network.%s.port must be an integer, got %T", sub, raw))
 			return 0, false
 		}
-		switch v := raw.(type) {
-		case int:
-			return v, true
-		case float64:
-			return int(v), true
-		case int64:
-			return int(v), true
-		}
-		return 0, false
 	}
 
 	var ports []portEntry
@@ -1453,12 +1465,36 @@ func (v *AerospikeClusterValidator) validateNetworkPortUniqueness(cluster *Aeros
 		if !ok {
 			continue
 		}
-		if port, ok := extractPort(subCfg); ok {
-			ports = append(ports, portEntry{name: sub, port: port})
+		raw, exists := subCfg["port"]
+		if !exists {
+			continue
 		}
+		port, ok := extractPort(sub, raw)
+		if !ok {
+			continue
+		}
+		// TCP port range check; out-of-range values are rejected and skipped
+		// so they do not poison the uniqueness / reserved-port checks below.
+		if port < 1 || port > 65535 {
+			errors = append(errors, fmt.Sprintf(
+				"aerospikeConfig.network.%s.port=%d must be in range 1-65535", sub, port))
+			continue
+		}
+		ports = append(ports, portEntry{name: sub, port: port})
 	}
 
-	var errors []string
+	// Cross-check user-configured ports against the reserved Aerospike port
+	// table; reject when a subsection's port collides with the reserved port
+	// of a *different* subsection (e.g. service.port=3003 → info port).
+	for _, p := range ports {
+		for reservedPort, reservedFor := range aerospikeReservedPorts {
+			if int(reservedPort) == p.port && reservedFor != p.name {
+				errors = append(errors, fmt.Sprintf(
+					"aerospikeConfig.network.%s.port=%d conflicts with reserved port %d (used for %s)",
+					p.name, p.port, reservedPort, reservedFor))
+			}
+		}
+	}
 	for i := 0; i < len(ports); i++ {
 		for j := i + 1; j < len(ports); j++ {
 			if ports[i].port == ports[j].port {
