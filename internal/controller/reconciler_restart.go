@@ -234,7 +234,7 @@ func (r *AerospikeClusterReconciler) restartPodBatch(
 			}
 		}
 		if *aeroClient != nil {
-			allOk, updates, rbResult := r.tryDynamicConfigUpdateBatch(ctx, cluster, batchPods, oldConfig, newConfig, *aeroClient)
+			allOk, _, rbResult := r.tryDynamicConfigUpdateBatch(ctx, cluster, batchPods, oldConfig, newConfig, *aeroClient)
 			if allOk {
 				log.Info("2PC batch dynamic config update succeeded for all pods", "podCount", len(batchPods))
 				return int32(len(batchPods)), nil, batchPods
@@ -247,9 +247,15 @@ func (r *AerospikeClusterReconciler) restartPodBatch(
 				r.setConfigDegraded(ctx, cluster, rbResult.FailedPods)
 			}
 
-			// Track any dynamic updates that were NOT rolled back (shouldn't happen
-			// in normal 2PC flow, but defensive)
-			dynamicUpdated = updates
+			// On any 2PC failure (validation abort, apply abort, or successful
+			// rollback) every pod returned in `updates` is either not-applied
+			// or already-rolled-back. Adding them to dynamicUpdated would
+			// inflate `restarted` below, and filterUnrestarted would then
+			// drop them from the pending queue — the pods would silently
+			// never be cold-restarted, leaving config-hash mismatch forever.
+			// Keep dynamicUpdated at its zero value (nil) so the per-pod
+			// fallback restart loop covers every batch member.
+			dynamicUpdated = nil
 		}
 	}
 
