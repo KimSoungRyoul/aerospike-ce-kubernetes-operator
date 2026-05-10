@@ -1422,7 +1422,9 @@ func (v *AerospikeClusterValidator) validateMonitoring(m *AerospikeMonitoringSpe
 	return errors, warnings
 }
 
-// validateNetworkPortUniqueness checks that service, heartbeat, and fabric ports are distinct.
+// validateNetworkPortUniqueness checks that service, heartbeat, and fabric
+// ports are distinct and do not collide with another Aerospike subsection's
+// reserved port (e.g. service.port=3003 vs the info port).
 func (v *AerospikeClusterValidator) validateNetworkPortUniqueness(cluster *AerospikeCluster) []string {
 	netCfg, ok := cluster.Spec.AerospikeConfig.Value["network"].(map[string]any)
 	if !ok {
@@ -1462,6 +1464,18 @@ func (v *AerospikeClusterValidator) validateNetworkPortUniqueness(cluster *Aeros
 	}
 
 	var errors []string
+	// Cross-check user-configured ports against the reserved Aerospike port
+	// table; reject when a subsection's port collides with the reserved port
+	// of a *different* subsection (e.g. service.port=3003 → info port).
+	for _, p := range ports {
+		for reservedPort, reservedFor := range aerospikeReservedPorts {
+			if int(reservedPort) == p.port && reservedFor != p.name {
+				errors = append(errors, fmt.Sprintf(
+					"aerospikeConfig.network.%s.port=%d conflicts with reserved port %d (used for %s)",
+					p.name, p.port, reservedPort, reservedFor))
+			}
+		}
+	}
 	for i := 0; i < len(ports); i++ {
 		for j := i + 1; j < len(ports); j++ {
 			if ports[i].port == ports[j].port {

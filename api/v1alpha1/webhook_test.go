@@ -4297,6 +4297,35 @@ func TestValidate_NetworkPortUniqueness_DistinctPorts(t *testing.T) {
 	}
 }
 
+func TestValidate_NetworkPortConflict_ServiceUsesInfoPort(t *testing.T) {
+	// service.port=3003 collides with the reserved Aerospike info port,
+	// even though no two of {service, heartbeat, fabric} share the same value.
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeConfig: &AerospikeConfigSpec{
+				Value: map[string]any{
+					"network": map[string]any{
+						"service":   map[string]any{"port": 3003},
+						"heartbeat": map[string]any{"port": 3002, "mode": "mesh"},
+						"fabric":    map[string]any{"port": 3001},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error for service.port=3003 vs reserved info port, got nil")
+	}
+	if !strings.Contains(err.Error(), "conflicts with reserved port 3003") {
+		t.Errorf("expected reserved-port error mentioning 3003, got: %v", err)
+	}
+}
+
 func TestValidate_NetworkPortUniqueness_NoNetworkSection(t *testing.T) {
 	v := &AerospikeClusterValidator{}
 	cluster := &AerospikeCluster{
