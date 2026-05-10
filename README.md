@@ -92,11 +92,10 @@ kubectl -n cert-manager wait --for=condition=Available deployment/cert-manager -
 ```sh
 helm install aerospike-operator \
   oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
-  --version 1.3.3 \
   -n aerospike-operator --create-namespace
 ```
 
-Replace `1.3.3` with the latest release tag from [Releases](https://github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/releases).
+Helm resolves the latest published version from the OCI registry when `--version` is omitted. To pin a specific version, see [Releases](https://github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/releases) and pass `--version <tag-without-v-prefix>`.
 
 > Multi-cluster mode (common cluster + per-environment operator clusters with Keycloak OIDC): see [docs/multi-cluster-keycloak.md](docs/multi-cluster-keycloak.md).
 
