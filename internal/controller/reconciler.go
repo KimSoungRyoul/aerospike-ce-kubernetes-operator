@@ -173,6 +173,18 @@ func (r *AerospikeClusterReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 	metrics.CircuitBreakerActive.WithLabelValues(cluster.Namespace, cluster.Name).Set(0)
 
+	// ConfigDegraded indicates that a 2PC dynamic-config rollback failed and at
+	// least one pod has divergent config. Continuing to reconcile in this state
+	// risks re-applying the same broken change and amplifying the divergence.
+	// Halt reconciliation until a human intervenes (cold restart, manual config
+	// rollback, or phase reset).
+	if cluster.Status.Phase == ackov1alpha1.AerospikePhaseConfigDegraded {
+		log.Info("cluster in ConfigDegraded; skipping reconcile until manual intervention")
+		r.Recorder.Event(cluster, corev1.EventTypeWarning, EventConfigDegradedSkip,
+			"Reconcile skipped due to ConfigDegraded phase")
+		return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
+	}
+
 	// 4.5 Template resolution: fetch/snapshot template and apply to in-memory spec.
 	if cluster.Spec.TemplateRef != nil {
 		if result, err := r.resolveTemplate(ctx, cluster); err != nil {
