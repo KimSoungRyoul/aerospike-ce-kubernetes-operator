@@ -59,9 +59,14 @@ func (r *AerospikeClusterReconciler) syncAllPodsReadinessGates(
 	}
 	defer closeAerospikeClient(aeroClient)
 
-	// isMigrating is a cluster-wide check — call it once before the loop
-	// rather than repeating it for every pod.
-	migrating, migratingErr := isMigrating(aeroClient)
+	// Cluster-wide migration check, called once before the loop rather than
+	// repeating it for every pod. Use isMigratingOnAnyNode (per-node
+	// migrate_partitions_remaining) so the readiness gate, scaledown, and
+	// rolling-restart paths all see the same migration signal. The previous
+	// single-node cluster-stable check could clear the gate while a remote
+	// node still had outstanding migrations, producing a false-negative that
+	// allowed a rolling restart to proceed during data movement.
+	migrating, migratingErr := isMigratingOnAnyNode(aeroClient)
 
 	for i := range podList.Items {
 		pod := &podList.Items[i]
@@ -107,7 +112,7 @@ func (r *AerospikeClusterReconciler) syncPodReadinessGate(
 	if node != nil {
 		// 2. Check that the cluster has no pending migrations.
 		if migratingErr != nil {
-			log.V(1).Info("isMigrating check failed; treating as migrating", "pod", pod.Name, "err", migratingErr)
+			log.V(1).Info("migration check failed; treating as migrating", "pod", pod.Name, "err", migratingErr)
 		} else {
 			satisfied = !migrating
 		}
