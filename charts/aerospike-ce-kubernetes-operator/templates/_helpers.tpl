@@ -360,6 +360,18 @@ preconditions are not met, so the helper is safe to call unconditionally.
 {{- end -}}
 {{- end }}
 
+{{- define "aerospike-ce-kubernetes-operator.validate.caSecretName" -}}
+{{- if and .Values.certManager.enabled (eq .Values.certManager.issuer.type "ca") (not .Values.certManager.issuer.caSecretName) -}}
+{{- fail "certManager.issuer.type=ca requires certManager.issuer.caSecretName to be set (the existing Secret in .Release.Namespace that holds tls.crt + tls.key for the CA Issuer)." -}}
+{{- end -}}
+{{- end }}
+
+{{- define "aerospike-ce-kubernetes-operator.validate.webhookTlsSource" -}}
+{{- if and .Values.webhook.enabled (not .Values.certManager.enabled) (not .Values.webhookTlsSecret) -}}
+{{- fail "webhook.enabled=true requires either certManager.enabled=true (auto-provision) or webhookTlsSecret to be set (manually provided Secret with tls.crt + tls.key). Otherwise the webhook server has no serving certificate and the apiserver rejects every admission call." -}}
+{{- end -}}
+{{- end }}
+
 {{/*
 Aggregate validation entry-point. Templates can `include` this helper once
 (typically from NOTES.txt or a dedicated _validations partial) to enforce
@@ -370,4 +382,6 @@ all gates uniformly.
 {{- include "aerospike-ce-kubernetes-operator.validate.defaultTemplatesNeedCRDs" . -}}
 {{- include "aerospike-ce-kubernetes-operator.validate.apiOidcIssuerUrl" . -}}
 {{- include "aerospike-ce-kubernetes-operator.validate.webOidcClientId" . -}}
+{{- include "aerospike-ce-kubernetes-operator.validate.caSecretName" . -}}
+{{- include "aerospike-ce-kubernetes-operator.validate.webhookTlsSource" . -}}
 {{- end }}

@@ -35,6 +35,12 @@ spec:
   dnsNames:
     - {{ include "aerospike-ce-kubernetes-operator.webhookServiceName" . }}.{{ .Release.Namespace }}.svc
     - {{ include "aerospike-ce-kubernetes-operator.webhookServiceName" . }}.{{ .Release.Namespace }}.svc.cluster.local
+    # Metrics service SANs: the controller-manager serves /metrics on port
+    # 8443 with the same serving-certs directory as the webhook. Including
+    # the metrics service DNS lets ServiceMonitor verify the scrape target
+    # against the cert-manager-issued CA instead of insecureSkipVerify.
+    - {{ include "aerospike-ce-kubernetes-operator.metricsServiceName" . }}.{{ .Release.Namespace }}.svc
+    - {{ include "aerospike-ce-kubernetes-operator.metricsServiceName" . }}.{{ .Release.Namespace }}.svc.cluster.local
   {{- if eq .Values.certManager.issuer.type "clusterIssuer" }}
   issuerRef:
     kind: ClusterIssuer

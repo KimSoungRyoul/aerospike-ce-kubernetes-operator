@@ -39,9 +39,15 @@ rules:
   # pod. The UI's ACL picker (/api/k8s/secrets) needs secrets:[get,list] in
   # .Release.Namespace only; that is granted via the namespace-scoped Role
   # in templates/ui/role.yaml + rolebinding.yaml.
+  # namespaces:create intentionally NOT granted — the UI's namespace picker
+  # only needs to enumerate existing namespaces (list). Namespace creation
+  # is an out-of-band cluster-admin task that should not be executable by
+  # a compromised UI pod. If a future feature genuinely requires the UI
+  # to provision namespaces, add a namespace-scoped Role on the target
+  # namespace rather than re-granting cluster-wide create.
   - apiGroups: [""]
     resources: ["namespaces"]
-    verbs: ["create", "list"]
+    verbs: ["list"]
   - apiGroups: ["storage.k8s.io"]
     resources: ["storageclasses"]
     verbs: ["list"]

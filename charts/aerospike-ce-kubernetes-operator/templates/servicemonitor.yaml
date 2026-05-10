@@ -16,7 +16,22 @@ spec:
       scheme: https
       bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
       tlsConfig:
+        {{- if and .Values.certManager.enabled .Values.webhook.enabled }}
+        # Verify against the cert-manager-issued CA. The Certificate in
+        # templates/certificate.yaml lists the metrics service DNS in its
+        # SAN list so Prometheus can scrape with full TLS verification.
+        ca:
+          secret:
+            name: {{ include "aerospike-ce-kubernetes-operator.certSecretName" . }}
+            key: ca.crt
+        serverName: {{ include "aerospike-ce-kubernetes-operator.metricsServiceName" . }}.{{ .Release.Namespace }}.svc
+        {{- else }}
+        # Fallback: no cert-manager-issued CA available (cert-manager off
+        # or webhook off → no Certificate rendered). Skip verification so
+        # scrapes still succeed; operators wanting full TLS should enable
+        # certManager.enabled + webhook.enabled.
         insecureSkipVerify: true
+        {{- end }}
       {{- with .Values.serviceMonitor.interval }}
       interval: {{ . }}
       {{- end }}
