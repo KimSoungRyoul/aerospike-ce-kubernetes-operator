@@ -4326,6 +4326,63 @@ func TestValidate_NetworkPortConflict_ServiceUsesInfoPort(t *testing.T) {
 	}
 }
 
+func TestValidate_NetworkPort_OutOfRange(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeConfig: &AerospikeConfigSpec{
+				Value: map[string]any{
+					"network": map[string]any{
+						"service":   map[string]any{"port": 0},
+						"heartbeat": map[string]any{"port": 99999, "mode": "mesh"},
+						"fabric":    map[string]any{"port": 3001},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error for out-of-range ports, got nil")
+	}
+	if !strings.Contains(err.Error(), "service.port=0 must be in range") {
+		t.Errorf("expected range error for service.port=0, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "heartbeat.port=99999 must be in range") {
+		t.Errorf("expected range error for heartbeat.port=99999, got: %v", err)
+	}
+}
+
+func TestValidate_NetworkPort_StringTypeRejected(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeConfig: &AerospikeConfigSpec{
+				Value: map[string]any{
+					"network": map[string]any{
+						"service":   map[string]any{"port": "3000"},
+						"heartbeat": map[string]any{"port": 3002, "mode": "mesh"},
+						"fabric":    map[string]any{"port": 3001},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error for string-typed port, got nil")
+	}
+	if !strings.Contains(err.Error(), `service.port must be an integer, got string "3000"`) {
+		t.Errorf("expected explicit string-type error, got: %v", err)
+	}
+}
+
 func TestValidate_NetworkPortUniqueness_NoNetworkSection(t *testing.T) {
 	v := &AerospikeClusterValidator{}
 	cluster := &AerospikeCluster{
