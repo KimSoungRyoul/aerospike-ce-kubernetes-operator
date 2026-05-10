@@ -288,3 +288,33 @@ func TestFilterUnrestarted_EmptyInputs(t *testing.T) {
 		t.Errorf("expected empty for nil inputs, got %v", result)
 	}
 }
+
+// TestFilterUnrestarted_BatchSubsetSemantics locks in the new contract: callers
+// must pass the actual batch slice, not the full pending queue. Previously the
+// caller passed `podsToRestart` (full queue), which meant pods beyond the batch
+// boundary could be incorrectly classified as restarted whenever `restarted`
+// happened to count past the real batch — an invariant that broke as soon as
+// dynamic-config returned len(batchPods) but the queue contained more pods.
+func TestFilterUnrestarted_BatchSubsetSemantics(t *testing.T) {
+	allPending := []string{"pod-4", "pod-3", "pod-2", "pod-1", "pod-0"}
+
+	// Only pod-4 and pod-3 were actually attempted in this reconcile pass
+	// (batchSize=2). Both succeeded.
+	batchPods := []*corev1.Pod{
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-4"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-3"}},
+	}
+
+	result := filterUnrestarted(allPending, nil, 2, batchPods)
+
+	// pod-2, pod-1, pod-0 were never attempted and must remain pending.
+	if len(result) != 3 {
+		t.Fatalf("expected 3 remaining (the unattempted tail), got %v", result)
+	}
+	want := map[string]bool{"pod-2": true, "pod-1": true, "pod-0": true}
+	for _, name := range result {
+		if !want[name] {
+			t.Errorf("unexpected pod in remaining: %q", name)
+		}
+	}
+}
