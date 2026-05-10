@@ -850,11 +850,16 @@ ui:
   podDisruptionBudget:
     # -- Enable PodDisruptionBudget for UI pods
     enabled: false
-    # -- Minimum number of pods that must remain available (mutually exclusive with maxUnavailable)
-    minAvailable: 1
+    # -- Minimum number of pods that must remain available (mutually exclusive with maxUnavailable).
+    # WARNING: with the default ui replicaCount=1, setting minAvailable=1
+    # makes the UI pod un-evictable and blocks `kubectl drain` indefinitely.
+    # Leave empty unless you scale ui replicas above 1.
+    minAvailable: ""
     # -- Maximum number of pods that can be unavailable (mutually exclusive with minAvailable).
-    # Uncomment and remove minAvailable to use.
-    maxUnavailable: ""
+    # Default of 1 lets exactly one UI pod be evicted at a time, which is
+    # the only safe value when ui replicaCount=1 (drain proceeds; the
+    # scheduler recreates the pod on another node).
+    maxUnavailable: 1
 
   # =============================================================================
   # Autoscaling (HPA)
