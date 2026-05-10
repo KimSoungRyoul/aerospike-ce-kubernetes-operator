@@ -55,11 +55,10 @@ func (r *AerospikeClusterReconciler) reconcileOperations(
 		Phase: ackov1alpha1.AerospikePhaseInProgress,
 	}
 
-	// Get batch size
-	batchSize := int32(1)
-	if cluster.Spec.RollingUpdateBatchSize != nil && *cluster.Spec.RollingUpdateBatchSize > 0 {
-		batchSize = *cluster.Spec.RollingUpdateBatchSize
-	}
+	// Get batch size — honor RackConfig.RollingUpdateBatchSize precedence over
+	// the legacy spec.rollingUpdateBatchSize field by reusing the same helper
+	// used by the rolling restart path.
+	batchSize := r.getRollingUpdateBatchSize(cluster, int32(len(pods)))
 
 	// Track completed pods from previous status
 	completedSet := make(map[string]bool)
@@ -72,13 +71,11 @@ func (r *AerospikeClusterReconciler) reconcileOperations(
 	}
 
 	processed := int32(0)
-	allDone := true
 
 	for _, pod := range pods {
 		if completedSet[pod.Name] {
 			continue
 		}
-		allDone = false
 
 		if processed >= batchSize {
 			break
@@ -109,12 +106,12 @@ func (r *AerospikeClusterReconciler) reconcileOperations(
 		processed++
 	}
 
-	if allDone {
-		opStatus.Phase = ackov1alpha1.AerospikePhaseCompleted
-		if len(opStatus.FailedPods) > 0 {
-			opStatus.Phase = ackov1alpha1.AerospikePhaseError
-		}
-	}
+	// Determine completion by directly inspecting how many target pods are still
+	// outstanding. The previous implementation flipped a bool to false on the
+	// first incomplete pod and never restored it, leaving the phase stuck on
+	// InProgress forever once any pod fell out of completedSet — a permanent
+	// regression for any operation that needed more than one reconcile loop.
+	allDone := finalizeOperationPhase(opStatus, pods, completedSet)
 
 	// Update operation status using Patch to avoid overwriting concurrent status changes.
 	latest, err := r.refetchCluster(ctx, types.NamespacedName{Name: cluster.Name, Namespace: cluster.Namespace})
@@ -148,6 +145,36 @@ func (r *AerospikeClusterReconciler) getOperationTargetPods(
 		return nil, err
 	}
 	return filterPodsByNames(allPods.Items, podList), nil
+}
+
+// finalizeOperationPhase inspects the target pod list against the completed set
+// and, when no pods remain outstanding, sets opStatus.Phase to Completed (or
+// Error if any pods failed). It returns true when the operation has reached a
+// terminal state, false when more reconciles are needed.
+//
+// Splitting this out lets us unit-test the completion logic without exercising
+// the full reconciler — the historical bug (allDone bool flipped to false and
+// never restored) hid here for several releases because the reconcile loop is
+// hard to test.
+func finalizeOperationPhase(
+	opStatus *ackov1alpha1.OperationStatus,
+	pods []*corev1.Pod,
+	completedSet map[string]bool,
+) bool {
+	remainingPods := 0
+	for _, pod := range pods {
+		if !completedSet[pod.Name] {
+			remainingPods++
+		}
+	}
+	if remainingPods > 0 {
+		return false
+	}
+	opStatus.Phase = ackov1alpha1.AerospikePhaseCompleted
+	if len(opStatus.FailedPods) > 0 {
+		opStatus.Phase = ackov1alpha1.AerospikePhaseError
+	}
+	return true
 }
 
 // filterPodsByNames returns pointers to the pods matching the given names.
