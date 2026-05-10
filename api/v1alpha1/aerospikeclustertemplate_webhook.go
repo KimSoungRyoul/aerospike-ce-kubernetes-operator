@@ -231,7 +231,11 @@ func validateTemplateConfigBannedKeys(fieldPath string, cfg map[string]any, isNa
 			"%s must not contain 'tls' section (TLS is Enterprise-only)", fieldPath))
 	}
 	if secSection, exists := cfg["security"]; exists {
-		if secMap, ok := secSection.(map[string]any); ok {
+		secMap, ok := secSection.(map[string]any)
+		if !ok {
+			errs = append(errs, fmt.Sprintf(
+				"%s.security must be a map, got %T", fieldPath, secSection))
+		} else {
 			for enterpriseKey, reason := range enterpriseOnlySecurityKeys {
 				if _, found := secMap[enterpriseKey]; found {
 					errs = append(errs, fmt.Sprintf(

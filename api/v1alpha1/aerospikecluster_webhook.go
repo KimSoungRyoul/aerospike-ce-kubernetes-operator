@@ -682,7 +682,10 @@ func (v *AerospikeClusterValidator) validateAerospikeConfig(config map[string]an
 	// aerospikeAccessControl is configured; the security section is intentionally
 	// skipped during config generation (configgen).
 	if secSection, exists := config["security"]; exists {
-		if secMap, ok := secSection.(map[string]any); ok {
+		secMap, ok := secSection.(map[string]any)
+		if !ok {
+			errors = append(errors, fmt.Sprintf("aerospikeConfig.security must be a map, got %T", secSection))
+		} else {
 			for enterpriseKey, reason := range enterpriseOnlySecurityKeys {
 				if _, found := secMap[enterpriseKey]; found {
 					errors = append(errors, fmt.Sprintf(
