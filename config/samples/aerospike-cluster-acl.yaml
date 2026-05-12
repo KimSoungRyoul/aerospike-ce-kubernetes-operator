@@ -73,6 +73,8 @@ spec:
     namespaces:
       - name: testns
         replication-factor: 2  # Each record on 2 of the 3 nodes
+        nsup-period: 60  # Enable nsup so records with non-zero TTL can be written
+                         # (Aerospike 8.x rejects TTL writes when nsup-period=0)
         storage-engine:
           type: device
           file: /opt/aerospike/data/testns.dat

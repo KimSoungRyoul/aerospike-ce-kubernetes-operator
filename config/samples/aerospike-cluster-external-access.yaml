@@ -31,6 +31,8 @@ spec:
     namespaces:
       - name: test
         replication-factor: 2
+        nsup-period: 60  # Enable nsup so records with non-zero TTL can be written
+                         # (Aerospike 8.x rejects TTL writes when nsup-period=0)
         storage-engine:
           type: memory
           data-size: 1073741824
