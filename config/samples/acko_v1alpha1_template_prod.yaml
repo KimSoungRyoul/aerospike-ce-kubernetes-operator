@@ -64,6 +64,8 @@ spec:
     namespaceDefaults:
       data-size: 2147483648   # 2GiB default per namespace
       replication-factor: 2
+      nsup-period: 60         # Enable nsup so records with non-zero TTL can be written
+                              # (Aerospike 8.x rejects TTL writes when nsup-period=0)
     network:
       heartbeat:
         mode: mesh

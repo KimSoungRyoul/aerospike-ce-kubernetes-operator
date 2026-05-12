@@ -39,4 +39,6 @@ spec:
       proto-fd-max: 1024
     namespaceDefaults:
       replication-factor: 1
+      nsup-period: 60   # Enable nsup so records with non-zero TTL can be written
+                        # (Aerospike 8.x rejects TTL writes when nsup-period=0)
       # data-size: optional; CE 8.x auto-sizes in-memory namespaces when omitted
