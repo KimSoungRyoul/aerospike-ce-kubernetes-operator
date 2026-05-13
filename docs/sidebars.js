@@ -12,6 +12,7 @@ const sidebars = {
         'getting-started/install',
         'getting-started/create-cluster',
         'getting-started/cluster-manager-ui',
+        'getting-started/ackoctl-cli',
       ],
     },
     {
