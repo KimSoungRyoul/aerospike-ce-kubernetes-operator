@@ -3,6 +3,9 @@ sidebar_position: 4
 title: ackoctl CLI
 ---
 
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
 # ackoctl — Command-line interface
 
 [ackoctl](https://github.com/aerospike-ce-ecosystem/ackoctl) is the CLI counterpart to the [Cluster Manager UI](./cluster-manager-ui.md). Both talk to the same `aerospike-cluster-manager` REST API (`/api/v1/*`) — anything you can do in the UI you can do from the terminal or a CI pipeline.
@@ -13,13 +16,15 @@ It is written in Go and follows the `kubectl` / `gh` command grammar (`ackoctl <
 
 ## Install
 
-### Homebrew (macOS, Linux)
+<Tabs groupId="ackoctl-install" queryString="install">
+<TabItem value="homebrew" label="Homebrew (macOS, Linux)" default>
 
 ```bash
 brew install aerospike-ce-ecosystem/tap/ackoctl
 ```
 
-### Debian / Ubuntu
+</TabItem>
+<TabItem value="apt" label="Debian / Ubuntu">
 
 ```bash
 sudo install -d /etc/apt/keyrings
@@ -30,7 +35,8 @@ echo "deb [signed-by=/etc/apt/keyrings/ackoctl.gpg] https://aerospike-ce-ecosyst
 sudo apt update && sudo apt install ackoctl
 ```
 
-### RHEL / Fedora / Rocky / AlmaLinux
+</TabItem>
+<TabItem value="yum" label="RHEL / Fedora / Rocky / AlmaLinux">
 
 ```bash
 sudo curl -fsSL https://aerospike-ce-ecosystem.github.io/ackoctl/yum/ackoctl.repo \
@@ -38,11 +44,15 @@ sudo curl -fsSL https://aerospike-ce-ecosystem.github.io/ackoctl/yum/ackoctl.rep
 sudo dnf install ackoctl
 ```
 
-### Any POSIX shell
+</TabItem>
+<TabItem value="posix" label="Any POSIX shell">
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/aerospike-ce-ecosystem/ackoctl/main/install.sh | sh
 ```
+
+</TabItem>
+</Tabs>
 
 Verify:
 

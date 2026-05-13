@@ -3,6 +3,9 @@ sidebar_position: 4
 title: ackoctl CLI
 ---
 
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
 # ackoctl — 커맨드라인 인터페이스
 
 [ackoctl](https://github.com/aerospike-ce-ecosystem/ackoctl)은 [클러스터 매니저 UI](./cluster-manager-ui.md)의 CLI 대응 도구입니다. 둘 다 동일한 `aerospike-cluster-manager` REST API(`/api/v1/*`)를 호출합니다 — UI에서 가능한 모든 작업을 터미널이나 CI 파이프라인에서도 수행할 수 있습니다.
@@ -13,13 +16,15 @@ Go로 작성되었으며 `kubectl` / `gh` 스타일의 명령 문법(`ackoctl <n
 
 ## 설치
 
-### Homebrew (macOS, Linux)
+<Tabs groupId="ackoctl-install" queryString="install">
+<TabItem value="homebrew" label="Homebrew (macOS, Linux)" default>
 
 ```bash
 brew install aerospike-ce-ecosystem/tap/ackoctl
 ```
 
-### Debian / Ubuntu
+</TabItem>
+<TabItem value="apt" label="Debian / Ubuntu">
 
 ```bash
 sudo install -d /etc/apt/keyrings
@@ -30,7 +35,8 @@ echo "deb [signed-by=/etc/apt/keyrings/ackoctl.gpg] https://aerospike-ce-ecosyst
 sudo apt update && sudo apt install ackoctl
 ```
 
-### RHEL / Fedora / Rocky / AlmaLinux
+</TabItem>
+<TabItem value="yum" label="RHEL / Fedora / Rocky / AlmaLinux">
 
 ```bash
 sudo curl -fsSL https://aerospike-ce-ecosystem.github.io/ackoctl/yum/ackoctl.repo \
@@ -38,11 +44,15 @@ sudo curl -fsSL https://aerospike-ce-ecosystem.github.io/ackoctl/yum/ackoctl.rep
 sudo dnf install ackoctl
 ```
 
-### POSIX 셸 일반 (패키지 매니저 없이)
+</TabItem>
+<TabItem value="posix" label="POSIX 셸 일반 (패키지 매니저 없이)">
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/aerospike-ce-ecosystem/ackoctl/main/install.sh | sh
 ```
+
+</TabItem>
+</Tabs>
 
 확인:
 
