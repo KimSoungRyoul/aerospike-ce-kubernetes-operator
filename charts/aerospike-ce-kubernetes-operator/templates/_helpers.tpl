@@ -220,15 +220,26 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 
 {{/*
 UI image helpers (per-component).
-Tag defaults to .Chart.AppVersion when ui.api.image.tag / ui.web.image.tag is
-empty, so users get a concrete pinned tag out of the box rather than ":latest".
+Tag resolution order:
+  1. ui.api.image.tag / ui.web.image.tag (per-component override)
+  2. ui.imageTag (shared cluster-manager release, pinned in values.yaml)
+  3. .Chart.AppVersion (last resort)
+aerospike-cluster-manager is versioned independently from the operator, so
+falling straight through to .Chart.AppVersion can resolve to a tag that
+does not exist in ghcr.io. ui.imageTag is the intended default knob.
 */}}
+{{- define "aerospike-ce-kubernetes-operator.ui.imageTag" -}}
+{{- default .Chart.AppVersion .Values.ui.imageTag | toString -}}
+{{- end }}
+
 {{- define "aerospike-ce-kubernetes-operator.ui.api.image" -}}
-{{- printf "%s:%s" .Values.ui.api.image.repository (default .Chart.AppVersion .Values.ui.api.image.tag | toString) -}}
+{{- $tag := default (include "aerospike-ce-kubernetes-operator.ui.imageTag" .) .Values.ui.api.image.tag -}}
+{{- printf "%s:%s" .Values.ui.api.image.repository ($tag | toString) -}}
 {{- end }}
 
 {{- define "aerospike-ce-kubernetes-operator.ui.web.image" -}}
-{{- printf "%s:%s" .Values.ui.web.image.repository (default .Chart.AppVersion .Values.ui.web.image.tag | toString) -}}
+{{- $tag := default (include "aerospike-ce-kubernetes-operator.ui.imageTag" .) .Values.ui.web.image.tag -}}
+{{- printf "%s:%s" .Values.ui.web.image.repository ($tag | toString) -}}
 {{- end }}
 
 {{/*

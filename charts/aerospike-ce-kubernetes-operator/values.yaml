@@ -353,6 +353,15 @@ ui:
   # -- Image pull secrets for private registries (applied to all UI Deployments)
   imagePullSecrets: []
 
+  # -- Default tag for both UI components (api + web).
+  # aerospike-cluster-manager is versioned independently from the operator,
+  # so the chart pins a known-good cluster-manager release here rather than
+  # letting the UI image tag fall through to .Chart.AppVersion (which is
+  # the operator's version and may not exist as a cluster-manager tag).
+  # Override per-component via ui.api.image.tag / ui.web.image.tag, or
+  # set this to "" to fall through to .Chart.AppVersion.
+  imageTag: "0.24.0"
+
   # =============================================================================
   # API (FastAPI) — port 8000 internally, Service port 80
   # =============================================================================
@@ -364,7 +373,8 @@ ui:
     image:
       repository: ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-api
       # -- Container image tag. Leave empty to fall through to
-      # .Chart.AppVersion (see ui.api.image helper in _helpers.tpl).
+      # ui.imageTag (preferred) or .Chart.AppVersion. See the
+      # ui.api.image helper in _helpers.tpl.
       tag: ""
       pullPolicy: IfNotPresent
     service:
@@ -551,7 +561,8 @@ ui:
     image:
       repository: ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-web
       # -- Container image tag. Leave empty to fall through to
-      # .Chart.AppVersion (see ui.web.image helper in _helpers.tpl).
+      # ui.imageTag (preferred) or .Chart.AppVersion. See the
+      # ui.web.image helper in _helpers.tpl.
       tag: ""
       pullPolicy: IfNotPresent
     service:
