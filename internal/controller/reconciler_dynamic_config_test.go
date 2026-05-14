@@ -240,6 +240,120 @@ func TestBuildSetConfigCommand_RejectsSemicolonInContext(t *testing.T) {
 	}
 }
 
+// TestBuildSetConfigCommand_RejectsUnsafeChars covers the hardened value
+// validation: asinfo's wire format is also sensitive to '=', control
+// characters (newline, carriage return, tab) and surrounding whitespace, any
+// of which could inject a second directive.
+func TestBuildSetConfigCommand_RejectsUnsafeChars(t *testing.T) {
+	tests := []struct {
+		name      string
+		change    configdiff.Change
+		wantInErr string
+	}{
+		{
+			name: "equals in value",
+			change: configdiff.Change{
+				Context: "service", Key: "ticker-interval", NewValue: "10;migrate-threads=99",
+			},
+			wantInErr: "10;migrate-threads=99",
+		},
+		{
+			name: "newline in value",
+			change: configdiff.Change{
+				Context: "service", Key: "ticker-interval", NewValue: "10\nset-config",
+			},
+			wantInErr: "control characters",
+		},
+		{
+			name: "carriage return in value",
+			change: configdiff.Change{
+				Context: "service", Key: "ticker-interval", NewValue: "10\rinject",
+			},
+			wantInErr: "control characters",
+		},
+		{
+			name: "tab in value",
+			change: configdiff.Change{
+				Context: "service", Key: "ticker-interval", NewValue: "10\tinject",
+			},
+			wantInErr: "control characters",
+		},
+		{
+			name: "leading whitespace in value",
+			change: configdiff.Change{
+				Context: "service", Key: "ticker-interval", NewValue: " 10",
+			},
+			wantInErr: "whitespace",
+		},
+		{
+			name: "trailing whitespace in value",
+			change: configdiff.Change{
+				Context: "service", Key: "ticker-interval", NewValue: "10 ",
+			},
+			wantInErr: "whitespace",
+		},
+		{
+			name: "newline in namespace id",
+			change: configdiff.Change{
+				Context: "namespace", Key: "default-ttl", NewValue: 3600, Namespace: "myns\ninject",
+			},
+			wantInErr: "control characters",
+		},
+		{
+			name: "equals in namespace id",
+			change: configdiff.Change{
+				Context: "namespace", Key: "default-ttl", NewValue: 3600, Namespace: "myns;id=other",
+			},
+			wantInErr: "myns;id=other",
+		},
+		{
+			name: "control char in key",
+			change: configdiff.Change{
+				Context: "service", Key: "proto-fd-max\ninject", NewValue: 20000,
+			},
+			wantInErr: "proto-fd-max",
+		},
+		{
+			name: "equals in key",
+			change: configdiff.Change{
+				Context: "service", Key: "proto-fd-max=evil", NewValue: 20000,
+			},
+			wantInErr: "proto-fd-max=evil",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := buildSetConfigCommand(tt.change)
+			if err == nil {
+				t.Fatalf("expected error for %s, got nil", tt.name)
+			}
+			if !strings.Contains(err.Error(), tt.wantInErr) {
+				t.Errorf("error %q should mention %q", err.Error(), tt.wantInErr)
+			}
+		})
+	}
+}
+
+// TestBuildSetConfigCommand_AllowsDottedKey ensures the hardened key validation
+// still accepts legitimate dotted asinfo keys like heartbeat.interval.
+func TestBuildSetConfigCommand_AllowsDottedKey(t *testing.T) {
+	change := configdiff.Change{
+		Path:     "network.heartbeat.interval",
+		Context:  "network",
+		Key:      "heartbeat.interval",
+		NewValue: 250,
+	}
+	cmd, err := buildSetConfigCommand(change)
+	if err != nil {
+		t.Fatalf("unexpected error for dotted key: %v", err)
+	}
+	expected := "set-config:context=network;heartbeat.interval=250"
+	if cmd != expected {
+		t.Errorf("buildSetConfigCommand = %q, want %q", cmd, expected)
+	}
+}
+
 // --- RollbackResult tests ---
 
 func TestRollbackResult_HasFailures(t *testing.T) {
