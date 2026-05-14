@@ -1,10 +1,10 @@
 name: Daily Release
-# Runs daily at KST 09:00 (UTC 00:00). Automatically releases if there are changes since the last release.
+# Runs daily at KST 07:00 (UTC 22:00 previous day). Automatically releases if there are changes since the last release.
 # Conventional Commits-based version bump: feat → minor, fix → patch, breaking → major
 
 on:
   schedule:
-    - cron: "0 0 * * *" # UTC 00:00 = KST 09:00
+    - cron: "0 22 * * *" # UTC 22:00 = KST 07:00
   workflow_dispatch: # can also be triggered manually
 
 jobs:
