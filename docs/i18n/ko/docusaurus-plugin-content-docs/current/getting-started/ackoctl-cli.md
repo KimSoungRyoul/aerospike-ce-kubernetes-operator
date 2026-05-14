@@ -24,27 +24,6 @@ brew install aerospike-ce-ecosystem/tap/ackoctl
 ```
 
 </TabItem>
-<TabItem value="apt" label="Debian / Ubuntu">
-
-```bash
-sudo install -d /etc/apt/keyrings
-curl -fsSL https://aerospike-ce-ecosystem.github.io/ackoctl/key.gpg \
-  | sudo gpg --dearmor -o /etc/apt/keyrings/ackoctl.gpg
-echo "deb [signed-by=/etc/apt/keyrings/ackoctl.gpg] https://aerospike-ce-ecosystem.github.io/ackoctl/apt stable main" \
-  | sudo tee /etc/apt/sources.list.d/ackoctl.list
-sudo apt update && sudo apt install ackoctl
-```
-
-</TabItem>
-<TabItem value="yum" label="RHEL / Fedora / Rocky / AlmaLinux">
-
-```bash
-sudo curl -fsSL https://aerospike-ce-ecosystem.github.io/ackoctl/yum/ackoctl.repo \
-  -o /etc/yum.repos.d/ackoctl.repo
-sudo dnf install ackoctl
-```
-
-</TabItem>
 <TabItem value="posix" label="POSIX 셸 일반 (패키지 매니저 없이)">
 
 ```bash
