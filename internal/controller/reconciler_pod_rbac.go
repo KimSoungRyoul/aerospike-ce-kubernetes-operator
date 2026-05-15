@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -37,6 +38,14 @@ func (r *AerospikeClusterReconciler) reconcilePodServiceRBAC(
 	log := logf.FromContext(ctx)
 	saName := "default"
 
+	desiredRules := []rbacv1.PolicyRule{
+		{
+			APIGroups: []string{""},
+			Resources: []string{"services"},
+			Verbs:     []string{"get"},
+		},
+	}
+
 	// Reconcile Role
 	existingRole := &rbacv1.Role{}
 	err := r.Get(ctx, types.NamespacedName{Name: roleName, Namespace: cluster.Namespace}, existingRole)
@@ -46,13 +55,7 @@ func (r *AerospikeClusterReconciler) reconcilePodServiceRBAC(
 				Name:      roleName,
 				Namespace: cluster.Namespace,
 			},
-			Rules: []rbacv1.PolicyRule{
-				{
-					APIGroups: []string{""},
-					Resources: []string{"services"},
-					Verbs:     []string{"get"},
-				},
-			},
+			Rules: desiredRules,
 		}
 		if err := r.setOwnerRef(cluster, role); err != nil {
 			return err
@@ -63,10 +66,33 @@ func (r *AerospikeClusterReconciler) reconcilePodServiceRBAC(
 		}
 	} else if err != nil {
 		return fmt.Errorf("getting pod service reader role %s: %w", roleName, err)
+	} else if !reflect.DeepEqual(existingRole.Rules, desiredRules) {
+		// Role exists but has drifted from the desired spec; correct it.
+		existingRole.Rules = desiredRules
+		if err := r.setOwnerRef(cluster, existingRole); err != nil {
+			return err
+		}
+		log.Info("Updating drifted pod service reader Role", "name", roleName)
+		if err := r.Update(ctx, existingRole); err != nil {
+			return fmt.Errorf("updating pod service reader role %s: %w", roleName, err)
+		}
 	}
 
 	// Reconcile RoleBinding
 	bindingName := roleName
+	desiredRoleRef := rbacv1.RoleRef{
+		APIGroup: "rbac.authorization.k8s.io",
+		Kind:     "Role",
+		Name:     roleName,
+	}
+	desiredSubjects := []rbacv1.Subject{
+		{
+			Kind:      "ServiceAccount",
+			Name:      saName,
+			Namespace: cluster.Namespace,
+		},
+	}
+
 	existingBinding := &rbacv1.RoleBinding{}
 	err = r.Get(ctx, types.NamespacedName{Name: bindingName, Namespace: cluster.Namespace}, existingBinding)
 	if errors.IsNotFound(err) {
@@ -75,18 +101,8 @@ func (r *AerospikeClusterReconciler) reconcilePodServiceRBAC(
 				Name:      bindingName,
 				Namespace: cluster.Namespace,
 			},
-			RoleRef: rbacv1.RoleRef{
-				APIGroup: "rbac.authorization.k8s.io",
-				Kind:     "Role",
-				Name:     roleName,
-			},
-			Subjects: []rbacv1.Subject{
-				{
-					Kind:      "ServiceAccount",
-					Name:      saName,
-					Namespace: cluster.Namespace,
-				},
-			},
+			RoleRef:  desiredRoleRef,
+			Subjects: desiredSubjects,
 		}
 		if err := r.setOwnerRef(cluster, binding); err != nil {
 			return err
@@ -97,6 +113,40 @@ func (r *AerospikeClusterReconciler) reconcilePodServiceRBAC(
 		}
 	} else if err != nil {
 		return fmt.Errorf("getting pod service reader rolebinding %s: %w", bindingName, err)
+	} else if !reflect.DeepEqual(existingBinding.RoleRef, desiredRoleRef) ||
+		!reflect.DeepEqual(existingBinding.Subjects, desiredSubjects) {
+		// RoleBinding exists but has drifted from the desired spec.
+		// RoleRef is immutable, so a divergence there requires recreation;
+		// Subjects can be updated in place.
+		if !reflect.DeepEqual(existingBinding.RoleRef, desiredRoleRef) {
+			log.Info("Recreating pod service reader RoleBinding due to immutable RoleRef drift", "name", bindingName)
+			if err := r.Delete(ctx, existingBinding); err != nil && !errors.IsNotFound(err) {
+				return fmt.Errorf("deleting drifted pod service reader rolebinding %s: %w", bindingName, err)
+			}
+			binding := &rbacv1.RoleBinding{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      bindingName,
+					Namespace: cluster.Namespace,
+				},
+				RoleRef:  desiredRoleRef,
+				Subjects: desiredSubjects,
+			}
+			if err := r.setOwnerRef(cluster, binding); err != nil {
+				return err
+			}
+			if err := r.Create(ctx, binding); err != nil {
+				return fmt.Errorf("recreating pod service reader rolebinding %s: %w", bindingName, err)
+			}
+		} else {
+			existingBinding.Subjects = desiredSubjects
+			if err := r.setOwnerRef(cluster, existingBinding); err != nil {
+				return err
+			}
+			log.Info("Updating drifted pod service reader RoleBinding", "name", bindingName)
+			if err := r.Update(ctx, existingBinding); err != nil {
+				return fmt.Errorf("updating pod service reader rolebinding %s: %w", bindingName, err)
+			}
+		}
 	}
 
 	return nil

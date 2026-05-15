@@ -3,8 +3,10 @@ package controller
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	aero "github.com/aerospike/aerospike-client-go/v8"
 	"github.com/go-logr/logr"
@@ -347,19 +349,52 @@ func buildRollbackCommand(log logr.Logger, change configdiff.Change) string {
 	return cmd
 }
 
+// tomlBareKeyRe matches a safe asinfo bare key: alphanumerics, underscores,
+// hyphens and dots (dots are used for nested keys like heartbeat.interval).
+// Mirrors the webhook's tomlBareKeyRe validation, extended to allow the dotted
+// key paths that dynamic config changes carry.
+var tomlBareKeyRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
+
+// hasUnsafeValueChars reports whether s contains characters that could break or
+// inject into the asinfo set-config wire format. The asinfo protocol is
+// sensitive to ';' and ':' (directive/field separators), '=' (key/value
+// separator), ASCII control characters such as '\n', '\r', '\t' (which can
+// terminate or splice a directive) and leading/trailing whitespace.
+func hasUnsafeValueChars(s string) (bool, string) {
+	if strings.ContainsAny(s, ";:=") {
+		return true, "must not contain ';', ':' or '='"
+	}
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f || unicode.IsControl(r) {
+			return true, "must not contain control characters (e.g. newline, carriage return, tab)"
+		}
+	}
+	if strings.TrimSpace(s) != s {
+		return true, "must not contain leading or trailing whitespace"
+	}
+	return false, ""
+}
+
 // buildSetConfigCommand builds the asinfo set-config command for a change.
-// Returns an error if any field contains characters that could break the
-// asinfo protocol (semicolons or colons used as delimiters).
+// Returns an error if any field contains characters that could break or inject
+// into the asinfo protocol. Keys must be safe bare keys (tomlBareKeyRe); the
+// context, namespace id and value must be free of asinfo delimiters (';', ':',
+// '='), ASCII control characters and surrounding whitespace.
 func buildSetConfigCommand(change configdiff.Change) (string, error) {
 	valueStr := fmt.Sprintf("%v", change.NewValue)
+
+	// Key must be a safe bare key (no delimiters, control chars or whitespace).
+	if !tomlBareKeyRe.MatchString(change.Key) {
+		return "", fmt.Errorf("invalid character in key %q: must match %s", change.Key, tomlBareKeyRe.String())
+	}
+
 	for _, field := range []struct{ name, val string }{
-		{"key", change.Key},
 		{"context", change.Context},
 		{"namespace", change.Namespace},
 		{"value", valueStr},
 	} {
-		if strings.ContainsAny(field.val, ";:") {
-			return "", fmt.Errorf("invalid character in %s %q: must not contain ';' or ':'", field.name, field.val)
+		if unsafe, reason := hasUnsafeValueChars(field.val); unsafe {
+			return "", fmt.Errorf("invalid character in %s %q: %s", field.name, field.val, reason)
 		}
 	}
 
