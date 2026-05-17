@@ -11,7 +11,6 @@ import (
 	"sync"
 
 	aero "github.com/aerospike/aerospike-client-go/v8"
-	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -176,7 +175,7 @@ func (r *AerospikeClusterReconciler) enrichStatusWithAerospikeInfo(
 	defer closeAerospikeClient(aeroClient)
 
 	// 1. Enrich pod status with per-node Aerospike info (NodeID, ClusterName, endpoints).
-	if aeroInfoMap := collectAerospikeInfo(log, aeroClient, cluster); aeroInfoMap != nil {
+	if aeroInfoMap := collectAerospikeInfo(ctx, aeroClient, cluster); aeroInfoMap != nil {
 		for podName, info := range aeroInfoMap {
 			if ps, ok := cluster.Status.Pods[podName]; ok {
 				ps.NodeID = info.NodeID
@@ -500,8 +499,13 @@ func setFineGrainedConditions(cluster *ackov1alpha1.AerospikeCluster, o StatusUp
 	}
 
 	// ReconciliationPaused
-	setCondition(cluster, ackov1alpha1.ConditionReconciliationPaused, o.Paused,
-		"ReconciliationPaused", "Reconciliation is paused by user (spec.paused=true)")
+	reason := "ReconciliationActive"
+	message := "Reconciliation is active"
+	if o.Paused {
+		reason = "ReconciliationPaused"
+		message = "Reconciliation is paused by user (spec.paused=true)"
+	}
+	setCondition(cluster, ackov1alpha1.ConditionReconciliationPaused, o.Paused, reason, message)
 
 	// ACLSynced — only set if ACL is configured; cleared when ACL is removed.
 	if cluster.Spec.AerospikeAccessControl != nil {
@@ -622,10 +626,11 @@ const maxParallelInfoQueries = 8
 // Errors are logged at V(1) and the function returns nil rather than failing
 // so that status updates are never blocked by an unreachable cluster.
 func collectAerospikeInfo(
-	log logr.Logger,
+	ctx context.Context,
 	aeroClient *aero.Client,
 	cluster *ackov1alpha1.AerospikeCluster,
 ) map[string]aeroPodInfo {
+	log := logf.FromContext(ctx)
 	// Build a pod-IP → pod-name lookup from the current status pods.
 	podIPToPodName := make(map[string]string, len(cluster.Status.Pods))
 	for podName, ps := range cluster.Status.Pods {
@@ -659,10 +664,13 @@ func collectAerospikeInfo(
 		}
 
 		wg.Add(1)
-		sem <- struct{}{} // acquire semaphore slot
-
 		go func(node *aero.Node, podName string) {
 			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
 			defer func() { <-sem }() // release semaphore slot
 
 			info := aeroPodInfo{}

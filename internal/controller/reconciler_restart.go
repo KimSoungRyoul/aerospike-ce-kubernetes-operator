@@ -134,7 +134,6 @@ func (r *AerospikeClusterReconciler) reconcileRollingRestart(
 	for _, pod := range podsToRestart {
 		pendingNames = append(pendingNames, pod.Name)
 	}
-	cluster.Status.PendingRestartPods = pendingNames
 
 	r.Recorder.Eventf(cluster, corev1.EventTypeNormal, EventRollingRestartStarted,
 		"Rolling restart started for rack %d: %d pods to restart", rack.ID, len(podsToRestart))
@@ -151,6 +150,8 @@ func (r *AerospikeClusterReconciler) reconcileRollingRestart(
 	if r.isBatchBlocked(ctx, cluster, rack.ID, rackPods) {
 		return true, nil
 	}
+
+	cluster.Status.PendingRestartPods = pendingNames
 
 	// Restart up to batchSize pods, continuing on individual pod failures.
 	restarted, failedPods, batchPods := r.restartPodBatch(ctx, cluster, podsToRestart, sts, desiredHash,
@@ -426,7 +427,7 @@ func (r *AerospikeClusterReconciler) updatePodConfigHash(ctx context.Context, po
 		podCopy.Annotations = make(map[string]string)
 	}
 	podCopy.Annotations[utils.ConfigHashAnnotation] = hash
-	return r.Update(ctx, podCopy)
+	return r.Patch(ctx, podCopy, client.MergeFrom(pod))
 }
 
 // coldRestartPod deletes the pod to trigger a cold restart via StatefulSet.
