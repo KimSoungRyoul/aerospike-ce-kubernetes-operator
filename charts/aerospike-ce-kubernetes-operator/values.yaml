@@ -588,10 +588,13 @@ ui:
       sidecar:
         # -- Enable the log-shipper sidecar container.
         enabled: false
-        # -- Sidecar container image.
+        # -- Sidecar container image. Pinned to a specific patch tag so
+        # `helm upgrade` does not silently pull a new build under the
+        # floating `3.2` alias. Bump deliberately when fluent-bit releases
+        # a fix you want to take.
         image:
           repository: cr.fluentbit.io/fluent/fluent-bit
-          tag: "3.2"
+          tag: "3.2.10"
           pullPolicy: IfNotPresent
         # -- Override the image's entrypoint command. Leave empty to use the
         # image default.
@@ -610,7 +613,15 @@ ui:
             cpu: 100m
             memory: 128Mi
         # -- Container-level securityContext applied to the sidecar.
+        # runAsUser is pinned to 1001 to match `ui.podSecurityContext.runAsUser`
+        # and `fsGroup` — the api container writes the rotating file as UID
+        # 1001, and the sidecar must read it as the same UID/GID so the
+        # contract holds even when the operator overrides the pod-level
+        # securityContext to a different non-root user. Bump alongside any
+        # change to `ui.podSecurityContext.runAsUser`.
         securityContext:
+          runAsUser: 1001
+          runAsNonRoot: true
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: false
           capabilities:

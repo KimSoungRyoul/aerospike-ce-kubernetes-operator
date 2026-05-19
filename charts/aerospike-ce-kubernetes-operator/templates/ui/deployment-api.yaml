@@ -8,6 +8,25 @@
 {{- if and .Values.ui.api.logging.fileMirror.enabled (or .Values.ui.api.logging.configFile .Values.ui.api.logging.dictConfig) }}
 {{- fail "ui.api.logging.fileMirror.enabled has no effect when ui.api.logging.configFile or ui.api.logging.dictConfig is set — dictConfig takes full ownership of the logging pipeline. Either disable fileMirror or move the file handler into your dictConfig." }}
 {{- end }}
+{{- if and .Values.ui.api.logging.sidecar.enabled .Values.ui.api.logging.sidecar.config.content }}
+{{- /*
+  Block YAML-toxic content from ui.api.logging.sidecar.config.content:
+  - "---" inside the value risks splitting the ConfigMap into multiple
+    YAML documents when rendered through `nindent`. Even when block-scalar
+    indentation keeps a single document intact, a downstream `kubectl
+    diff` / GitOps tool that re-parses the rendered manifest can still
+    trip on it.
+  - A leading "%" is a YAML directive marker and is unsafe in any context.
+  Catch both at install time with a clear error rather than ship a
+  broken ConfigMap that fails on apply with an opaque parser message.
+*/}}
+{{- if contains "\n---" (printf "\n%s" .Values.ui.api.logging.sidecar.config.content) }}
+{{- fail "ui.api.logging.sidecar.config.content must not contain a '---' line (YAML document separator). Inline the directives without document separators, or supply the config via `ui.api.logging.sidecar.extraVolumeMounts` referencing your own ConfigMap." }}
+{{- end }}
+{{- if hasPrefix "%" .Values.ui.api.logging.sidecar.config.content }}
+{{- fail "ui.api.logging.sidecar.config.content must not start with '%' (YAML directive marker). Indent the first line or supply the config via `ui.api.logging.sidecar.extraVolumeMounts` referencing your own ConfigMap." }}
+{{- end }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -166,10 +185,16 @@ spec:
             {{- if .Values.ui.api.logging.fileMirror.enabled }}
             - name: LOG_FILE_PATH
               value: {{ .Values.ui.api.logging.fileMirror.path | quote }}
+            {{- /*
+              `| quote` on a JSON number >= 1e7 renders it in scientific
+              notation (e.g. "5.24288e+07"), which Python's int() rejects
+              with ValueError on startup. Force a decimal-int representation
+              via `printf "%d"` so 52428800 stays "52428800".
+            */}}
             - name: LOG_FILE_MAX_BYTES
-              value: {{ .Values.ui.api.logging.fileMirror.maxBytes | quote }}
+              value: {{ printf "%d" (.Values.ui.api.logging.fileMirror.maxBytes | int) | quote }}
             - name: LOG_FILE_BACKUP_COUNT
-              value: {{ .Values.ui.api.logging.fileMirror.backupCount | quote }}
+              value: {{ printf "%d" (.Values.ui.api.logging.fileMirror.backupCount | int) | quote }}
             {{- end }}
             {{- with .Values.ui.api.extraEnv }}
             {{- toYaml . | nindent 12 }}
