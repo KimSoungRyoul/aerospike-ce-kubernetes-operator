@@ -130,7 +130,7 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kuber
 
 ### OpenTelemetry Collector를 통한 로그 라우팅
 
-ACM은 stdout으로 구조화된 JSON 로그를 출력합니다(`request_id` / `otelTraceID` / `otelSpanID` 상관관계 필드 포함). 외부 로그 라우팅 — PII 마스킹, 샘플링, 벤더별 exporter(NELO, Datadog, Loki, Sentry, Elasticsearch, ...) — 는 클러스터 어딘가에서 운영자가 직접 운영하는 **외부 OpenTelemetry Collector**에 위임됩니다. 차트는 Collector 자체를 배포하지 않으며, ACM api의 회전 파일 미러를 tail해서 OTLP로 forward하는 per-pod 사이드카만 옵션으로 배포합니다.
+ACM은 stdout으로 구조화된 JSON 로그를 출력합니다(`request_id` / `otelTraceID` / `otelSpanID` 상관관계 필드 포함). 외부 로그 라우팅 — PII 마스킹, 샘플링, 벤더별 exporter(Datadog, Loki, Elasticsearch, Sentry, ...) — 는 클러스터 어딘가에서 운영자가 직접 운영하는 **외부 OpenTelemetry Collector**에 위임됩니다. 차트는 Collector 자체를 배포하지 않으며, ACM api의 회전 파일 미러를 tail해서 OTLP로 forward하는 per-pod 사이드카만 옵션으로 배포합니다.
 
 지원되는 deployment 패턴은 두 가지입니다.
 
@@ -195,19 +195,7 @@ ui:
 | `sidecar.enabled=true`인데 `sidecar.otlp.endpoint`도 `sidecar.config.content`도 비어 있는 경우 | 기본 템플릿이 endpoint를 필요로 함 — install 실패 |
 | `sidecar.config.content`에 `---` 줄이 있거나 `%`로 시작하는 경우 | 렌더된 ConfigMap YAML이 깨질 위험 — install 실패 |
 
-### 구버전 `LOG_HANDLERS` / `dictConfig`에서 마이그레이션
-
-이전 릴리스의 차트는 `ui.api.logging.handlers`, `ui.api.logging.configFile`, `ui.api.logging.dictConfig`를 통해 ACM api에 in-process Python 로깅 훅을 wiring했습니다. 해당 훅은 [aerospike-cluster-manager#368](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/pull/368)에서 제거되었고, 차트 쪽 매핑 값은 [aerospike-ce-kubernetes-operator#269](https://github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/pull/269)에서 제거되었습니다. 기존 use case는 모두 OTel Collector 프리미티브로 매핑됩니다:
-
-| 구버전 차트 값 | OTel Collector 대체 |
-|---|---|
-| `ui.api.logging.handlers: "pynelo:AsyncNeloHandler"` | Collector에 OTLP→NELO exporter/bridge를 운영하고, `sidecar.otlp.endpoint`를 그쪽으로 향하게 함. |
-| 핸들러 내부에서 수행하던 per-record PII 마스킹 | Collector 파이프라인의 `attributes` / `redaction` / `transform` 프로세서. |
-| 핸들러 내부 샘플링 (error 100% / info 1%) | `probabilistic_sampler` / `tail_sampling` 프로세서. |
-| 고정 필드 (`service`, `env`, `tenant`) | `resource` / `attributes` 프로세서; 또는 `ui.api.otel.resourceAttributes`로 OTel SDK 리소스 속성 주입. |
-| `ui.api.logging.dictConfig`로 전체 파이프라인 소유 | Collector `service.pipelines.logs` 설정으로 이전. |
-
-전체 마이그레이션 매트릭스는 [ACM 로깅 레퍼런스](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/blob/main/docs/logging.md)와 [observability 가이드](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/blob/main/docs/observability.md)를 참고하세요.
+전체 레퍼런스와 fluent-bit 사이드카 예시 설정은 [ACM 로깅 레퍼런스](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/blob/main/docs/logging.md)와 [observability 가이드](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/blob/main/docs/observability.md)를 참고하세요.
 
 ---
 
