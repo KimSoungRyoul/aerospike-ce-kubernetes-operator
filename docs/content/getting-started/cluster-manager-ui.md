@@ -622,7 +622,7 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kuber
 
 #### Log routing via OpenTelemetry Collector
 
-ACM emits structured JSON to stdout (with `request_id` / `otelTraceID` / `otelSpanID` correlation fields). External log routing — PII redaction, sampling, vendor-specific exporters (NELO, Datadog, Loki, Sentry, Elasticsearch, ...) — is delegated to an **external OpenTelemetry Collector** that you operate elsewhere in the cluster. The chart does NOT deploy a Collector; it only opt-in deploys a per-pod OTLP-forwarder sidecar that tails the api's rotating-file mirror.
+ACM emits structured JSON to stdout (with `request_id` / `otelTraceID` / `otelSpanID` correlation fields). External log routing — PII redaction, sampling, vendor-specific exporters (Datadog, Loki, Elasticsearch, Sentry, ...) — is delegated to an **external OpenTelemetry Collector** that you operate elsewhere in the cluster. The chart does NOT deploy a Collector; it only opt-in deploys a per-pod OTLP-forwarder sidecar that tails the api's rotating-file mirror.
 
 Two deployment patterns are supported.
 
@@ -687,19 +687,7 @@ The chart fails template rendering on misconfigurations rather than producing a 
 | `sidecar.enabled=true` without `sidecar.otlp.endpoint` AND without `sidecar.config.content` | install fails — default template needs an endpoint |
 | `sidecar.config.content` containing a `---` line or starting with `%` | install fails — would corrupt rendered ConfigMap YAML |
 
-#### Migrating from pre-0.X.0 `LOG_HANDLERS` / `dictConfig`
-
-Earlier releases of this chart exposed `ui.api.logging.handlers`, `ui.api.logging.configFile`, and `ui.api.logging.dictConfig` that wired in-process Python logging hooks on the ACM api. Those hooks were removed in [aerospike-cluster-manager#368](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/pull/368) and the matching chart values are gone in [aerospike-ce-kubernetes-operator#269](https://github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/pull/269). Every prior use case maps to an OTel Collector primitive:
-
-| Old chart values | OTel Collector equivalent |
-|---|---|
-| `ui.api.logging.handlers: "pynelo:AsyncNeloHandler"` | Run an OTLP→NELO exporter/bridge on the Collector; point `sidecar.otlp.endpoint` at it. |
-| Per-record PII redaction inside the handler | `attributes` / `redaction` / `transform` processor in the Collector pipeline. |
-| Sampling (error 100% / info 1%) inside the handler | `probabilistic_sampler` / `tail_sampling` processor. |
-| Fixed extra fields (`service`, `env`, `tenant`) | `resource` / `attributes` processor; or OTel SDK resource attributes via `ui.api.otel.resourceAttributes`. |
-| `ui.api.logging.dictConfig` for full pipeline ownership | Collector `service.pipelines.logs` configuration. |
-
-See the [ACM logging reference](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/blob/main/docs/logging.md) and the [observability guide](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/blob/main/docs/observability.md) for the full migration matrix.
+See the [ACM logging reference](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/blob/main/docs/logging.md) and the [observability guide](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/blob/main/docs/observability.md) for the full reference and example fluent-bit sidecar configuration.
 
 ---
 
