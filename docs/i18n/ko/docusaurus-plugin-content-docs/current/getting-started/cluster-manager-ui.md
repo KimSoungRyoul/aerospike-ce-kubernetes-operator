@@ -100,12 +100,114 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kuber
 | `ui.postgresql.existingSecret` | 데이터베이스 자격 증명에 기존 Secret 사용 | `""` |
 | `ui.extraEnv` | UI 컨테이너에 추가할 환경 변수 목록 | `[]` |
 
+외부 OpenTelemetry Collector로 로그를 라우팅하는 설정(`fileMirror` + OTLP-forwarder 사이드카)은 아래의 [로깅](#로깅) 섹션을 참고하세요.
+
 :::tip
 프로브, 보안 컨텍스트, 톨러레이션, 어피니티, 오토스케일링 등 전체 설정 옵션 목록은 다음 명령으로 확인할 수 있습니다.
 ```bash
 helm show values oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator | grep -A 500 "^ui:"
 ```
 :::
+
+---
+
+## 로깅
+
+### 기본 로그 레벨 / 포맷
+
+| 파라미터 | 기본값 | 설명 |
+|----------|--------|------|
+| `ui.env.logLevel` | `"INFO"` | 로그 레벨: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `ui.env.logFormat` | `"text"` | `"text"`: 사람이 읽기 좋은 포맷, `"json"`: 구조화된 JSON (OpenTelemetry Collector 등 로그 파이프라인에 보낼 때 권장) |
+
+```bash
+# JSON 구조화 로깅 활성화 (Loki, Elasticsearch 등으로 보낼 때 권장)
+helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  --namespace aerospike-operator --create-namespace \
+  --set ui.env.logFormat=json \
+  --set ui.env.logLevel=INFO
+```
+
+### OpenTelemetry Collector를 통한 로그 라우팅
+
+ACM은 stdout으로 구조화된 JSON 로그를 출력합니다(`request_id` / `otelTraceID` / `otelSpanID` 상관관계 필드 포함). 외부 로그 라우팅 — PII 마스킹, 샘플링, 벤더별 exporter(NELO, Datadog, Loki, Sentry, Elasticsearch, ...) — 는 클러스터 어딘가에서 운영자가 직접 운영하는 **외부 OpenTelemetry Collector**에 위임됩니다. 차트는 Collector 자체를 배포하지 않으며, ACM api의 회전 파일 미러를 tail해서 OTLP로 forward하는 per-pod 사이드카만 옵션으로 배포합니다.
+
+지원되는 deployment 패턴은 두 가지입니다.
+
+**패턴 A — 노드 단위 DaemonSet Collector (가능하면 권장)**
+
+`ui.api.logging.fileMirror.enabled=false`, `ui.api.logging.sidecar.enabled=false`(기본값)로 둡니다. ACM의 stdout은 운영 중인 OTel Collector DaemonSet이 `/var/log/containers/*.log`에서 그대로 가져갑니다. per-pod 오버헤드가 없는 깔끔한 형태이며 차트의 기본 상태입니다.
+
+**패턴 B — Pod 내부 OTLP-forwarder 사이드카**
+
+DaemonSet 스크레이핑을 쓸 수 없는 환경에서 사용합니다 (테넌트별로 각자 다른 Collector를 가져오는 멀티테넌트 클러스터, hostPath DaemonSet 권한이 없는 경우, 벤더 전용 shipper 격리가 필요한 경우 등). 차트는 다음을 자동으로 wiring 합니다:
+
+1. api 컨테이너와 사이드카에 동시에 마운트되는 공유 `emptyDir` 볼륨 (`fileMirror.mountPath`).
+2. api가 그 위에 회전 파일을 기록 (`LOG_FILE_PATH` env 자동 주입).
+3. fluent-bit 사이드카가 그 파일을 tail → JSON 파싱 → 지정한 OTLP/gRPC 엔드포인트로 forward.
+
+```yaml
+# values.yaml
+ui:
+  env:
+    logFormat: "json"               # Collector 파서가 타입을 보존하도록 권장
+  api:
+    logging:
+      fileMirror:
+        enabled: true               # /var/log/acm/api.log 를 공유 emptyDir에 기록
+      sidecar:
+        enabled: true
+        otlp:
+          endpoint: "otel-collector.observability.svc.cluster.local:4317"
+          # tls: true
+          # insecureSkipVerify: false
+          # headers: "x-tenant=acm,authorization=Bearer xxxxxxxx"
+```
+
+`sidecar.config.content`가 비어 있으면(기본), 차트가 자동으로 fluent-bit 설정을 렌더링합니다 — `fileMirror.path`를 tail하고 JSON 파서로 파싱한 뒤 `opentelemetry` output 플러그인을 통해 `sidecar.otlp.endpoint`로 forward 합니다. vector, promtail, 벤더 에이전트로 바꾸려면 `sidecar.image`와 `sidecar.config.content`를 override 하세요 — 차트는 주어진 설정을 그대로 마운트합니다.
+
+### 로깅 설정 참조
+
+| 파라미터 | 기본값 | 설명 |
+|----------|--------|------|
+| `ui.api.logging.fileMirror.enabled` | `false` | stdout과 별도로 회전 파일에 로그를 미러(공유 emptyDir 자동 마운트). `sidecar.enabled=true`일 때 필수. |
+| `ui.api.logging.fileMirror.mountPath` | `"/var/log/acm"` | api 컨테이너와 사이드카가 공유하는 emptyDir 마운트 루트. |
+| `ui.api.logging.fileMirror.path` | `"/var/log/acm/api.log"` | 회전 로그 파일 경로. 사이드카가 읽을 수 있도록 반드시 `mountPath` 하위여야 함. |
+| `ui.api.logging.fileMirror.maxBytes` | `52428800` | 파일별 회전 임계치(바이트). 기본 50 MiB. |
+| `ui.api.logging.fileMirror.backupCount` | `3` | 디스크에 보관할 회전 백업 파일 개수. |
+| `ui.api.logging.sidecar.enabled` | `false` | OTLP-forwarder 사이드카 컨테이너 배포. `fileMirror.enabled=true`가 필요. |
+| `ui.api.logging.sidecar.otlp.endpoint` | `""` | 외부 OTel Collector의 OTLP/gRPC 엔드포인트(host:port). `sidecar.enabled=true`이고 `sidecar.config.content`가 비어 있을 때 필수. |
+| `ui.api.logging.sidecar.otlp.headers` | `""` | OTLP 메타데이터 헤더 (콤마 구분 `key=value`). |
+| `ui.api.logging.sidecar.otlp.tls` | `false` | OTLP TLS 사용 여부. 사내 Collector에 mTLS가 없다면 평문 gRPC도 무방. |
+| `ui.api.logging.sidecar.otlp.insecureSkipVerify` | `false` | TLS 인증서 검증 skip (dev/staging 자체 서명 Collector용). 프로덕션에서는 사용 금지. |
+| `ui.api.logging.sidecar.image.repository` | `cr.fluentbit.io/fluent/fluent-bit` | 사이드카 이미지. vector/promtail/벤더 에이전트로 교체 가능. |
+| `ui.api.logging.sidecar.image.tag` | `"3.2.10"` | `helm upgrade` 시 silent 재빌드를 막기 위해 패치 버전까지 핀. |
+| `ui.api.logging.sidecar.config.content` | `""` (기본 fluent-bit OTLP 템플릿 렌더링) | 기본 설정을 override하는 사이드카 raw config. `---` 줄 포함 금지, `%`로 시작 금지. |
+| `ui.api.logging.sidecar.resources` | `25m/32Mi → 100m/128Mi` | 사이드카 리소스 requests/limits. |
+
+### 검증 가드
+
+설정이 모순되면 차트가 `helm install` 시점에 명확한 에러로 실패합니다(런타임에 조용히 no-op 되지 않도록):
+
+| 잘못된 설정 | 실패 메시지 |
+|---|---|
+| `sidecar.enabled=true`인데 `fileMirror.enabled=true`가 아닌 경우 | 사이드카가 tail할 파일이 없음 — install 실패 |
+| `sidecar.enabled=true`인데 `sidecar.otlp.endpoint`도 `sidecar.config.content`도 비어 있는 경우 | 기본 템플릿이 endpoint를 필요로 함 — install 실패 |
+| `sidecar.config.content`에 `---` 줄이 있거나 `%`로 시작하는 경우 | 렌더된 ConfigMap YAML이 깨질 위험 — install 실패 |
+
+### 구버전 `LOG_HANDLERS` / `dictConfig`에서 마이그레이션
+
+이전 릴리스의 차트는 `ui.api.logging.handlers`, `ui.api.logging.configFile`, `ui.api.logging.dictConfig`를 통해 ACM api에 in-process Python 로깅 훅을 wiring했습니다. 해당 훅은 [aerospike-cluster-manager#368](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/pull/368)에서 제거되었고, 차트 쪽 매핑 값은 [aerospike-ce-kubernetes-operator#269](https://github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/pull/269)에서 제거되었습니다. 기존 use case는 모두 OTel Collector 프리미티브로 매핑됩니다:
+
+| 구버전 차트 값 | OTel Collector 대체 |
+|---|---|
+| `ui.api.logging.handlers: "pynelo:AsyncNeloHandler"` | Collector에 OTLP→NELO exporter/bridge를 운영하고, `sidecar.otlp.endpoint`를 그쪽으로 향하게 함. |
+| 핸들러 내부에서 수행하던 per-record PII 마스킹 | Collector 파이프라인의 `attributes` / `redaction` / `transform` 프로세서. |
+| 핸들러 내부 샘플링 (error 100% / info 1%) | `probabilistic_sampler` / `tail_sampling` 프로세서. |
+| 고정 필드 (`service`, `env`, `tenant`) | `resource` / `attributes` 프로세서; 또는 `ui.api.otel.resourceAttributes`로 OTel SDK 리소스 속성 주입. |
+| `ui.api.logging.dictConfig`로 전체 파이프라인 소유 | Collector `service.pipelines.logs` 설정으로 이전. |
+
+전체 마이그레이션 매트릭스는 [ACM 로깅 레퍼런스](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/blob/main/docs/logging.md)와 [observability 가이드](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/blob/main/docs/observability.md)를 참고하세요.
 
 ---
 
