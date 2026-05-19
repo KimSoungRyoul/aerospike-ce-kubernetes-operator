@@ -171,103 +171,67 @@ ui:
 When `ui.api.otel.enabled=false` (default), the deployment sets
 `OTEL_SDK_DISABLED=true` and the API uses NoOp providers — zero overhead.
 
-#### Pluggable log handlers (chart 0.3.0+)
+#### Log routing via external OTel Collector
 
-Forward API logs to NELO, Datadog, Loki, Sentry, or any
-`logging.Handler` without rebuilding the upstream image. Either the
-`extraPipPackages` init-container path or a custom image works:
+ACM emits structured JSON to stdout (with `request_id` /
+`otelTraceID` / `otelSpanID` correlation fields) and delegates all
+external routing — PII redaction, sampling, vendor exporters (NELO,
+Datadog, Loki, Sentry, ...) — to an **external OpenTelemetry Collector**
+that the operator runs elsewhere in the cluster. This chart does NOT
+deploy a Collector; it only opt-in deploys a per-pod OTLP-forwarder
+sidecar.
 
-```yaml
-ui:
-  api:
-    extraPipPackages:
-      - "pynelo>=1.0.0"
-    logging:
-      handlers: "pynelo:AsyncNeloHandler"
-    extraEnv:
-      - name: NELO_HOST
-        value: "nelo-collector.svc.cluster.local"
-    extraEnvFrom:
-      - secretRef:
-          name: nelo-token
-```
+Two patterns:
 
-For more elaborate routing (multiple handlers, formatters, filters), the
-`ui.api.logging.dictConfig` value is written to a ConfigMap, mounted at
-`/etc/asm/logging.yaml`, and applied via `logging.config.dictConfig`:
+1. **Node-level DaemonSet OTel Collector** scraping container logs.
+   Default — leave `ui.api.logging.fileMirror.enabled=false` and
+   `ui.api.logging.sidecar.enabled=false`. ACM stdout is the only sink;
+   your existing Collector DaemonSet picks it up from
+   `/var/log/containers/*.log`.
 
-```yaml
-ui:
-  api:
-    logging:
-      dictConfig:
-        version: 1
-        disable_existing_loggers: false
-        formatters:
-          json:
-            "()": pythonjsonlogger.json.JsonFormatter
-            fmt: "%(asctime)s %(levelname)s %(name)s %(message)s %(otelTraceID)s"
-        handlers:
-          console:
-            class: logging.StreamHandler
-            formatter: json
-        loggers:
-          aerospike_cluster_manager_api:
-            level: INFO
-            handlers: [console]
-            propagate: false
-```
-
-See [docs/observability.md](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/blob/main/docs/observability.md)
-and [docs/logging.md](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/blob/main/docs/logging.md)
-in the cluster-manager repo for the full reference, including airgap and
-constraint notes.
-
-#### Sidecar log shipper (fileMirror + sidecar)
-
-For operators who want to forward logs through a generic agent
-(fluent-bit, vector, promtail, ...) instead of an in-process SDK, enable
-the file mirror and add a sidecar container. The api writes records to a
-rotating file on a shared `emptyDir`, and the sidecar tails that file:
+2. **Pod-internal OTLP-forwarder sidecar** (when DaemonSet scraping is
+   not an option — e.g. multi-tenant clusters where each tenant brings
+   its own Collector, or no permission for a hostPath DaemonSet). Enable
+   `fileMirror` + `sidecar`. The chart wires a shared `emptyDir`, the
+   api writes a rotating file, and a fluent-bit sidecar forwards via
+   OTLP/gRPC to the Collector you specify:
 
 ```yaml
 ui:
+  env:
+    logFormat: "json"     # recommended so the Collector can parse fields
   api:
     logging:
       fileMirror:
-        enabled: true
-        # mountPath / path / maxBytes / backupCount have sensible defaults;
-        # see values.yaml for the full schema.
+        enabled: true     # /var/log/acm/api.log on a shared emptyDir
       sidecar:
         enabled: true
-        # Defaults to fluent-bit. Override image / command / args / env to
-        # pick vector, promtail, or a vendor-specific shipper.
-        config:
-          content: |
-            [SERVICE]
-                Flush 1
-            [INPUT]
-                Name tail
-                Path /var/log/acm/*.log
-                Refresh_Interval 5
-            [OUTPUT]
-                Name forward
-                Match *
-                Host fluentd.observability.svc.cluster.local
-                Port 24224
+        otlp:
+          endpoint: "otel-collector.observability.svc.cluster.local:4317"
+          # tls: true
+          # headers: "x-tenant=acm,authorization=Bearer ..."
 ```
 
-The chart fails template rendering if `sidecar.enabled=true` is set
-without `fileMirror.enabled=true` (sidecar would have nothing to tail),
-or if `fileMirror.enabled=true` is combined with `logging.configFile` /
-`logging.dictConfig` (those modes own the entire pipeline). This catches
-the misconfiguration at `helm install` time rather than as a silent
-no-op at runtime.
+The chart renders a default fluent-bit config that tails the file,
+parses JSON, and forwards via the `opentelemetry` output plugin. To
+plug a different shipper (vector, promtail, vendor agent), override
+`sidecar.image` and `sidecar.config.content`.
 
-`fileMirror.enabled=true` (without a sidecar) is also valid — it lets a
-node-level DaemonSet attach to the api pod's `emptyDir` indirectly via
-log-driver paths, or simply serves as a per-pod retention buffer when
-`kubectl logs` rotation is too aggressive for your environment.
+Validation guards:
+
+- `sidecar.enabled=true` without `fileMirror.enabled=true` → install
+  fails (sidecar would have nothing to tail).
+- `sidecar.enabled=true` without `sidecar.otlp.endpoint` AND without
+  `sidecar.config.content` → install fails (default template needs an
+  endpoint; bring your own config if you want different routing).
+- `sidecar.config.content` containing a `---` line or starting with `%`
+  → install fails (would corrupt the rendered ConfigMap YAML).
+
+See [docs/observability.md](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/blob/main/docs/observability.md)
+and [docs/logging.md](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/blob/main/docs/logging.md)
+in the cluster-manager repo for the full reference, including the
+migration table from the pre-0.X.0 `LOG_HANDLERS` / `LOGGING_CONFIG_FILE`
+in-process extension hooks.
 
 #### Customizing the UI deployment
 

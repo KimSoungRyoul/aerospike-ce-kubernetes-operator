@@ -274,12 +274,21 @@ consider enabling it (ui.networkPolicy.enabled=true).
   ACM API log file mirror is ENABLED
 ------------------------------------------------------------------------
 
-The api container is configured to write log records to a rotating file
-at {{ .Values.ui.api.logging.fileMirror.path }} (shared emptyDir mounted
-at {{ .Values.ui.api.logging.fileMirror.mountPath }}).
+The api container writes log records to a rotating file at
+{{ .Values.ui.api.logging.fileMirror.path }} on a shared emptyDir mounted
+at {{ .Values.ui.api.logging.fileMirror.mountPath }}.
 {{- if .Values.ui.api.logging.sidecar.enabled }}
-A `{{ .Values.ui.api.logging.sidecar.image.repository }}:{{ .Values.ui.api.logging.sidecar.image.tag }}` sidecar is mounted at the same path with
-read-only access.
+
+An OTLP-forwarder sidecar
+`{{ .Values.ui.api.logging.sidecar.image.repository }}:{{ .Values.ui.api.logging.sidecar.image.tag }}`
+tails the same path read-only and forwards records via OTLP to
+  {{ .Values.ui.api.logging.sidecar.otlp.endpoint | default "(unset — sidecar.config.content overrides it)" }}
+
+NOTE: this chart does NOT deploy an OTel Collector. The endpoint above
+must point at one you operate elsewhere (DaemonSet / Deployment /
+namespace-scoped). All redaction / sampling / vendor-specific exporter
+configuration lives in that Collector's pipeline, not in ACM or this
+chart.
 {{- end }}
 
 IMPORTANT: This feature requires the ACM api process to honor

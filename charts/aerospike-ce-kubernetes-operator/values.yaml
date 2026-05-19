@@ -523,40 +523,27 @@ ui:
           - /api/docs
 
     # =============================================================================
-    # Logging — pluggable handlers via LOG_HANDLERS or full dictConfig.
-    # See aerospike-cluster-manager docs/logging.md for examples.
+    # Logging — stdout (always) + optional rotating file mirror + optional
+    # OTLP-forwarder sidecar. ACM no longer ships in-process logging
+    # extension hooks; external log routing (PII redaction, sampling,
+    # vendor exporters) is delegated to an external OpenTelemetry Collector.
+    # See aerospike-cluster-manager docs/logging.md.
+    #
+    # Two deployment shapes are supported:
+    #   (a) node-level OTel Collector DaemonSet scraping container logs.
+    #       Default: leave `fileMirror.enabled=false` and
+    #       `sidecar.enabled=false`. ACM stdout is the only sink.
+    #   (b) pod-internal sidecar that tails the rotating file and forwards
+    #       OTLP to an external OTel Collector. Set fileMirror.enabled=true
+    #       AND sidecar.enabled=true (the chart fails install if you set
+    #       the sidecar without the mirror).
     # =============================================================================
     logging:
-      # -- LOG_HANDLERS env value. Comma-separated list of handler specs:
-      # "module.path:ClassName" or entry-point name registered under
-      # "aerospike_cluster_manager.log_handlers".
-      # Example: "pynelo:AsyncNeloHandler"
-      handlers: ""
-      # -- Path to an externally-mounted dictConfig file (when you mount it
-      # via your own ConfigMap / Volume). Mutually exclusive with
-      # `dictConfig` below.
-      configFile: ""
-      # -- dictConfig payload. When non-empty, the chart writes it to a
-      # ConfigMap, mounts it at /etc/asm/logging.yaml, and sets
-      # LOGGING_CONFIG_FILE accordingly. Example:
-      #   dictConfig:
-      #     version: 1
-      #     handlers:
-      #       console:
-      #         class: logging.StreamHandler
-      #     loggers:
-      #       aerospike_cluster_manager_api:
-      #         level: INFO
-      #         handlers: [console]
-      dictConfig: {}
-
       # =========================================================================
       # File mirror — writes log records to a rotating file on a shared
-      # emptyDir so a sidecar shipper (fluent-bit, vector, promtail, ...) can
-      # tail it. The api container reads LOG_FILE_PATH / LOG_FILE_MAX_BYTES /
-      # LOG_FILE_BACKUP_COUNT — see aerospike-cluster-manager docs/logging.md
-      # "Example C". Ignored when `logging.configFile` or `logging.dictConfig`
-      # is set (dictConfig takes full ownership of the logging pipeline).
+      # emptyDir so the sidecar (when enabled) can tail it. The api
+      # container reads LOG_FILE_PATH / LOG_FILE_MAX_BYTES /
+      # LOG_FILE_BACKUP_COUNT.
       # =========================================================================
       fileMirror:
         # -- Enable file mirror. Auto-mounts an emptyDir at `mountPath` on
@@ -575,23 +562,51 @@ ui:
         backupCount: 3
 
       # =========================================================================
-      # Log-shipper sidecar (fluent-bit, vector, promtail, vendor-specific
-      # collector, ...). The sidecar shares an emptyDir with the api container
-      # at `fileMirror.mountPath` so it can tail the rotating file.
+      # OTLP-forwarder sidecar (fluent-bit by default).
+      #
+      # The sidecar shares an emptyDir with the api container at
+      # `fileMirror.mountPath`, tails the rotating file, and forwards
+      # records via OTLP/gRPC to an external OpenTelemetry Collector — the
+      # Collector is NOT deployed by this chart, the assumption is that
+      # one already exists in the cluster (DaemonSet, Deployment, or
+      # namespace-scoped). The sidecar is purely a per-pod *exporter*.
       #
       # `sidecar.enabled=true` requires `fileMirror.enabled=true` — without
       # the mirror, the sidecar would have nothing to tail. The chart fails
-      # template rendering if the two are inconsistent so the misconfiguration
-      # is caught at `helm install` time instead of as a silent no-op at
-      # runtime.
+      # template rendering if the two are inconsistent so the
+      # misconfiguration is caught at `helm install` time.
       # =========================================================================
       sidecar:
-        # -- Enable the log-shipper sidecar container.
+        # -- Enable the OTLP-forwarder sidecar container.
         enabled: false
-        # -- Sidecar container image. Pinned to a specific patch tag so
-        # `helm upgrade` does not silently pull a new build under the
-        # floating `3.2` alias. Bump deliberately when fluent-bit releases
-        # a fix you want to take.
+
+        # -- OTLP target. This is the external OTel Collector — set the
+        # endpoint to where Collector's OTLP receiver listens.
+        otlp:
+          # -- Host:port of the OTel Collector's OTLP/gRPC receiver. The
+          # default sidecar config (below) wires this into fluent-bit's
+          # `opentelemetry` output plugin. Required when sidecar.enabled=true
+          # and config.content is empty (the default rendered config
+          # references it).
+          # Example: "otel-collector.observability.svc.cluster.local:4317"
+          endpoint: ""
+          # -- Optional OTLP headers (auth tokens, tenant id). Forwarded
+          # as gRPC metadata. Comma-separated `key=value` pairs.
+          # Example: "x-tenant=acm,authorization=Bearer xxxxx"
+          headers: ""
+          # -- Use TLS for the OTLP connection. When false the sidecar uses
+          # plaintext gRPC — fine for in-cluster Collector with no
+          # mTLS, but production should generally enable TLS.
+          tls: false
+          # -- Insecure-skip-verify when tls=true. Useful for self-signed
+          # Collector certs in dev/staging. Avoid in production.
+          insecureSkipVerify: false
+
+        # -- Sidecar container image. Defaults to fluent-bit, which has a
+        # first-party OTLP output plugin (`opentelemetry`) since 1.9. Pinned
+        # to a specific patch tag so `helm upgrade` does not silently pull a
+        # new build under the floating `3.2` alias. Bump deliberately when
+        # fluent-bit releases a fix you want to take.
         image:
           repository: cr.fluentbit.io/fluent/fluent-bit
           tag: "3.2.10"
@@ -630,19 +645,19 @@ ui:
         # -- Additional volume mounts on the sidecar container. Use together
         # with `ui.api.extraVolumes` to mount secrets, CA bundles, etc.
         extraVolumeMounts: []
-        # -- Optional sidecar config file rendered into a ConfigMap and
-        # mounted into the sidecar. When `content` is empty no ConfigMap is
-        # created — the sidecar runs with the image's default config and the
-        # operator is expected to bake one in or supply it via
-        # `extraVolumeMounts`. The file format depends on the shipper:
-        # fluent-bit conf, vector toml, promtail yaml, etc.
+        # -- Sidecar config file. When `content` is empty the chart renders
+        # a fluent-bit config that tails fileMirror.path and forwards via
+        # OTLP to sidecar.otlp.endpoint. Override `content` to plug in a
+        # different shipper (vector, promtail, vendor agent); the chart
+        # will render exactly what you provide.
         config:
           # -- Path inside the sidecar where the file is mounted.
           mountPath: /fluent-bit/etc/fluent-bit.conf
           # -- ConfigMap key the file is stored under (also the subPath of
           # the volume mount).
           subPath: fluent-bit.conf
-          # -- Raw file content. Empty disables the ConfigMap.
+          # -- Override the rendered config with raw file content. Empty =
+          # use the chart's default fluent-bit OTLP-forwarder template.
           content: ""
 
   # =============================================================================
