@@ -2,6 +2,31 @@
 {{- if and .Values.ui.autoscaling.enabled .Values.ui.postgresql.enabled }}
 {{- fail "ui.autoscaling.enabled and ui.postgresql.enabled cannot both be true. The embedded PostgreSQL sidecar is single-instance only. Disable ui.postgresql.enabled and provide ui.env.databaseUrl for an external database when using HPA." }}
 {{- end }}
+{{- if and .Values.ui.api.logging.sidecar.enabled (not .Values.ui.api.logging.fileMirror.enabled) }}
+{{- fail "ui.api.logging.sidecar.enabled=true requires ui.api.logging.fileMirror.enabled=true. Without the file mirror the sidecar has nothing to tail. Either enable fileMirror, or rely on a node-level OTel Collector DaemonSet scraping container logs instead." }}
+{{- end }}
+{{- if and .Values.ui.api.logging.sidecar.enabled (not .Values.ui.api.logging.sidecar.config.content) (not .Values.ui.api.logging.sidecar.otlp.endpoint) }}
+{{- fail "ui.api.logging.sidecar.enabled=true requires either ui.api.logging.sidecar.otlp.endpoint (to use the default fluent-bit OTLP forwarder config) or ui.api.logging.sidecar.config.content (to bring your own shipper config)." }}
+{{- end }}
+{{- if .Values.ui.api.logging.sidecar.config.content }}
+{{- /*
+  Block YAML-toxic content from ui.api.logging.sidecar.config.content:
+  - "---" inside the value risks splitting the ConfigMap into multiple
+    YAML documents when rendered through `nindent`. Even when block-scalar
+    indentation keeps a single document intact, a downstream `kubectl
+    diff` / GitOps tool that re-parses the rendered manifest can still
+    trip on it.
+  - A leading "%" is a YAML directive marker and is unsafe in any context.
+  Catch both at install time with a clear error rather than ship a
+  broken ConfigMap that fails on apply with an opaque parser message.
+*/}}
+{{- if contains "\n---" (printf "\n%s" .Values.ui.api.logging.sidecar.config.content) }}
+{{- fail "ui.api.logging.sidecar.config.content must not contain a '---' line (YAML document separator). Inline the directives without document separators, or supply the config via `ui.api.logging.sidecar.extraVolumeMounts` referencing your own ConfigMap." }}
+{{- end }}
+{{- if hasPrefix "%" .Values.ui.api.logging.sidecar.config.content }}
+{{- fail "ui.api.logging.sidecar.config.content must not start with '%' (YAML directive marker). Indent the first line or supply the config via `ui.api.logging.sidecar.extraVolumeMounts` referencing your own ConfigMap." }}
+{{- end }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -43,6 +68,9 @@ spec:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/ui/configmap.yaml") . | sha256sum }}
         checksum/secret: {{ include (print $.Template.BasePath "/ui/secret.yaml") . | sha256sum }}
+        {{- if .Values.ui.api.logging.sidecar.enabled }}
+        checksum/log-shipper-config: {{ include (print $.Template.BasePath "/ui/configmap-log-shipper.yaml") . | sha256sum }}
+        {{- end }}
       {{- with .Values.ui.podAnnotations }}
         {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -143,16 +171,19 @@ spec:
             - name: OIDC_EXCLUDE_PATHS
               value: {{ join "," .Values.ui.api.auth.oidc.excludePaths | quote }}
             {{- end }}
-            {{- with .Values.ui.api.logging.handlers }}
-            - name: LOG_HANDLERS
-              value: {{ . | quote }}
-            {{- end }}
-            {{- if .Values.ui.api.logging.dictConfig }}
-            - name: LOGGING_CONFIG_FILE
-              value: /etc/asm/logging.yaml
-            {{- else if .Values.ui.api.logging.configFile }}
-            - name: LOGGING_CONFIG_FILE
-              value: {{ .Values.ui.api.logging.configFile | quote }}
+            {{- if .Values.ui.api.logging.fileMirror.enabled }}
+            - name: LOG_FILE_PATH
+              value: {{ .Values.ui.api.logging.fileMirror.path | quote }}
+            {{- /*
+              `| quote` on a JSON number >= 1e7 renders it in scientific
+              notation (e.g. "5.24288e+07"), which Python's int() rejects
+              with ValueError on startup. Force a decimal-int representation
+              via `printf "%d"` so 52428800 stays "52428800".
+            */}}
+            - name: LOG_FILE_MAX_BYTES
+              value: {{ printf "%d" (.Values.ui.api.logging.fileMirror.maxBytes | int) | quote }}
+            - name: LOG_FILE_BACKUP_COUNT
+              value: {{ printf "%d" (.Values.ui.api.logging.fileMirror.backupCount | int) | quote }}
             {{- end }}
             {{- with .Values.ui.api.extraEnv }}
             {{- toYaml . | nindent 12 }}
@@ -184,7 +215,7 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if or .Values.ui.api.extraVolumeMounts .Values.ui.api.extraPipPackages .Values.ui.api.logging.dictConfig }}
+          {{- if or .Values.ui.api.extraVolumeMounts .Values.ui.api.extraPipPackages .Values.ui.api.logging.fileMirror.enabled .Values.ui.api.logging.sidecar.enabled }}
           volumeMounts:
             {{- with .Values.ui.api.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
@@ -194,12 +225,47 @@ spec:
               mountPath: /extra-packages
               readOnly: true
             {{- end }}
-            {{- if .Values.ui.api.logging.dictConfig }}
-            - name: logging-config
-              mountPath: /etc/asm
-              readOnly: true
+            {{- if or .Values.ui.api.logging.fileMirror.enabled .Values.ui.api.logging.sidecar.enabled }}
+            - name: acm-logs
+              mountPath: {{ .Values.ui.api.logging.fileMirror.mountPath | quote }}
             {{- end }}
           {{- end }}
+        {{- if .Values.ui.api.logging.sidecar.enabled }}
+        - name: log-shipper
+          image: "{{ .Values.ui.api.logging.sidecar.image.repository }}:{{ .Values.ui.api.logging.sidecar.image.tag }}"
+          imagePullPolicy: {{ .Values.ui.api.logging.sidecar.image.pullPolicy }}
+          {{- with .Values.ui.api.logging.sidecar.command }}
+          command:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.ui.api.logging.sidecar.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.ui.api.logging.sidecar.env }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.ui.api.logging.sidecar.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.ui.api.logging.sidecar.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: acm-logs
+              mountPath: {{ .Values.ui.api.logging.fileMirror.mountPath | quote }}
+              readOnly: true
+            - name: log-shipper-config
+              mountPath: {{ .Values.ui.api.logging.sidecar.config.mountPath | quote }}
+              subPath: {{ .Values.ui.api.logging.sidecar.config.subPath | quote }}
+              readOnly: true
+            {{- with .Values.ui.api.logging.sidecar.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+        {{- end }}
         {{- if .Values.ui.postgresql.enabled }}
         - name: postgres
           image: "{{ .Values.ui.postgresql.image.repository }}:{{ .Values.ui.postgresql.image.tag }}"
@@ -273,7 +339,7 @@ spec:
             - name: data
               mountPath: /var/lib/postgresql/data
         {{- end }}
-      {{- if or .Values.ui.postgresql.enabled .Values.ui.api.extraVolumes .Values.ui.api.extraPipPackages .Values.ui.api.logging.dictConfig }}
+      {{- if or .Values.ui.postgresql.enabled .Values.ui.api.extraVolumes .Values.ui.api.extraPipPackages .Values.ui.api.logging.fileMirror.enabled .Values.ui.api.logging.sidecar.enabled }}
       volumes:
         {{- if .Values.ui.postgresql.enabled }}
         - name: data
@@ -291,10 +357,14 @@ spec:
         - name: extra-packages
           emptyDir: {}
         {{- end }}
-        {{- if .Values.ui.api.logging.dictConfig }}
-        - name: logging-config
+        {{- if or .Values.ui.api.logging.fileMirror.enabled .Values.ui.api.logging.sidecar.enabled }}
+        - name: acm-logs
+          emptyDir: {}
+        {{- end }}
+        {{- if .Values.ui.api.logging.sidecar.enabled }}
+        - name: log-shipper-config
           configMap:
-            name: {{ include "aerospike-ce-kubernetes-operator.ui.api.fullname" . }}-logging
+            name: {{ include "aerospike-ce-kubernetes-operator.ui.api.fullname" . }}-log-shipper
         {{- end }}
       {{- end }}
       {{- with .Values.ui.nodeSelector }}

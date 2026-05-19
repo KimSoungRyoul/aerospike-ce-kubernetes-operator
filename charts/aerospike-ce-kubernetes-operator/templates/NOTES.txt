@@ -268,6 +268,42 @@ SECURITY NOTE: NetworkPolicy is disabled for the UI. For production deployments,
 consider enabling it (ui.networkPolicy.enabled=true).
 {{- end }}
 
+{{- if .Values.ui.api.logging.fileMirror.enabled }}
+
+------------------------------------------------------------------------
+  ACM API log file mirror is ENABLED
+------------------------------------------------------------------------
+
+The api container writes log records to a rotating file at
+{{ .Values.ui.api.logging.fileMirror.path }} on a shared emptyDir mounted
+at {{ .Values.ui.api.logging.fileMirror.mountPath }}.
+{{- if .Values.ui.api.logging.sidecar.enabled }}
+
+An OTLP-forwarder sidecar
+`{{ .Values.ui.api.logging.sidecar.image.repository }}:{{ .Values.ui.api.logging.sidecar.image.tag }}`
+tails the same path read-only and forwards records via OTLP to
+  {{ .Values.ui.api.logging.sidecar.otlp.endpoint | default "(unset — sidecar.config.content overrides it)" }}
+
+NOTE: this chart does NOT deploy an OTel Collector. The endpoint above
+must point at one you operate elsewhere (DaemonSet / Deployment /
+namespace-scoped). All redaction / sampling / vendor-specific exporter
+configuration lives in that Collector's pipeline, not in ACM or this
+chart.
+{{- end }}
+
+IMPORTANT: This feature requires the ACM api process to honor
+`LOG_FILE_PATH`, which was added in aerospike-cluster-manager PR #368.
+Make sure `ui.imageTag` (or `ui.api.image.tag`) points to a release that
+includes that change. If you pin an older tag the sidecar will tail an
+empty file with no warning at runtime — the operator's only signal is
+"logs don't appear in the shipper".
+
+Verify quickly:
+
+  kubectl exec -n {{ .Release.Namespace }} deploy/{{ include "aerospike-ce-kubernetes-operator.ui.api.fullname" . }} -c api -- \
+    ls -l {{ .Values.ui.api.logging.fileMirror.path }}
+{{- end }}
+
 Check UI pod status:
   kubectl get pods -l app.kubernetes.io/name=aerospike-cluster-manager,app.kubernetes.io/instance={{ .Release.Name }} -n {{ .Release.Namespace }}
 

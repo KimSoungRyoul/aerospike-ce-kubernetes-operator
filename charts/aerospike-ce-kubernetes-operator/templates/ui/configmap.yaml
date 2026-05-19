@@ -30,19 +30,6 @@ data:
   DEFAULT_AEROSPIKE_IMAGE: {{ .Values.aerospikeImages.aerospike | quote }}
   DEFAULT_EXPORTER_IMAGE: {{ .Values.aerospikeImages.exporter | quote }}
 {{- end }}
-{{- if and (eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true") .Values.ui.api.logging.dictConfig }}
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: {{ include "aerospike-ce-kubernetes-operator.ui.api.fullname" . }}-logging
-  namespace: {{ .Release.Namespace }}
-  labels:
-    {{- include "aerospike-ce-kubernetes-operator.ui.api.labels" . | nindent 4 }}
-data:
-  logging.yaml: |
-{{ toYaml .Values.ui.api.logging.dictConfig | indent 4 }}
-{{- end }}
 {{- if eq (include "aerospike-ce-kubernetes-operator.multiCluster.enabled" .) "true" }}
 ---
 # Multi-cluster registry consumed by the web SPA at /cluster-registry.json.

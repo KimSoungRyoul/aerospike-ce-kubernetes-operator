@@ -1,0 +1,69 @@
+{{- if eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true" }}
+{{- if .Values.ui.api.logging.sidecar.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "aerospike-ce-kubernetes-operator.ui.api.fullname" . }}-log-shipper
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aerospike-ce-kubernetes-operator.ui.api.labels" . | nindent 4 }}
+data:
+  {{ .Values.ui.api.logging.sidecar.config.subPath }}: |-
+    {{- if .Values.ui.api.logging.sidecar.config.content }}
+    {{- /*
+      Operator-supplied raw content. The chart treats it as opaque text and
+      mounts it as-is — the format is whatever the chosen shipper (fluent-bit,
+      vector, promtail, ...) expects. YAML safety guards on the input string
+      (no `---`, no leading `%`) live in deployment-api.yaml.
+    */}}
+    {{- .Values.ui.api.logging.sidecar.config.content | nindent 4 }}
+    {{- else }}
+    {{- /*
+      Default fluent-bit OTLP-forwarder template. Tails the ACM rotating
+      file at fileMirror.path, parses it as JSON, and forwards via fluent-
+      bit's `opentelemetry` output to the external OTel Collector at
+      sidecar.otlp.endpoint. The OTel Collector is NOT deployed by this
+      chart — operators run it elsewhere (DaemonSet / Deployment) and
+      configure routing / redaction / sampling / vendor exporters there.
+    */}}
+    [SERVICE]
+        Flush         1
+        Daemon        Off
+        Log_Level     info
+        Parsers_File  /fluent-bit/parsers/parsers.conf
+
+    [INPUT]
+        Name              tail
+        Path              {{ .Values.ui.api.logging.fileMirror.mountPath }}/*.log
+        Parser            json
+        Refresh_Interval  5
+        Read_from_Head    true
+        DB                /tmp/fluent-bit-acm.db
+        Tag               acm.api
+
+    [OUTPUT]
+        Name              opentelemetry
+        Match             *
+        {{- /*
+          fluent-bit's opentelemetry output accepts `host` + `port` or a
+          full URI. We split host/port because the value is more readable
+          and parses identically regardless of TLS toggling.
+        */}}
+        Host              {{ regexReplaceAll ":[0-9]+$" (required "ui.api.logging.sidecar.otlp.endpoint is required when sidecar.enabled=true and sidecar.config.content is empty" .Values.ui.api.logging.sidecar.otlp.endpoint) "" }}
+        Port              {{ regexFind "[0-9]+$" (required "ui.api.logging.sidecar.otlp.endpoint must include a port (host:port)" .Values.ui.api.logging.sidecar.otlp.endpoint) | default "4317" }}
+        Logs_uri          /v1/logs
+        Metrics_uri       /v1/metrics
+        Traces_uri        /v1/traces
+        Log_response_payload true
+        {{- if .Values.ui.api.logging.sidecar.otlp.tls }}
+        tls               On
+        tls.verify        {{ if .Values.ui.api.logging.sidecar.otlp.insecureSkipVerify }}Off{{ else }}On{{ end }}
+        {{- else }}
+        tls               Off
+        {{- end }}
+        {{- with .Values.ui.api.logging.sidecar.otlp.headers }}
+        Header            {{ . }}
+        {{- end }}
+    {{- end }}
+{{- end }}
+{{- end }}
