@@ -550,6 +550,90 @@ ui:
       #         handlers: [console]
       dictConfig: {}
 
+      # =========================================================================
+      # File mirror — writes log records to a rotating file on a shared
+      # emptyDir so a sidecar shipper (fluent-bit, vector, promtail, ...) can
+      # tail it. The api container reads LOG_FILE_PATH / LOG_FILE_MAX_BYTES /
+      # LOG_FILE_BACKUP_COUNT — see aerospike-cluster-manager docs/logging.md
+      # "Example C". Ignored when `logging.configFile` or `logging.dictConfig`
+      # is set (dictConfig takes full ownership of the logging pipeline).
+      # =========================================================================
+      fileMirror:
+        # -- Enable file mirror. Auto-mounts an emptyDir at `mountPath` on
+        # both the api container and the sidecar (when enabled), so the
+        # rotating file at `path` is visible to both.
+        enabled: false
+        # -- Mount root of the shared emptyDir inside both the api container
+        # and the sidecar.
+        mountPath: /var/log/acm
+        # -- Log file the api process writes to. Must live under `mountPath`
+        # so the sidecar can read it.
+        path: /var/log/acm/api.log
+        # -- Per-file size cap (bytes) before rotation. Default 50 MiB.
+        maxBytes: 52428800
+        # -- Number of rotated backups kept on disk.
+        backupCount: 3
+
+      # =========================================================================
+      # Log-shipper sidecar (fluent-bit, vector, promtail, vendor-specific
+      # collector, ...). The sidecar shares an emptyDir with the api container
+      # at `fileMirror.mountPath` so it can tail the rotating file.
+      #
+      # `sidecar.enabled=true` requires `fileMirror.enabled=true` — without
+      # the mirror, the sidecar would have nothing to tail. The chart fails
+      # template rendering if the two are inconsistent so the misconfiguration
+      # is caught at `helm install` time instead of as a silent no-op at
+      # runtime.
+      # =========================================================================
+      sidecar:
+        # -- Enable the log-shipper sidecar container.
+        enabled: false
+        # -- Sidecar container image.
+        image:
+          repository: cr.fluentbit.io/fluent/fluent-bit
+          tag: "3.2"
+          pullPolicy: IfNotPresent
+        # -- Override the image's entrypoint command. Leave empty to use the
+        # image default.
+        command: []
+        # -- Override the image's CMD (arguments).
+        args: []
+        # -- Additional env vars passed to the sidecar (e.g. log shipper auth
+        # tokens). Standard Kubernetes env-var schema.
+        env: []
+        # -- Resource requests/limits for the sidecar.
+        resources:
+          requests:
+            cpu: 25m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
+        # -- Container-level securityContext applied to the sidecar.
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          capabilities:
+            drop:
+              - ALL
+        # -- Additional volume mounts on the sidecar container. Use together
+        # with `ui.api.extraVolumes` to mount secrets, CA bundles, etc.
+        extraVolumeMounts: []
+        # -- Optional sidecar config file rendered into a ConfigMap and
+        # mounted into the sidecar. When `content` is empty no ConfigMap is
+        # created — the sidecar runs with the image's default config and the
+        # operator is expected to bake one in or supply it via
+        # `extraVolumeMounts`. The file format depends on the shipper:
+        # fluent-bit conf, vector toml, promtail yaml, etc.
+        config:
+          # -- Path inside the sidecar where the file is mounted.
+          mountPath: /fluent-bit/etc/fluent-bit.conf
+          # -- ConfigMap key the file is stored under (also the subPath of
+          # the volume mount).
+          subPath: fluent-bit.conf
+          # -- Raw file content. Empty disables the ConfigMap.
+          content: ""
+
   # =============================================================================
   # Web (Next.js 14 + proxy.js sidecar) — port 3100
   # =============================================================================

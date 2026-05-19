@@ -223,6 +223,52 @@ and [docs/logging.md](https://github.com/aerospike-ce-ecosystem/aerospike-cluste
 in the cluster-manager repo for the full reference, including airgap and
 constraint notes.
 
+#### Sidecar log shipper (fileMirror + sidecar)
+
+For operators who want to forward logs through a generic agent
+(fluent-bit, vector, promtail, ...) instead of an in-process SDK, enable
+the file mirror and add a sidecar container. The api writes records to a
+rotating file on a shared `emptyDir`, and the sidecar tails that file:
+
+```yaml
+ui:
+  api:
+    logging:
+      fileMirror:
+        enabled: true
+        # mountPath / path / maxBytes / backupCount have sensible defaults;
+        # see values.yaml for the full schema.
+      sidecar:
+        enabled: true
+        # Defaults to fluent-bit. Override image / command / args / env to
+        # pick vector, promtail, or a vendor-specific shipper.
+        config:
+          content: |
+            [SERVICE]
+                Flush 1
+            [INPUT]
+                Name tail
+                Path /var/log/acm/*.log
+                Refresh_Interval 5
+            [OUTPUT]
+                Name forward
+                Match *
+                Host fluentd.observability.svc.cluster.local
+                Port 24224
+```
+
+The chart fails template rendering if `sidecar.enabled=true` is set
+without `fileMirror.enabled=true` (sidecar would have nothing to tail),
+or if `fileMirror.enabled=true` is combined with `logging.configFile` /
+`logging.dictConfig` (those modes own the entire pipeline). This catches
+the misconfiguration at `helm install` time rather than as a silent
+no-op at runtime.
+
+`fileMirror.enabled=true` (without a sidecar) is also valid — it lets a
+node-level DaemonSet attach to the api pod's `emptyDir` indirectly via
+log-driver paths, or simply serves as a per-pod retention buffer when
+`kubectl logs` rotation is too aggressive for your environment.
+
 #### Customizing the UI deployment
 
 You can customize the UI with service annotations, resource defaults, and extra environment variables:

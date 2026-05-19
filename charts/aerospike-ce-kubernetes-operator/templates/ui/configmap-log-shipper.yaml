@@ -1,0 +1,14 @@
+{{- if eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true" }}
+{{- if and .Values.ui.api.logging.sidecar.enabled .Values.ui.api.logging.sidecar.config.content }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "aerospike-ce-kubernetes-operator.ui.api.fullname" . }}-log-shipper
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aerospike-ce-kubernetes-operator.ui.api.labels" . | nindent 4 }}
+data:
+  {{ .Values.ui.api.logging.sidecar.config.subPath }}: |-
+    {{- .Values.ui.api.logging.sidecar.config.content | nindent 4 }}
+{{- end }}
+{{- end }}
