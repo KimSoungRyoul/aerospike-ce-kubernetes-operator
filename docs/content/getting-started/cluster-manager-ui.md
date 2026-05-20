@@ -560,6 +560,8 @@ After modifying a template, existing clusters that reference it are not automati
 | `ui.metrics.serviceMonitor.scrapeTimeout` | Scrape timeout | `"10s"` |
 | `ui.metrics.serviceMonitor.labels` | Additional ServiceMonitor labels | `{}` |
 
+For log routing to an external OpenTelemetry Collector (fileMirror + OTLP-forwarder sidecar), see [Logging](#logging) below.
+
 View all options:
 
 ```bash
@@ -605,10 +607,12 @@ Configure the timeout for UI requests to the Kubernetes API server:
 
 ### Logging
 
+#### Basic log level / format
+
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `ui.env.logLevel` | `"INFO"` | Log level: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
-| `ui.env.logFormat` | `"text"` | `"text"`: human-readable format, `"json"`: structured JSON format (recommended when integrating with a log collection pipeline) |
+| `ui.env.logFormat` | `"text"` | `"text"`: human-readable format, `"json"`: structured JSON (recommended when shipping to an OpenTelemetry Collector or other log pipeline) |
 
 ```bash
 # Enable structured JSON logging (recommended when integrating with Loki, Elasticsearch, etc.)
@@ -617,6 +621,75 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kuber
   --set ui.env.logFormat=json \
   --set ui.env.logLevel=INFO
 ```
+
+#### Log routing via OpenTelemetry Collector
+
+ACM emits structured JSON to stdout (with `request_id` / `otelTraceID` / `otelSpanID` correlation fields). External log routing — PII redaction, sampling, vendor-specific exporters (Datadog, Loki, Elasticsearch, Sentry, ...) — is delegated to an **external OpenTelemetry Collector** that you operate elsewhere in the cluster. The chart does NOT deploy a Collector; it only opt-in deploys a per-pod OTLP-forwarder sidecar that tails the api's rotating-file mirror.
+
+Two deployment patterns are supported.
+
+**Pattern A — Node-level DaemonSet Collector (recommended when available)**
+
+Leave `ui.api.logging.fileMirror.enabled=false` and `ui.api.logging.sidecar.enabled=false`. ACM's stdout is picked up by your existing OTel Collector DaemonSet scraping `/var/log/containers/*.log`. No per-pod overhead. This is the default state of the chart.
+
+**Pattern B — Pod-internal OTLP-forwarder sidecar**
+
+Use this when DaemonSet scraping is not an option (multi-tenant clusters where each tenant brings its own Collector, no permission for a hostPath DaemonSet, vendor-specific shipper isolation). The chart wires:
+
+1. A shared `emptyDir` volume mounted into both the api container and the sidecar at `fileMirror.mountPath`.
+2. The api writes a rotating file (`LOG_FILE_PATH` env auto-set on the api container).
+3. A fluent-bit sidecar tails that file, parses JSON, and forwards records via OTLP/gRPC to the Collector endpoint you specify.
+
+```yaml
+# values.yaml
+ui:
+  env:
+    logFormat: "json"               # recommended so the Collector parser keeps field types
+  api:
+    logging:
+      fileMirror:
+        enabled: true               # writes /var/log/acm/api.log on a shared emptyDir
+      sidecar:
+        enabled: true
+        otlp:
+          endpoint: "otel-collector.observability.svc.cluster.local:4317"
+          # tls: true
+          # insecureSkipVerify: false
+          # headers: "x-tenant=acm,authorization=Bearer xxxxxxxx"
+```
+
+When `sidecar.config.content` is empty (default), the chart renders a fluent-bit config that tails `fileMirror.path`, parses it with the JSON parser, and forwards via the `opentelemetry` output plugin to `sidecar.otlp.endpoint`. Override `sidecar.image` and `sidecar.config.content` to swap in vector, promtail, or a vendor agent — the chart will mount whatever you provide verbatim.
+
+#### Logging values reference
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `ui.api.logging.fileMirror.enabled` | `false` | Mirror logs to a rotating file in addition to stdout (auto-mounts the shared emptyDir). Required when `sidecar.enabled=true`. |
+| `ui.api.logging.fileMirror.mountPath` | `"/var/log/acm"` | Shared emptyDir mount path inside both the api container and the sidecar. |
+| `ui.api.logging.fileMirror.path` | `"/var/log/acm/api.log"` | Rotating log file path. Must live under `mountPath` so the sidecar can read it. |
+| `ui.api.logging.fileMirror.maxBytes` | `52428800` | Per-file size cap (bytes) before rotation. Default 50 MiB. |
+| `ui.api.logging.fileMirror.backupCount` | `3` | Number of rotated backups kept on disk. |
+| `ui.api.logging.sidecar.enabled` | `false` | Deploy the OTLP-forwarder sidecar container. Requires `fileMirror.enabled=true`. |
+| `ui.api.logging.sidecar.otlp.endpoint` | `""` | OTel Collector OTLP/gRPC endpoint (host:port). Required when `sidecar.enabled=true` and `sidecar.config.content` is empty. |
+| `ui.api.logging.sidecar.otlp.headers` | `""` | OTLP metadata header (comma-separated `key=value`). |
+| `ui.api.logging.sidecar.otlp.tls` | `false` | Use TLS for OTLP. Plaintext gRPC is fine for in-cluster Collector without mTLS. |
+| `ui.api.logging.sidecar.otlp.insecureSkipVerify` | `false` | Skip TLS cert verification (dev/staging self-signed Collector certs). |
+| `ui.api.logging.sidecar.image.repository` | `cr.fluentbit.io/fluent/fluent-bit` | Sidecar image. Override for vector/promtail/vendor agent. |
+| `ui.api.logging.sidecar.image.tag` | `"3.2.10"` | Pinned patch tag to avoid silent rebuilds on `helm upgrade`. |
+| `ui.api.logging.sidecar.config.content` | `""` (default fluent-bit OTLP template renders) | Raw sidecar config to override the default. Must not contain `---` lines or start with `%`. |
+| `ui.api.logging.sidecar.resources` | `25m/32Mi → 100m/128Mi` | Sidecar resource requests/limits. |
+
+#### Validation guards
+
+The chart fails template rendering on misconfigurations rather than producing a silent no-op:
+
+| Misconfiguration | Failure |
+|---|---|
+| `sidecar.enabled=true` without `fileMirror.enabled=true` | install fails — sidecar would have nothing to tail |
+| `sidecar.enabled=true` without `sidecar.otlp.endpoint` AND without `sidecar.config.content` | install fails — default template needs an endpoint |
+| `sidecar.config.content` containing a `---` line or starting with `%` | install fails — would corrupt rendered ConfigMap YAML |
+
+See the [ACM logging reference](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/blob/main/docs/logging.md) and the [observability guide](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/blob/main/docs/observability.md) for the full reference and example fluent-bit sidecar configuration.
 
 ---
 

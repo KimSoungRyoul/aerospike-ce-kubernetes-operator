@@ -20,6 +20,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
+# Least-privilege: e2e only reads the checked-out code.
+permissions:
+  contents: read
+
 jobs:
   test-e2e:
     name: Run on Ubuntu

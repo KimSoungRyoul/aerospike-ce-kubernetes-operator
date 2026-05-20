@@ -432,23 +432,25 @@ ui:
     extraVolumeMounts: []
 
     # -- Extra environment variables passed to the api container.
-    # Useful for plugin handler configuration (NELO_HOST, NELO_PROJECT_TOKEN, etc.)
+    # Use this for any custom configuration the api container needs (e.g.
+    # third-party SDK endpoints, timezone overrides). Standard Kubernetes
+    # env-var schema applies.
     # Example:
     #   extraEnv:
-    #     - name: NELO_HOST
-    #       value: "nelo-collector.svc.cluster.local"
+    #     - name: TZ
+    #       value: "Asia/Seoul"
     extraEnv: []
 
     # -- envFrom entries (configMapRef / secretRef) for bulk env injection.
     # Example:
     #   extraEnvFrom:
     #     - secretRef:
-    #         name: nelo-token
+    #         name: my-api-secrets
     extraEnvFrom: []
 
     # -- Additional Python packages installed by an init container into a
-    # PYTHONPATH-mounted volume so plugin log handlers (pynelo, ddtrace, ...)
-    # can be loaded without rebuilding the upstream image.
+    # PYTHONPATH-mounted volume so extra dependencies can be loaded without
+    # rebuilding the upstream image.
     #
     # Limitations: requires PyPI egress from the cluster, adds pod-startup
     # latency, may break with C extensions whose ABI mismatches the runtime

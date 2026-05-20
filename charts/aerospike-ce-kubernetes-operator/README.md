@@ -175,8 +175,8 @@ When `ui.api.otel.enabled=false` (default), the deployment sets
 
 ACM emits structured JSON to stdout (with `request_id` /
 `otelTraceID` / `otelSpanID` correlation fields) and delegates all
-external routing — PII redaction, sampling, vendor exporters (NELO,
-Datadog, Loki, Sentry, ...) — to an **external OpenTelemetry Collector**
+external routing — PII redaction, sampling, vendor exporters (Datadog,
+Loki, Elasticsearch, Sentry, ...) — to an **external OpenTelemetry Collector**
 that the operator runs elsewhere in the cluster. This chart does NOT
 deploy a Collector; it only opt-in deploys a per-pod OTLP-forwarder
 sidecar.
@@ -229,9 +229,8 @@ Validation guards:
 
 See [docs/observability.md](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/blob/main/docs/observability.md)
 and [docs/logging.md](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/blob/main/docs/logging.md)
-in the cluster-manager repo for the full reference, including the
-migration table from the pre-0.X.0 `LOG_HANDLERS` / `LOGGING_CONFIG_FILE`
-in-process extension hooks.
+in the cluster-manager repo for the full reference and example fluent-bit
+sidecar configuration.
 
 #### Database backend
 

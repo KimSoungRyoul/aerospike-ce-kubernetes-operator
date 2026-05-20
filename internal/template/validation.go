@@ -172,8 +172,11 @@ func ValidateTemplateSpec(spec *ackov1alpha1.AerospikeClusterTemplateSpec) ([]st
 // silently inherit an enterprise image. Previously this was a warning only,
 // so the constraint could be bypassed via templateRef. We now reject:
 //  1. images whose lower-cased reference contains "aerospike-server-enterprise"
-//     (the canonical enterprise repository name on Docker Hub), and
-//  2. images whose tag/repository contains a generic "enterprise" substring.
+//     (the canonical enterprise repository name on Docker Hub),
+//  2. images with an Enterprise Edition tag prefix ("ee-"/"ent-"), matching
+//     the cluster webhook's isEnterpriseTag check so a custom registry name
+//     cannot smuggle an enterprise build past template validation, and
+//  3. images whose tag/repository contains a generic "enterprise" substring.
 //
 // CE images typically contain a "ce-" tag prefix (e.g. aerospike:ce-8.1.1.1);
 // retagged custom-registry CE images that omit "ce-" are reported as a
@@ -189,6 +192,12 @@ func validateTemplateImage(image string) (errs []string, warnings []string) {
 		errs = append(errs, fmt.Sprintf(
 			"template image %q references the enterprise repository "+
 				"(aerospike-server-enterprise); CE clusters must use a CE image (CE constraint)",
+			image,
+		))
+	case isEnterpriseTag(image):
+		errs = append(errs, fmt.Sprintf(
+			"template image %q has an Enterprise Edition tag (ee-/ent- prefix); "+
+				"CE clusters must use a CE image (CE constraint)",
 			image,
 		))
 	case strings.Contains(imageLower, "enterprise"):

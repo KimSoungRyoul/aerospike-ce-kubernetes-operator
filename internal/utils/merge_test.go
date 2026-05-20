@@ -102,6 +102,48 @@ func TestDeepMerge_ScalarOverridesMap(t *testing.T) {
 	}
 }
 
+func TestDeepMerge_ResultDoesNotAliasNestedBaseMap(t *testing.T) {
+	base := map[string]any{
+		"service": map[string]any{"proto-fd-max": 15000},
+	}
+	override := map[string]any{}
+	result := DeepMerge(base, override)
+
+	// Mutating a nested map in the result must not reach back into base.
+	result["service"].(map[string]any)["proto-fd-max"] = 999
+	if base["service"].(map[string]any)["proto-fd-max"] != 15000 {
+		t.Error("mutating result aliased back into base map")
+	}
+}
+
+func TestDeepMerge_ResultDoesNotAliasNestedOverrideMap(t *testing.T) {
+	base := map[string]any{}
+	override := map[string]any{
+		"network": map[string]any{"port": 3000},
+	}
+	result := DeepMerge(base, override)
+
+	// A key present only in override must also be deep-copied.
+	result["network"].(map[string]any)["port"] = 9999
+	if override["network"].(map[string]any)["port"] != 3000 {
+		t.Error("mutating result aliased back into override map")
+	}
+}
+
+func TestDeepMerge_ResultDoesNotAliasSlices(t *testing.T) {
+	base := map[string]any{
+		"namespaces": []any{
+			map[string]any{"name": "test"},
+		},
+	}
+	result := DeepMerge(base, map[string]any{})
+
+	result["namespaces"].([]any)[0].(map[string]any)["name"] = "mutated"
+	if base["namespaces"].([]any)[0].(map[string]any)["name"] != "test" {
+		t.Error("mutating result aliased back into base slice element")
+	}
+}
+
 // --- IntFromAny tests ---
 
 func TestIntFromAny_Int(t *testing.T) {

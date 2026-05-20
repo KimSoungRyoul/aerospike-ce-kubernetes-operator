@@ -421,6 +421,19 @@ func TestValuesEqual(t *testing.T) {
 		{true, true, true},
 		{true, false, false},
 		{nil, nil, true},
+		// Cross-type numeric equality: a value decoded as int from a Go
+		// literal must equal the same value decoded as float64 after a
+		// JSON round-trip, otherwise the diff reports a phantom change.
+		{15000, float64(15000), true},
+		{float64(15000), 15000, true},
+		{int64(60), float64(60), true},
+		{int64(60), 60, true},
+		{float64(2), int32(2), true},
+		{1, float64(2), false},
+		{int64(15000), float64(15001), false},
+		// A number and a non-number are never equal.
+		{1, "1", false},
+		{0, false, false},
 	}
 	for _, tc := range tests {
 		if got := valuesEqual(tc.a, tc.b); got != tc.expected {
