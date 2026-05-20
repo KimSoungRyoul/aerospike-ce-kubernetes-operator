@@ -69,6 +69,9 @@ spec:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/ui/configmap.yaml") . | sha256sum }}
         checksum/secret: {{ include (print $.Template.BasePath "/ui/secret.yaml") . | sha256sum }}
+        {{- if .Values.ui.database.postgresql.deploy }}
+        checksum/db-secret: {{ include (print $.Template.BasePath "/ui/postgres-secret.yaml") . | sha256sum }}
+        {{- end }}
         {{- if .Values.ui.api.logging.sidecar.enabled }}
         checksum/log-shipper-config: {{ include (print $.Template.BasePath "/ui/configmap-log-shipper.yaml") . | sha256sum }}
         {{- end }}
@@ -96,8 +99,41 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       terminationGracePeriodSeconds: {{ .Values.ui.terminationGracePeriodSeconds | default 45 }}
-      {{- if .Values.ui.api.extraPipPackages }}
+      {{- $pgManaged := and (eq .Values.ui.database.type "postgresql") .Values.ui.database.postgresql.deploy -}}
+      {{- if or .Values.ui.api.extraPipPackages $pgManaged }}
       initContainers:
+        {{- if $pgManaged }}
+        {{- /* Block api startup until the chart-managed PostgreSQL accepts
+               connections, so the api does not crash-loop on first install
+               while the database is still initialising. `-U` is passed
+               explicitly: this container inherits the UI pod's runAsUser
+               (1001), which has no /etc/passwd entry in the postgres image,
+               and libpq tools report "no attempt" if they must look the
+               current uid up to derive a default user. */}}
+        - name: wait-for-postgres
+          image: "{{ .Values.ui.database.postgresql.image.repository }}:{{ .Values.ui.database.postgresql.image.tag }}"
+          imagePullPolicy: {{ .Values.ui.database.postgresql.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h {{ include "aerospike-ce-kubernetes-operator.ui.postgres.fullname" . }} -p 5432 -U '{{ .Values.ui.database.postgresql.auth.username }}'; do
+                echo "waiting for PostgreSQL to accept connections..."
+                sleep 2
+              done
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
+          {{- with .Values.ui.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        {{- end }}
+        {{- if .Values.ui.api.extraPipPackages }}
         - name: install-extra-packages
           image: {{ include "aerospike-ce-kubernetes-operator.ui.api.image" . }}
           imagePullPolicy: {{ .Values.ui.api.image.pullPolicy }}
@@ -111,6 +147,7 @@ spec:
           volumeMounts:
             - name: extra-packages
               mountPath: /extra-packages
+        {{- end }}
       {{- end }}
       containers:
         - name: api
@@ -123,14 +160,28 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "aerospike-ce-kubernetes-operator.ui.fullname" . }}-config
-            {{- if eq .Values.ui.database.type "postgresql" }}
+            {{- if and (eq .Values.ui.database.type "postgresql") (not .Values.ui.database.postgresql.deploy) }}
+            {{- /* External PostgreSQL: the -db / existingSecret carries only
+                   DATABASE_URL, so envFrom is safe. The chart-managed Secret
+                   also holds POSTGRES_PASSWORD, so that case injects just
+                   DATABASE_URL explicitly below instead of envFrom. */}}
             - secretRef:
-                name: {{ .Values.ui.database.postgresql.existingSecret | default (printf "%s-db" (include "aerospike-ce-kubernetes-operator.ui.fullname" .)) }}
+                name: {{ include "aerospike-ce-kubernetes-operator.ui.database.secretName" . }}
             {{- end }}
             {{- with .Values.ui.api.extraEnvFrom }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
           env:
+            {{- if and (eq .Values.ui.database.type "postgresql") .Values.ui.database.postgresql.deploy }}
+            {{- /* Chart-managed PostgreSQL: inject only DATABASE_URL — the
+                   shared Secret also holds POSTGRES_PASSWORD, which the api
+                   does not need, so it is not pulled in via envFrom. */}}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aerospike-ce-kubernetes-operator.ui.database.secretName" . }}
+                  key: DATABASE_URL
+            {{- end }}
             {{- if .Values.ui.api.extraPipPackages }}
             - name: PYTHONPATH
               value: /extra-packages

@@ -7,7 +7,7 @@ title: 클러스터 매니저 UI
 
 [Aerospike Cluster Manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager)는 Aerospike CE 클러스터를 관리하기 위한 웹 기반 GUI입니다. 오퍼레이터 Helm 차트에 번들로 포함되어 있으며, 오퍼레이터와 함께 선택적 컴포넌트로 배포할 수 있습니다.
 
-UI는 클러스터 연결 프로파일을 데이터베이스에 저장합니다. 기본 백엔드는 api 컨테이너에 내장된 SQLite 파일(PVC에 영속 저장)이며, HA·다중 레플리카가 필요하면 외부 PostgreSQL 인스턴스를 사용할 수 있습니다. 차트는 PostgreSQL을 직접 배포하지 않습니다.
+UI는 클러스터 연결 프로파일을 데이터베이스에 저장합니다. 기본 백엔드는 api 컨테이너에 내장된 SQLite 파일(PVC에 영속 저장)이며, `postgresql`로 전환하면 차트가 직접 띄우는 PostgreSQL StatefulSet 또는 직접 운영하는 외부 PostgreSQL 인스턴스를 사용할 수 있습니다.
 
 ---
 
@@ -81,11 +81,12 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kuber
 | `ui.service.type` | 서비스 타입 (`ClusterIP`, `NodePort`, `LoadBalancer`) | `ClusterIP` |
 | `ui.service.frontendPort` | 프론트엔드 (Next.js) 포트 | `3000` |
 | `ui.service.backendPort` | 백엔드 (FastAPI) 포트 | `8000` |
-| `ui.database.type` | 데이터베이스 백엔드: `sqlite`(내장, 기본값) 또는 `postgresql`(외부) | `sqlite` |
+| `ui.database.type` | 데이터베이스 백엔드: `sqlite`(내장, 기본값) 또는 `postgresql` | `sqlite` |
 | `ui.database.sqlite.persistence.enabled` | SQLite 데이터베이스 파일을 PVC에 영속 저장 | `true` |
 | `ui.database.sqlite.persistence.size` | SQLite PVC 스토리지 크기 | `1Gi` |
 | `ui.database.sqlite.persistence.storageClassName` | SQLite PVC 스토리지 클래스 | `null` |
-| `ui.database.postgresql.databaseUrl` | 외부 PostgreSQL 연결 URL (`type=postgresql` 일 때) | `""` |
+| `ui.database.postgresql.deploy` | 차트 관리형 PostgreSQL StatefulSet 프로비저닝 (`type=postgresql` 일 때) | `false` |
+| `ui.database.postgresql.databaseUrl` | 외부 PostgreSQL 연결 URL (`type=postgresql`, `deploy=false` 일 때) | `""` |
 | `ui.database.postgresql.existingSecret` | `DATABASE_URL` 키를 포함하는 기존 Secret (`databaseUrl` 대안) | `""` |
 | `ui.k8s.enabled` | K8s 클러스터 관리 기능 활성화 | `true` |
 | `ui.ingress.enabled` | 외부 접근용 Ingress 생성 | `false` |
@@ -407,9 +408,30 @@ Aerospike 클러스터에 등록된 사용자 정의 함수(Lua 모듈)를 업�
 api는 클러스터 연결 메타데이터를 데이터베이스에 저장하며, `ui.database.type`으로 백엔드를 선택합니다.
 
 - **`sqlite`** (기본값) — api 컨테이너에 내장된 SQLite 파일을 PVC에 영속 저장합니다. 추가 인프라가 필요 없습니다. SQLite는 단일 라이터(single-writer)이므로 `ui.replicaCount`는 `1`이어야 합니다(그렇지 않으면 차트가 설치를 실패시킵니다).
-- **`postgresql`** — 직접 운영하는 **외부** PostgreSQL 인스턴스(RDS, Cloud SQL, AlloyDB, 클러스터 내 PostgreSQL 오퍼레이터 등)에 연결합니다. HA·다중 레플리카에 필요합니다. 차트는 PostgreSQL을 직접 배포하지 않습니다.
+- **`postgresql`** — PostgreSQL 데이터베이스로, 두 가지 하위 모드가 있습니다:
+  - **차트 관리형** (`ui.database.postgresql.deploy=true`) — 차트가 단일 레플리카 PostgreSQL StatefulSet(데이터는 PVC)을 프로비저닝하고 api를 자동 연결합니다. 간편하지만 고가용성은 아닙니다.
+  - **외부** (`deploy=false`, 기본값) — 직접 운영하는 PostgreSQL 인스턴스(RDS, Cloud SQL, AlloyDB, 클러스터 내 오퍼레이터 등)에 연결합니다. HA·다중 레플리카에 적합합니다.
 
-외부 PostgreSQL을 사용하려면 연결 URL을 지정합니다:
+### 차트 관리형 PostgreSQL
+
+외부 데이터베이스 없이 차트가 PostgreSQL을 직접 띄우게 합니다:
+
+```bash
+helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  --namespace aerospike-operator --create-namespace \
+  --set ui.database.type=postgresql \
+  --set ui.database.postgresql.deploy=true
+```
+
+이렇게 하면 `<릴리스명>-...-ui-postgres` StatefulSet(공식 `postgres` 이미지, 데이터는 8Gi PVC), Service, 자동 생성된 비밀번호를 담은 Secret이 렌더링됩니다. api의 `DATABASE_URL`은 자동으로 연결됩니다. `ui.database.postgresql.image` / `.auth` / `.persistence` / `.resources`로 데이터베이스를 조정할 수 있습니다.
+
+:::warning
+차트 관리형 StatefulSet은 **단일 레플리카**입니다 — 간편하지만 고가용성은 아닙니다. 프로덕션 HA에는 아래의 외부 PostgreSQL을 사용하세요.
+:::
+
+### 외부 PostgreSQL
+
+직접 운영하는 PostgreSQL 인스턴스에 연결하려면 연결 URL을 지정합니다:
 
 ```bash
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \

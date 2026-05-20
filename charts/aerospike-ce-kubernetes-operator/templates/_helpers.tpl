@@ -198,6 +198,41 @@ app.kubernetes.io/component: ui-web
 {{- end }}
 
 {{/*
+Chart-managed PostgreSQL (ui.database.postgresql.deploy=true) name & labels.
+*/}}
+{{- define "aerospike-ce-kubernetes-operator.ui.postgres.fullname" -}}
+{{- include "aerospike-ce-kubernetes-operator.ui.fullname" . }}-postgres
+{{- end }}
+
+{{- define "aerospike-ce-kubernetes-operator.ui.postgres.selectorLabels" -}}
+{{ include "aerospike-ce-kubernetes-operator.ui.selectorLabels" . }}
+app.kubernetes.io/component: ui-postgres
+{{- end }}
+
+{{- define "aerospike-ce-kubernetes-operator.ui.postgres.labels" -}}
+helm.sh/chart: {{ include "aerospike-ce-kubernetes-operator.chart" . }}
+{{ include "aerospike-ce-kubernetes-operator.ui.postgres.selectorLabels" . }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+
+{{/*
+Name of the Secret carrying the api's DATABASE_URL.
+- deploy=true  -> the chart's own "<ui.fullname>-postgres" Secret.
+- deploy=false -> the user's existingSecret, else the chart's "<ui.fullname>-db"
+  Secret built from databaseUrl.
+*/}}
+{{- define "aerospike-ce-kubernetes-operator.ui.database.secretName" -}}
+{{- if .Values.ui.database.postgresql.deploy -}}
+{{- include "aerospike-ce-kubernetes-operator.ui.postgres.fullname" . -}}
+{{- else -}}
+{{- .Values.ui.database.postgresql.existingSecret | default (printf "%s-db" (include "aerospike-ce-kubernetes-operator.ui.fullname" .)) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 UI component-specific common labels.
 */}}
 {{- define "aerospike-ce-kubernetes-operator.ui.api.labels" -}}
@@ -423,9 +458,30 @@ stale sidecar-era value keys and on invalid backend combinations.
 {{- /* The remaining checks only matter when the api Deployment is rendered. */ -}}
 {{- if eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true" -}}
 {{- if eq $type "postgresql" -}}
-{{- if and (not .Values.ui.database.postgresql.databaseUrl) (not .Values.ui.database.postgresql.existingSecret) -}}
-{{- fail "ui.database.type=postgresql requires either ui.database.postgresql.databaseUrl or ui.database.postgresql.existingSecret — the chart connects to an external PostgreSQL and never provisions one." -}}
+{{- if .Values.ui.database.postgresql.deploy -}}
+{{- /* Chart-managed PostgreSQL: the chart provisions the database and builds
+       DATABASE_URL itself, so the external-connection keys must be unset. */ -}}
+{{- if .Values.ui.database.postgresql.existingSecret -}}
+{{- fail "ui.database.postgresql.deploy=true provisions a chart-managed PostgreSQL and builds its own Secret — unset ui.database.postgresql.existingSecret (it applies only to an external database)." -}}
 {{- end -}}
+{{- if .Values.ui.database.postgresql.databaseUrl -}}
+{{- fail "ui.database.postgresql.deploy=true provisions a chart-managed PostgreSQL and builds DATABASE_URL itself — unset ui.database.postgresql.databaseUrl (it applies only to an external database)." -}}
+{{- end -}}
+{{- /* The password is embedded verbatim in DATABASE_URL; reject characters
+       that would corrupt the connection string (the auto-generated default
+       is always safe). */ -}}
+{{- if and .Values.ui.database.postgresql.auth.password (not (regexMatch "^[A-Za-z0-9._~-]+$" .Values.ui.database.postgresql.auth.password)) -}}
+{{- fail "ui.database.postgresql.auth.password contains a character outside [A-Za-z0-9._~-]. The chart embeds it verbatim in DATABASE_URL, so URL-special characters (@ : / ? # ...) would corrupt the connection string. Use a password from that set, or leave it empty to auto-generate one." -}}
+{{- end -}}
+{{- else -}}
+{{- /* External PostgreSQL: a connection URL is mandatory. */ -}}
+{{- if and (not .Values.ui.database.postgresql.databaseUrl) (not .Values.ui.database.postgresql.existingSecret) -}}
+{{- fail "ui.database.type=postgresql requires either ui.database.postgresql.databaseUrl or ui.database.postgresql.existingSecret for an external database — or set ui.database.postgresql.deploy=true to let the chart provision a PostgreSQL StatefulSet." -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if and (eq $type "sqlite") .Values.ui.database.postgresql.deploy -}}
+{{- fail "ui.database.postgresql.deploy=true has no effect with ui.database.type=sqlite. Set ui.database.type=postgresql to deploy the chart-managed PostgreSQL, or unset the deploy flag." -}}
 {{- end -}}
 {{- if and (eq $type "sqlite") (gt (int .Values.ui.replicaCount) 1) -}}
 {{- fail "ui.database.type=sqlite is single-writer and is incompatible with ui.replicaCount > 1. Switch to ui.database.type=postgresql with an external database for multi-replica / HA deployments." -}}

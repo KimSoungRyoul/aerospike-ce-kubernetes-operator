@@ -205,9 +205,11 @@ When `ui.rbac.create=true`, the generated ClusterRole includes the following per
 ### Database
 
 The api persists cluster connection metadata in a database. The backend is
-selected by `ui.database.type` — `sqlite` (embedded, default) or `postgresql`
-(external). The chart never deploys PostgreSQL itself; the embedded PostgreSQL
-sidecar of earlier chart versions has been removed.
+selected by `ui.database.type` — `sqlite` (embedded, default) or `postgresql`.
+For `postgresql` you can either connect to an external instance, or set
+`ui.database.postgresql.deploy=true` to have the chart provision a
+single-replica PostgreSQL StatefulSet for you. The embedded PostgreSQL
+*sidecar* of earlier chart versions has been removed.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -223,13 +225,38 @@ sidecar of earlier chart versions has been removed.
 | `ui.database.postgresql.poolMaxSize` | int | `10` | Connection pool maximum size (`DB_POOL_MAX_SIZE`). |
 | `ui.database.postgresql.commandTimeout` | int | `30` | SQL command execution timeout in seconds (`DB_COMMAND_TIMEOUT`). |
 
+The keys below provision a **chart-managed** PostgreSQL and apply only when `ui.database.postgresql.deploy=true`.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `ui.database.postgresql.deploy` | bool | `false` | When `true`, the chart provisions a single-replica PostgreSQL StatefulSet + Service + Secret and wires the api's `DATABASE_URL` to it automatically (`databaseUrl` / `existingSecret` are then ignored and rejected). When `false`, connect to an external instance. |
+| `ui.database.postgresql.image.repository` | string | `postgres` | Chart-managed PostgreSQL image repository. |
+| `ui.database.postgresql.image.tag` | string | `"17"` | PostgreSQL image tag. |
+| `ui.database.postgresql.image.pullPolicy` | string | `IfNotPresent` | PostgreSQL image pull policy. |
+| `ui.database.postgresql.auth.database` | string | `aerospike_manager` | Database name created on first start. |
+| `ui.database.postgresql.auth.username` | string | `aerospike` | Database user. |
+| `ui.database.postgresql.auth.password` | string | `""` | Database password. Empty = a 24-character random password is generated on first install and preserved across `helm upgrade`. |
+| `ui.database.postgresql.persistence.enabled` | bool | `true` | Persist the data directory on a PVC (`volumeClaimTemplate`). When `false`, an `emptyDir` is used and all data is lost on pod restart. |
+| `ui.database.postgresql.persistence.storageClassName` | string | `null` | Storage class for the PostgreSQL PVC. `null` = cluster default, `""` = pre-provisioned PV, `"name"` = specified StorageClass. |
+| `ui.database.postgresql.persistence.accessMode` | string | `ReadWriteOnce` | PostgreSQL PVC access mode. |
+| `ui.database.postgresql.persistence.size` | string | `8Gi` | PostgreSQL PVC volume size. |
+| `ui.database.postgresql.resources` | object | `100m`/`256Mi` → `500m`/`512Mi` | Resource requests / limits for the PostgreSQL container. |
+| `ui.database.postgresql.podSecurityContext` | object | `runAsUser/runAsGroup/fsGroup: 999` | Pod-level securityContext for the PostgreSQL pod. |
+| `ui.database.postgresql.securityContext` | object | drops all capabilities | Container-level securityContext for the PostgreSQL container. |
+| `ui.database.postgresql.nodeSelector` | object | `{}` | Node selector for the PostgreSQL pod. |
+| `ui.database.postgresql.tolerations` | list | `[]` | Tolerations for the PostgreSQL pod. |
+| `ui.database.postgresql.affinity` | object | `{}` | Affinity rules for the PostgreSQL pod. |
+
 **SQLite (default)** stores data in a single file inside the api container,
 backed by a PersistentVolumeClaim. It is single-writer, so `ui.replicaCount`
 must stay `1` — the chart fails the install otherwise.
 
-**PostgreSQL** mode connects to an external database that you operate (managed
-services such as RDS / Cloud SQL / AlloyDB, or an in-cluster PostgreSQL
-operator). Required for HA / multi-replica deployments.
+**PostgreSQL** mode has two sub-modes. With `deploy=false` (default) it
+connects to an **external** database that you operate (managed services such
+as RDS / Cloud SQL / AlloyDB, or an in-cluster PostgreSQL operator) — the
+right choice for HA / multi-replica. With `deploy=true` the chart provisions a
+**single-replica** PostgreSQL StatefulSet (data on a PVC) and wires the api to
+it automatically — turnkey, but not highly available.
 
 > **Migration:** stale `ui.postgresql.*` and `ui.persistence.*` keys from the
 > embedded-sidecar era fail the install with a migration message. Map

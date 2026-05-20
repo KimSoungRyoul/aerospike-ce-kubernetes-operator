@@ -98,13 +98,15 @@ Ensure acko-crds is installed separately before creating AerospikeCluster resour
   helm install acko-crds oci://ghcr.io/aerospike-ce-ecosystem/charts/acko-crds --version {{ .Chart.Version }}
 {{- end }}
 
-NOTE: The embedded PostgreSQL sidecar has been REMOVED. The api now runs on
-SQLite (embedded file on a PVC, the default) or an EXTERNAL PostgreSQL that
-you operate — the chart no longer ships a `postgres` container.
+NOTE: The embedded PostgreSQL *sidecar* has been REMOVED. The api now runs on
+SQLite (embedded file on a PVC, the default), an EXTERNAL PostgreSQL that you
+operate, or a chart-managed PostgreSQL StatefulSet
+(ui.database.postgresql.deploy=true).
   Migration of values:
-    ui.postgresql.enabled: true   -> ui.database.type: postgresql
-                                     + ui.database.postgresql.databaseUrl
-                                       (point at an external PostgreSQL)
+    ui.postgresql.enabled: true   -> ui.database.type: postgresql, then either
+                                     ui.database.postgresql.databaseUrl (external)
+                                     or ui.database.postgresql.deploy=true
+                                     (chart-managed PostgreSQL StatefulSet)
     ui.postgresql.enabled: false  -> ui.database.type: sqlite   (default)
     ui.persistence.*              -> ui.database.sqlite.persistence.*
     ui.env.databaseUrl            -> ui.database.postgresql.databaseUrl
@@ -336,10 +338,18 @@ View UI logs:
 
 {{- if eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true" }}
 {{- if eq .Values.ui.database.type "postgresql" }}
+{{- if .Values.ui.database.postgresql.deploy }}
+
+Database backend: PostgreSQL (chart-managed).
+The chart deployed a single-replica PostgreSQL StatefulSet "{{ include "aerospike-ce-kubernetes-operator.ui.postgres.fullname" . }}"
+(data on a {{ .Values.ui.database.postgresql.persistence.size }} PVC). Convenient, but NOT highly
+available — use an external database (deploy=false) for production HA.
+{{- else }}
 
 Database backend: PostgreSQL (external).
 The chart does NOT deploy PostgreSQL — the api connects to the database via
 {{ if .Values.ui.database.postgresql.existingSecret }}DATABASE_URL in Secret "{{ .Values.ui.database.postgresql.existingSecret }}"{{ else }}ui.database.postgresql.databaseUrl{{ end }}.
+{{- end }}
 {{- else }}
 
 Database backend: SQLite (embedded).
