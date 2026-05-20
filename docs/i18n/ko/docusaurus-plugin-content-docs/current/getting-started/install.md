@@ -402,16 +402,18 @@ UI를 끄려면 `--set ui.api.enabled=false --set ui.web.enabled=false`.
 
 ### Port-Forward로 접근
 
+웹 프론트엔드는 3100 포트로 서비스됩니다.
+
 ```bash
-kubectl -n aerospike-operator port-forward svc/aerospike-operator-ui 3000:3000
+kubectl -n aerospike-operator port-forward svc/aerospike-ce-kubernetes-operator-ui-web 3100:3100
 ```
 
-브라우저에서 [http://localhost:3000](http://localhost:3000)을 열면 UI에 접근할 수 있습니다.
+브라우저에서 [http://localhost:3100](http://localhost:3100)을 열면 UI에 접근할 수 있습니다.
 
 :::tip
-서비스 이름은 `<release>-aerospike-operator-ui` 형식입니다. 릴리스 이름을 커스텀으로 지정한 경우 아래와 같이 조정하세요:
+웹 서비스 이름은 `<release>-aerospike-ce-kubernetes-operator-ui-web` 형식입니다. 릴리스 이름을 커스텀으로 지정한 경우 아래와 같이 조정하세요:
 ```bash
-kubectl -n aerospike-operator port-forward svc/<release>-aerospike-operator-ui 3000:3000
+kubectl -n aerospike-operator port-forward svc/<release>-aerospike-ce-kubernetes-operator-ui-web 3100:3100
 ```
 :::
 
@@ -436,9 +438,8 @@ helm install aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosyst
 | `ui.api.enabled` | `true` | Cluster Manager API (FastAPI) 컴포넌트 배포. `ui.web.enabled=false`와 함께 false로 설정하면 UI 전체 비활성. |
 | `ui.web.enabled` | `true` | Cluster Manager web (Next.js) 컴포넌트 배포. `ui.api.enabled=false`와 함께 false로 설정하면 UI 전체 비활성. |
 | `ui.replicaCount` | `1` | UI 레플리카 수 |
-| `ui.service.type` | `ClusterIP` | 서비스 타입 (`ClusterIP`, `NodePort`, `LoadBalancer`) |
-| `ui.service.frontendPort` | `3000` | Frontend(Next.js) 포트 |
-| `ui.service.backendPort` | `8000` | Backend(FastAPI) 포트 |
+| `ui.api.service.port` | `80` | API 서비스 포트 (컨테이너 포트 8000으로 전달) |
+| `ui.web.service.port` | `3100` | Web 서비스 포트 (브라우저 접근 / Ingress 대상) |
 | `ui.ingress.enabled` | `false` | 외부 접근을 위한 Ingress 생성 |
 | `ui.postgresql.enabled` | `true` | 임베디드 PostgreSQL 사이드카 배포 |
 | `ui.persistence.enabled` | `true` | PostgreSQL 데이터용 PVC 활성화 |

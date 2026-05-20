@@ -27,7 +27,7 @@ This page documents all configurable values for the `aerospike-ce-kubernetes-ope
 |-----|------|---------|-------------|
 | `replicaCount` | int | `1` | Number of operator replicas. Typically 1 is sufficient as leader election handles HA. |
 | `image.repository` | string | `ghcr.io/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator` | Operator container image repository. |
-| `image.tag` | string | `"latest"` | Container image tag. |
+| `image.tag` | string | `""` | Container image tag. Empty falls through to `.Chart.AppVersion`. |
 | `image.pullPolicy` | string | `IfNotPresent` | Image pull policy: `Always`, `IfNotPresent`, or `Never`. |
 | `imagePullSecrets` | list | `[]` | Image pull secrets for private registries. |
 | `nameOverride` | string | `""` | Override the chart name used in resource names. |
@@ -44,9 +44,9 @@ This page documents all configurable values for the `aerospike-ce-kubernetes-ope
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `resources.limits.cpu` | string | `500m` | CPU limit for the operator pod. |
-| `resources.limits.memory` | string | `256Mi` | Memory limit for the operator pod. |
+| `resources.limits.memory` | string | `512Mi` | Memory limit for the operator pod. |
 | `resources.requests.cpu` | string | `100m` | CPU request for the operator pod. |
-| `resources.requests.memory` | string | `128Mi` | Memory request for the operator pod. |
+| `resources.requests.memory` | string | `256Mi` | Memory request for the operator pod. |
 
 ## Webhook
 
@@ -110,9 +110,9 @@ This page documents all configurable values for the `aerospike-ce-kubernetes-ope
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `podDisruptionBudget.enabled` | bool | `false` | Create a PodDisruptionBudget for the operator deployment. |
-| `podDisruptionBudget.minAvailable` | int | `1` | Minimum available pods. Mutually exclusive with `maxUnavailable`. |
-| `podDisruptionBudget.maxUnavailable` | int | — | Maximum unavailable pods. Mutually exclusive with `minAvailable`. |
+| `podDisruptionBudget.enabled` | bool | `true` | Create a PodDisruptionBudget for the operator deployment. |
+| `podDisruptionBudget.minAvailable` | int | `""` | Minimum available pods. Mutually exclusive with `maxUnavailable`. Leave empty unless `replicaCount` > 1. |
+| `podDisruptionBudget.maxUnavailable` | int | `1` | Maximum unavailable pods. Mutually exclusive with `minAvailable`. |
 
 ## Horizontal Pod Autoscaler
 
@@ -143,7 +143,7 @@ This page documents all configurable values for the `aerospike-ce-kubernetes-ope
 
 ## UI - Aerospike Cluster Manager
 
-The Aerospike Cluster Manager is a full-stack web dashboard deployed alongside the operator. It provides a visual interface for monitoring and managing Aerospike clusters.
+The Aerospike Cluster Manager is a full-stack web dashboard deployed alongside the operator as two independent Deployments — `api` (FastAPI backend) and `web` (Next.js frontend). It provides a visual interface for monitoring and managing Aerospike clusters.
 
 ### General
 
@@ -151,11 +151,15 @@ The Aerospike Cluster Manager is a full-stack web dashboard deployed alongside t
 |-----|------|---------|-------------|
 | `ui.api.enabled` | bool | `true` | Deploy the Cluster Manager API (FastAPI) component. Set to false together with `ui.web.enabled=false` to skip the UI entirely. |
 | `ui.web.enabled` | bool | `true` | Deploy the Cluster Manager web (Next.js) component. Set to false together with `ui.api.enabled=false` to skip the UI entirely. |
-| `ui.replicaCount` | int | `1` | Number of UI replicas. |
-| `ui.image.repository` | string | `ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager` | UI container image repository. |
-| `ui.image.tag` | string | `"latest"` | UI container image tag. UI is versioned independently from the operator. |
-| `ui.image.pullPolicy` | string | `IfNotPresent` | Image pull policy. |
-| `ui.imagePullSecrets` | list | `[]` | Image pull secrets for private registries. |
+| `ui.replicaCount` | int | `1` | Number of replicas for each UI Deployment (api / web). |
+| `ui.imageTag` | string | `"0.24.0"` | Default image tag for both UI components. `aerospike-cluster-manager` is versioned independently from the operator, so the chart pins a known-good release here. Set to `""` to fall through to `.Chart.AppVersion`. |
+| `ui.api.image.repository` | string | `ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-api` | API (FastAPI) container image repository. |
+| `ui.api.image.tag` | string | `""` | API image tag. Empty falls through to `ui.imageTag`. |
+| `ui.api.image.pullPolicy` | string | `IfNotPresent` | API image pull policy. |
+| `ui.web.image.repository` | string | `ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-web` | Web (Next.js) container image repository. |
+| `ui.web.image.tag` | string | `""` | Web image tag. Empty falls through to `ui.imageTag`. |
+| `ui.web.image.pullPolicy` | string | `IfNotPresent` | Web image pull policy. |
+| `ui.imagePullSecrets` | list | `[]` | Image pull secrets for private registries (applied to all UI Deployments). |
 
 ### Service Account & RBAC
 
@@ -185,12 +189,18 @@ When `ui.rbac.create=true`, the generated ClusterRole includes the following per
 
 ### Service
 
+Each UI component has its own Service.
+
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `ui.service.type` | string | `ClusterIP` | Service type: `ClusterIP`, `NodePort`, or `LoadBalancer`. |
-| `ui.service.frontendPort` | int | `3000` | Frontend port (Next.js web UI). |
-| `ui.service.backendPort` | int | `8000` | Backend port (FastAPI REST API). |
-| `ui.service.annotations` | object | `{}` | Annotations for the UI Service. |
+| `ui.api.service.type` | string | `ClusterIP` | API Service type: `ClusterIP`, `NodePort`, or `LoadBalancer`. |
+| `ui.api.service.port` | int | `80` | API Service port. Traffic is forwarded to container port 8000. |
+| `ui.api.service.targetPort` | int | `8000` | API container port (non-privileged; the container runs as non-root). |
+| `ui.api.service.annotations` | object | `{}` | Annotations for the API Service. |
+| `ui.web.service.type` | string | `ClusterIP` | Web Service type: `ClusterIP`, `NodePort`, or `LoadBalancer`. |
+| `ui.web.service.port` | int | `3100` | Web Service port. This is the port to port-forward (or route an Ingress to) for browser access. |
+| `ui.web.service.annotations` | object | `{}` | Annotations for the Web Service. |
+| `ui.web.env.apiUrl` | string | `""` | External API URL. When set, the web pod's `proxy.js` forwards `/api/*` there instead of the in-cluster API Service. Required when `ui.api.enabled=false`. |
 
 ### Ingress
 
@@ -248,12 +258,18 @@ The UI container includes a **preStop lifecycle hook** (`sleep 5`) to allow in-f
 
 ### UI Resources
 
+The api and web Deployments have independent resource settings.
+
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `ui.resources.requests.cpu` | string | `100m` | CPU request. |
-| `ui.resources.requests.memory` | string | `256Mi` | Memory request. |
-| `ui.resources.limits.cpu` | string | `200m` | CPU limit. |
-| `ui.resources.limits.memory` | string | `512Mi` | Memory limit. |
+| `ui.api.resources.requests.cpu` | string | `100m` | API CPU request. |
+| `ui.api.resources.requests.memory` | string | `256Mi` | API memory request. |
+| `ui.api.resources.limits.cpu` | string | `200m` | API CPU limit. |
+| `ui.api.resources.limits.memory` | string | `512Mi` | API memory limit. |
+| `ui.web.resources.requests.cpu` | string | `50m` | Web CPU request. |
+| `ui.web.resources.requests.memory` | string | `128Mi` | Web memory request. |
+| `ui.web.resources.limits.cpu` | string | `150m` | Web CPU limit. |
+| `ui.web.resources.limits.memory` | string | `384Mi` | Web memory limit. |
 
 ### Security Context
 
@@ -269,31 +285,41 @@ The UI container includes a **preStop lifecycle hook** (`sleep 5`) to allow in-f
 
 ### Probes
 
+The api Deployment has liveness / readiness / startup probes; the web Deployment has liveness / readiness probes.
+
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `ui.livenessProbe.httpGet.path` | string | `/api/health` | Liveness probe path. |
-| `ui.livenessProbe.httpGet.port` | string | `backend` | Liveness probe port. |
-| `ui.livenessProbe.initialDelaySeconds` | int | `15` | Initial delay. |
-| `ui.livenessProbe.periodSeconds` | int | `20` | Check period. |
-| `ui.livenessProbe.timeoutSeconds` | int | `5` | Timeout. |
-| `ui.readinessProbe.httpGet.path` | string | `/api/health` | Readiness probe path. |
-| `ui.readinessProbe.httpGet.port` | string | `backend` | Readiness probe port. |
-| `ui.readinessProbe.initialDelaySeconds` | int | `5` | Initial delay. |
-| `ui.readinessProbe.periodSeconds` | int | `10` | Check period. |
-| `ui.readinessProbe.timeoutSeconds` | int | `5` | Timeout. |
-| `ui.startupProbe.httpGet.path` | string | `/api/health` | Startup probe path. |
-| `ui.startupProbe.httpGet.port` | string | `backend` | Startup probe port. |
-| `ui.startupProbe.periodSeconds` | int | `5` | Check period. |
-| `ui.startupProbe.timeoutSeconds` | int | `3` | Timeout. |
-| `ui.startupProbe.failureThreshold` | int | `30` | Max failures before giving up (allows 150s startup). |
+| `ui.api.livenessProbe.httpGet.path` | string | `/api/health` | API liveness probe path. |
+| `ui.api.livenessProbe.httpGet.port` | string | `api` | API liveness probe port. |
+| `ui.api.livenessProbe.initialDelaySeconds` | int | `15` | Initial delay. |
+| `ui.api.livenessProbe.periodSeconds` | int | `20` | Check period. |
+| `ui.api.livenessProbe.timeoutSeconds` | int | `5` | Timeout. |
+| `ui.api.readinessProbe.httpGet.path` | string | `/api/health` | API readiness probe path. |
+| `ui.api.readinessProbe.httpGet.port` | string | `api` | API readiness probe port. |
+| `ui.api.readinessProbe.initialDelaySeconds` | int | `5` | Initial delay. |
+| `ui.api.readinessProbe.periodSeconds` | int | `10` | Check period. |
+| `ui.api.readinessProbe.timeoutSeconds` | int | `5` | Timeout. |
+| `ui.api.startupProbe.httpGet.path` | string | `/api/health` | API startup probe path. |
+| `ui.api.startupProbe.httpGet.port` | string | `api` | API startup probe port. |
+| `ui.api.startupProbe.periodSeconds` | int | `5` | Check period. |
+| `ui.api.startupProbe.timeoutSeconds` | int | `3` | Timeout. |
+| `ui.api.startupProbe.failureThreshold` | int | `30` | Max failures before giving up (allows 150s startup). |
+| `ui.web.livenessProbe.httpGet.path` | string | `/` | Web liveness probe path. |
+| `ui.web.livenessProbe.httpGet.port` | string | `web` | Web liveness probe port. |
+| `ui.web.livenessProbe.initialDelaySeconds` | int | `15` | Initial delay. |
+| `ui.web.livenessProbe.periodSeconds` | int | `20` | Check period. |
+| `ui.web.livenessProbe.timeoutSeconds` | int | `5` | Timeout. |
+| `ui.web.readinessProbe.httpGet.path` | string | `/` | Web readiness probe path. |
+| `ui.web.readinessProbe.httpGet.port` | string | `web` | Web readiness probe port. |
+| `ui.web.readinessProbe.initialDelaySeconds` | int | `5` | Initial delay. |
+| `ui.web.readinessProbe.periodSeconds` | int | `10` | Check period. |
+| `ui.web.readinessProbe.timeoutSeconds` | int | `5` | Timeout. |
 
 ### Environment
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `ui.env.frontendPort` | string | (from `ui.service.frontendPort`) | Frontend port injected into the ConfigMap as `FRONTEND_PORT`. Automatically derived from the service port configuration. |
-| `ui.env.backendPort` | string | (from `ui.service.backendPort`) | Backend port injected into the ConfigMap as `BACKEND_PORT`. Automatically derived from the service port configuration. |
-| `ui.env.corsOrigins` | string | `""` | Backend CORS origins. Empty means no CORS (frontend proxies via Next.js rewrites). |
+| `ui.env.corsOrigins` | string | `""` | Backend CORS origins. Empty means no CORS (the web pod proxies `/api/*` instead). |
 | `ui.env.logLevel` | string | `"INFO"` | Log level: `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
 | `ui.env.logFormat` | string | `"text"` | Log format: `text` for human-readable, `json` for structured logging. |
 | `ui.env.databaseUrl` | string | `""` | External PostgreSQL connection URL. Only used when `postgresql.enabled` is `false`. |
@@ -382,6 +408,6 @@ The UI ServiceMonitor scrapes the backend metrics endpoint at `/api/metrics`. Th
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `defaultTemplates.enabled` | bool | `true` | Create pre-built AerospikeClusterTemplate resources (minimal, soft-rack, hard-rack). Templates are cluster-scoped and accessible from all namespaces. |
+| `defaultTemplates.enabled` | bool | `false` | Create pre-built AerospikeClusterTemplate resources (minimal, soft-rack, hard-rack). Default `false` because the templates need the AerospikeClusterTemplate CRD to be registered first — enable via `helm upgrade` after the initial install. Templates are cluster-scoped and accessible from all namespaces. |
 
 The three default template tiers are configured under `defaultTemplates.templates.minimal`, `defaultTemplates.templates.soft-rack`, and `defaultTemplates.templates.hard-rack`. See [Template Management](../configuration/templates.md) for details on each tier.
