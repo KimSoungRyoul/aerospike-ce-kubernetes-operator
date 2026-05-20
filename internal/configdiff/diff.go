@@ -242,6 +242,10 @@ func valuesEqual(a, b any) bool {
 // numericValue converts any Go numeric type to float64 so values can be
 // compared regardless of the concrete type they were decoded as. The second
 // return is false when v is not a number.
+//
+// Widening to float64 is exact for Aerospike config values: every numeric
+// parameter (ports, proto-fd-max, memory/data sizes, periods) is far below
+// 2^53, the largest integer float64 represents exactly.
 func numericValue(v any) (float64, bool) {
 	switch n := v.(type) {
 	case int:

@@ -66,6 +66,10 @@ func DeepMerge(base, override map[string]any) map[string]any {
 
 // deepCopyValue returns a deep copy of an arbitrary config value, recursing
 // into map[string]any and []any. Scalars are immutable and returned as-is.
+// Only the map[string]any / []any shape produced by JSON and Kubernetes
+// unstructured decoding is recursed into — which is exactly what
+// AerospikeConfigSpec.Value holds; typed containers (e.g. []string) would
+// still be aliased, but that shape never reaches DeepMerge.
 func deepCopyValue(v any) any {
 	switch t := v.(type) {
 	case map[string]any:
