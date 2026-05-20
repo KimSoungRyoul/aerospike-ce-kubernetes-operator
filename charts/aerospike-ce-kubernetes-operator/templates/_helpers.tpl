@@ -406,6 +406,20 @@ stale sidecar-era value keys and on invalid backend combinations.
 {{- if not (has $type (list "sqlite" "postgresql")) -}}
 {{- fail (printf "ui.database.type must be \"sqlite\" or \"postgresql\", got %q." $type) -}}
 {{- end -}}
+{{- /* Upgrade safety: chart versions before this one ran an embedded PostgreSQL
+       sidecar whose database lived in the "<ui.fullname>-db" Secret (carrying a
+       POSTGRES_PASSWORD key) + "<ui.fullname>-data" PVC. That sidecar is gone
+       and there is NO automatic data migration. Detect the leftover
+       embedded-mode Secret and refuse the upgrade until the operator
+       acknowledges it (after backing the data up). `lookup` is empty on fresh
+       installs and on `helm template`, so this fires only on a real upgrade. */ -}}
+{{- if not .Values.ui.database.acknowledgeEmbeddedPostgresRemoval -}}
+{{- $dbSecretName := printf "%s-db" (include "aerospike-ce-kubernetes-operator.ui.fullname" .) -}}
+{{- $dbSecret := lookup "v1" "Secret" .Release.Namespace $dbSecretName -}}
+{{- if and $dbSecret (hasKey (default (dict) $dbSecret.data) "POSTGRES_PASSWORD") -}}
+{{- fail (printf "Upgrade blocked: Secret %q carries a POSTGRES_PASSWORD key, so this release previously ran the embedded PostgreSQL sidecar (removed in this chart version). Upgrading does NOT migrate that data -- with ui.database.type=sqlite the old database is stranded on the PVC, with type=postgresql the PVC is deleted. Back it up first (pg_dump the embedded database), restore it into your chosen backend, then re-run with ui.database.acknowledgeEmbeddedPostgresRemoval=true. See the chart README 'Database' migration section." $dbSecretName) -}}
+{{- end -}}
+{{- end -}}
 {{- /* The remaining checks only matter when the api Deployment is rendered. */ -}}
 {{- if eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true" -}}
 {{- if eq $type "postgresql" -}}

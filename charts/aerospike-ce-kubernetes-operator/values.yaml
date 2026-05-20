@@ -790,6 +790,15 @@ ui:
     # -- Database backend: "sqlite" (embedded, default) or "postgresql" (external).
     type: sqlite
 
+    # -- Upgrade-safety gate. Chart versions before the embedded PostgreSQL
+    # sidecar was removed stored data in an in-pod PostgreSQL. Upgrading does
+    # NOT migrate that data automatically: with type=sqlite the old database is
+    # stranded on the volume, with type=postgresql its PVC is deleted. When the
+    # chart detects a leftover embedded-mode Secret it BLOCKS the upgrade until
+    # this is set to true — set it only AFTER backing the data up (see the
+    # chart README "Database" migration section). No effect on fresh installs.
+    acknowledgeEmbeddedPostgresRemoval: false
+
     # -- SQLite backend settings. Used only when database.type=sqlite.
     sqlite:
       persistence:

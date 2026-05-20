@@ -202,6 +202,7 @@ api는 클러스터 연결 메타데이터를 데이터베이스에 저장합니
 | 키 | 타입 | 기본값 | 설명 |
 |-----|------|---------|-------------|
 | `ui.database.type` | string | `sqlite` | 데이터베이스 백엔드: `sqlite`(PVC에 저장되는 내장 파일) 또는 `postgresql`(외부 인스턴스). |
+| `ui.database.acknowledgeEmbeddedPostgresRemoval` | bool | `false` | 업그레이드 안전 게이트. 임베디드 PostgreSQL Secret이 남아 있는 릴리스에서의 업그레이드를 이 값이 `true`가 될 때까지 차단. 임베디드 데이터를 백업한 뒤에만 설정(아래 마이그레이션 안내 참조). 신규 설치에는 영향 없음. |
 | `ui.database.sqlite.persistence.enabled` | bool | `true` | SQLite 데이터베이스 파일을 PVC에 영속 저장. `false`이면 `emptyDir`을 사용하며 Pod 재시작 시 저장된 연결이 사라짐. |
 | `ui.database.sqlite.persistence.storageClassName` | string | `null` | 스토리지 클래스. `null` = 클러스터 기본 StorageClass, `""` = 사전 프로비저닝된 PV, `"name"` = 지정한 StorageClass. |
 | `ui.database.sqlite.persistence.accessMode` | string | `ReadWriteOnce` | PVC 접근 모드. SQLite는 단일 라이터이므로 `ReadWriteOnce` 유지. |
@@ -216,7 +217,7 @@ api는 클러스터 연결 메타데이터를 데이터베이스에 저장합니
 
 **PostgreSQL** 모드는 직접 운영하는 외부 데이터베이스(RDS / Cloud SQL / AlloyDB 같은 관리형 서비스, 또는 클러스터 내 PostgreSQL 오퍼레이터)에 연결합니다. HA·다중 레플리카 배포에 필요합니다.
 
-> **마이그레이션:** 임베디드 사이드카 시절의 구버전 `ui.postgresql.*` / `ui.persistence.*` 키는 이제 설치 시 마이그레이션 안내 메시지와 함께 실패합니다. `ui.postgresql.enabled: true` → `ui.database.type: postgresql` + `ui.database.postgresql.databaseUrl`, `ui.postgresql.enabled: false` → `ui.database.type: sqlite`, `ui.persistence.*` → `ui.database.sqlite.persistence.*`, `ui.env.databaseUrl` → `ui.database.postgresql.databaseUrl`로 매핑하세요. 기존 임베디드 PostgreSQL PVC에서 자동 데이터 마이그레이션은 제공되지 않습니다.
+> **마이그레이션:** 임베디드 사이드카 시절의 구버전 `ui.postgresql.*` / `ui.persistence.*` 키는 설치 시 마이그레이션 안내 메시지와 함께 실패합니다. `ui.postgresql.enabled: true` → `ui.database.type: postgresql` + `ui.database.postgresql.databaseUrl`, `ui.postgresql.enabled: false` → `ui.database.type: sqlite`, `ui.persistence.*` → `ui.database.sqlite.persistence.*`, `ui.env.databaseUrl` → `ui.database.postgresql.databaseUrl`로 매핑하세요. 임베디드 PostgreSQL에서 자동 데이터 마이그레이션은 제공되지 않으며, 임베디드 사이드카 릴리스에서의 업그레이드는 `ui.database.acknowledgeEmbeddedPostgresRemoval=true`를 설정할 때까지 차단됩니다. `pg_dump` → 복원 → 업그레이드 런북은 차트 README의 "Migrating off the embedded PostgreSQL sidecar" 절을 참고하세요.
 
 ### 배포 전략 및 정상 종료
 

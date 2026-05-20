@@ -212,6 +212,7 @@ sidecar of earlier chart versions has been removed.
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `ui.database.type` | string | `sqlite` | Database backend: `sqlite` (embedded file on a PVC) or `postgresql` (external instance). |
+| `ui.database.acknowledgeEmbeddedPostgresRemoval` | bool | `false` | Upgrade-safety gate. The chart blocks any upgrade from a release that still carries the embedded-PostgreSQL Secret until this is `true`. Set it only after backing the embedded database up (see the migration note below). No effect on fresh installs. |
 | `ui.database.sqlite.persistence.enabled` | bool | `true` | Persist the SQLite database file on a PVC. When `false`, an `emptyDir` is used and stored connections are lost on pod restart. |
 | `ui.database.sqlite.persistence.storageClassName` | string | `null` | Storage class. `null` = cluster default StorageClass, `""` = pre-provisioned PV, `"name"` = specified StorageClass. |
 | `ui.database.sqlite.persistence.accessMode` | string | `ReadWriteOnce` | PVC access mode. SQLite is single-writer; keep `ReadWriteOnce`. |
@@ -231,13 +232,16 @@ services such as RDS / Cloud SQL / AlloyDB, or an in-cluster PostgreSQL
 operator). Required for HA / multi-replica deployments.
 
 > **Migration:** stale `ui.postgresql.*` and `ui.persistence.*` keys from the
-> embedded-sidecar era now fail the install with a migration message. Map
+> embedded-sidecar era fail the install with a migration message. Map
 > `ui.postgresql.enabled: true` → `ui.database.type: postgresql` +
 > `ui.database.postgresql.databaseUrl`, `ui.postgresql.enabled: false` →
 > `ui.database.type: sqlite`, `ui.persistence.*` →
 > `ui.database.sqlite.persistence.*`, and `ui.env.databaseUrl` →
-> `ui.database.postgresql.databaseUrl`. There is no in-place data migration
-> from the old embedded PostgreSQL PVC.
+> `ui.database.postgresql.databaseUrl`. There is no automatic data migration
+> from the old embedded PostgreSQL — any upgrade from an embedded-sidecar
+> release is blocked until `ui.database.acknowledgeEmbeddedPostgresRemoval=true`.
+> See the chart README "Migrating off the embedded PostgreSQL sidecar" for the
+> `pg_dump` → restore → upgrade runbook.
 
 ### Deployment Strategy & Graceful Shutdown
 
