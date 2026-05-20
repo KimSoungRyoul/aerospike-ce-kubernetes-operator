@@ -17,14 +17,19 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"os"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	uberzap "go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -37,12 +42,16 @@ import (
 
 	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
 	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/controller"
+	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/telemetry"
 	// +kubebuilder:scaffold:imports
 )
 
 var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
+	// version is stamped onto telemetry as the service.version resource
+	// attribute. Override at build time with -ldflags "-X main.version=...".
+	version = "dev"
 )
 
 func init() {
@@ -52,8 +61,19 @@ func init() {
 	// +kubebuilder:scaffold:scheme
 }
 
-// nolint:gocyclo
 func main() {
+	// run holds the real startup logic so that its deferred telemetry
+	// Shutdown is guaranteed to execute — os.Exit (used here for a non-zero
+	// exit code) skips deferred calls, which would drop the final batch of
+	// buffered traces/metrics/logs on every error path.
+	if err := run(); err != nil {
+		setupLog.Error(err, "Operator exited with error")
+		os.Exit(1)
+	}
+}
+
+// nolint:gocyclo
+func run() error {
 	var metricsAddr string
 	var metricsCertPath, metricsCertName, metricsCertKey string
 	var webhookCertPath, webhookCertName, webhookCertKey string
@@ -86,7 +106,30 @@ func main() {
 	flag.Parse()
 	opts.Development = devMode
 
+	// Initialize the OpenTelemetry pipeline before building the logger so the
+	// OTLP log core can be teed into the controller-runtime zap logger. Setup
+	// is a no-op unless OTEL_SDK_DISABLED is explicitly falsy.
+	tel, telErr := telemetry.Setup(context.Background(), version)
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := tel.Shutdown(shutdownCtx); err != nil {
+			setupLog.Error(err, "Failed to shut down telemetry")
+		}
+	}()
+	if otelCore := tel.ZapCore(); otelCore != nil {
+		opts.ZapOpts = append(opts.ZapOpts, uberzap.WrapCore(func(c zapcore.Core) zapcore.Core {
+			return zapcore.NewTee(c, otelCore)
+		}))
+	}
+
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	if telErr != nil {
+		setupLog.Error(telErr, "OpenTelemetry setup failed; continuing with telemetry export disabled")
+	} else if tel.Enabled() {
+		setupLog.Info("OpenTelemetry export enabled", "service", telemetry.ServiceName)
+	}
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
@@ -156,8 +199,7 @@ func main() {
 		LeaderElectionID:       "ed3f4371.aerospike.com",
 	})
 	if err != nil {
-		setupLog.Error(err, "Failed to start manager")
-		os.Exit(1)
+		return fmt.Errorf("unable to start manager: %w", err)
 	}
 
 	if err := (&controller.AerospikeClusterReconciler{
@@ -167,31 +209,27 @@ func main() {
 		//nolint:staticcheck // GetEventRecorder returns incompatible interface
 		Recorder: mgr.GetEventRecorderFor("aerospikecluster-controller"),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "AerospikeCluster")
-		os.Exit(1)
+		return fmt.Errorf("unable to create controller AerospikeCluster: %w", err)
 	}
 	if err := (&ackov1alpha1.AerospikeCluster{}).SetupWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create webhook", "webhook", "AerospikeCluster")
-		os.Exit(1)
+		return fmt.Errorf("unable to create webhook AerospikeCluster: %w", err)
 	}
 	if err := (&ackov1alpha1.AerospikeClusterTemplate{}).SetupWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create webhook", "webhook", "AerospikeClusterTemplate")
-		os.Exit(1)
+		return fmt.Errorf("unable to create webhook AerospikeClusterTemplate: %w", err)
 	}
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		setupLog.Error(err, "Failed to set up health check")
-		os.Exit(1)
+		return fmt.Errorf("unable to set up health check: %w", err)
 	}
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		setupLog.Error(err, "Failed to set up ready check")
-		os.Exit(1)
+		return fmt.Errorf("unable to set up ready check: %w", err)
 	}
 
 	setupLog.Info("Starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		setupLog.Error(err, "Failed to run manager")
-		os.Exit(1)
+		return fmt.Errorf("problem running manager: %w", err)
 	}
+
+	return nil
 }

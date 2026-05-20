@@ -347,3 +347,70 @@ spec:
 ```
 
 Clusters referencing this template inherit the monitoring configuration. Per-cluster `spec.monitoring` fields override template values.
+
+---
+
+## OpenTelemetry export (operator)
+
+Everything above covers **per-cluster** Aerospike metrics. Separately, the
+**operator itself** can export its own **traces, metrics, and logs** to an
+[OpenTelemetry](https://opentelemetry.io/) collector over OTLP/gRPC. This is
+**off by default** — while disabled, every OpenTelemetry call falls back to a
+NoOp implementation at effectively zero cost.
+
+### What is exported
+
+| Signal | Contents |
+|--------|----------|
+| **Traces** | A span per reconcile loop (`Reconcile` → `reconcileCluster` → `reconcileRacks`) carrying the cluster namespace/name and recording the loop's terminal error. |
+| **Metrics** | The full operator Prometheus registry — the built-in controller-runtime metrics (`controller_runtime_reconcile_*`, `workqueue_*`, …) **and** every ACKO metric (`acko_cluster_phase`, `acko_reconcile_duration_seconds`, …) — bridged to OTLP. The identical series stay scrapable at `/metrics`, so OTLP push and Prometheus scraping run side by side. |
+| **Logs** | The operator's structured log stream, teed into the OTLP log pipeline. Console/JSON logging on stdout is unchanged. |
+
+### Enabling it
+
+Set the `observability.otel.*` Helm values:
+
+```yaml
+observability:
+  otel:
+    enabled: true
+    # OTLP/gRPC collector endpoint (required when enabled).
+    endpoint: otel-collector.observability.svc.cluster.local:4317
+    # Optional collector auth headers.
+    headers: "api-key=xxxxxxxx"
+    # Optional extra resource attributes.
+    resourceAttributes: "deployment.environment=prod,team=platform"
+    # OTel SDK standard trace sampler.
+    sampler: parentbased_traceidratio
+    samplerArg: "1.0"
+```
+
+The operator exports over **OTLP/gRPC only** — point `endpoint` at the
+collector's gRPC receiver (port `4317`). Chart rendering fails fast if
+`enabled: true` is set without an `endpoint`.
+
+### Configuration
+
+All exporter, sampler, and resource configuration uses the
+[OpenTelemetry SDK standard environment variables](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/);
+the Helm values are thin wrappers over them.
+
+| Helm value | Environment variable | Purpose |
+|------------|----------------------|---------|
+| `observability.otel.enabled` | `OTEL_SDK_DISABLED` | Master switch (`enabled: false` → `OTEL_SDK_DISABLED=true`). |
+| `observability.otel.endpoint` | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP/gRPC collector endpoint. |
+| `observability.otel.headers` | `OTEL_EXPORTER_OTLP_HEADERS` | Collector auth headers. |
+| `observability.otel.resourceAttributes` | `OTEL_RESOURCE_ATTRIBUTES` | Extra resource attributes. |
+| `observability.otel.sampler` | `OTEL_TRACES_SAMPLER` | Trace sampler. |
+| `observability.otel.samplerArg` | `OTEL_TRACES_SAMPLER_ARG` | Sampler argument. |
+| `observability.otel.extraEnv` | *(raw)* | Any other `OTEL_*` SDK variable not surfaced above. |
+
+The service name reported to the collector is `aerospike-ce-kubernetes-operator`
+(override with `OTEL_SERVICE_NAME` via `extraEnv`).
+
+:::note
+Pointing the operator and the [Cluster Manager API](../getting-started/cluster-manager-ui.md)
+at the same collector gives end-to-end traces: both sides propagate W3C trace
+context, so a UI-triggered change and the reconcile it causes appear under a
+single trace.
+:::

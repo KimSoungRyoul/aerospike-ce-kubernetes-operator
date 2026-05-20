@@ -1,4 +1,7 @@
 {{- if eq (include "aerospike-ce-kubernetes-operator.operator.enabled" .) "true" }}
+{{- if and .Values.observability.otel.enabled (not .Values.observability.otel.endpoint) }}
+{{- fail "observability.otel.endpoint is required when observability.otel.enabled=true" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -47,6 +50,41 @@ spec:
             - --leader-elect
             - --health-probe-bind-address=:8081
             - --metrics-bind-address=:8443
+          env:
+            {{- if .Values.observability.otel.enabled }}
+            # OpenTelemetry export — traces/metrics/logs to an OTLP/gRPC
+            # collector. See internal/telemetry and docs/observability.md.
+            - name: OTEL_SDK_DISABLED
+              value: "false"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.observability.otel.endpoint | quote }}
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: "grpc"
+            {{- with .Values.observability.otel.headers }}
+            - name: OTEL_EXPORTER_OTLP_HEADERS
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.observability.otel.resourceAttributes }}
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.observability.otel.sampler }}
+            - name: OTEL_TRACES_SAMPLER
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.observability.otel.samplerArg }}
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.observability.otel.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- else }}
+            # Explicit kill-switch so a stray cluster-wide OTEL_* env cannot
+            # silently turn telemetry on.
+            - name: OTEL_SDK_DISABLED
+              value: "true"
+            {{- end }}
           ports:
             - name: metrics
               containerPort: 8443

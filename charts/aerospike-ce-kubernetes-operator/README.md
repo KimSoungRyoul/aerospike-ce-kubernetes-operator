@@ -90,6 +90,29 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/acko \
   --set grafanaDashboard.enabled=true
 ```
 
+### With operator OpenTelemetry export
+
+The operator can additionally export its own **traces, metrics, and logs**
+to an OTLP/gRPC collector. Off by default; metrics are the whole
+controller-runtime + ACKO Prometheus registry bridged to OTLP, so the
+`/metrics` scrape endpoint keeps working alongside the push.
+
+```yaml
+observability:
+  otel:
+    enabled: true
+    endpoint: otel-collector.observability.svc.cluster.local:4317  # OTLP/gRPC
+    headers: ""                                                    # collector auth
+    resourceAttributes: "deployment.environment=prod,team=platform"
+    sampler: parentbased_traceidratio
+    samplerArg: "1.0"
+```
+
+`endpoint` is required when `enabled: true` (rendering fails fast otherwise).
+All settings map to the OTel SDK standard environment variables. See
+[Monitoring — OpenTelemetry export](https://aerospike-ce-ecosystem.github.io/aerospike-ce-kubernetes-operator/operations/monitoring)
+for the full reference.
+
 ### With Cilium network policy
 
 ```bash
@@ -166,10 +189,19 @@ ui:
       serviceName: aerospike-cluster-manager-api
       resourceAttributes: "deployment.environment=staging,team=platform"
       headers: ""
+      # aerospike-py Rust-core instrumentation
+      aerospikePyLogLevel: ""                       # empty → inherit LOG_LEVEL
+      aerospikePyTracing: true                      # emit aerospike.<op> spans
 ```
 
 When `ui.api.otel.enabled=false` (default), the deployment sets
 `OTEL_SDK_DISABLED=true` and the API uses NoOp providers — zero overhead.
+
+`aerospikePyTracing` starts aerospike-py's own OTLP span exporter so every
+Aerospike operation is traced, and `aerospikePyLogLevel` routes the client's
+Rust-core logs into the API log stream. The API exporter speaks OTLP/gRPC and
+HTTP; aerospike-py's exporter is **gRPC only**, so use a gRPC `endpoint` when
+`aerospikePyTracing` is on.
 
 #### Log routing via external OTel Collector
 

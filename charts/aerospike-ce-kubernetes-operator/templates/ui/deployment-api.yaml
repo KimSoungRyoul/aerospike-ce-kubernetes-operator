@@ -186,9 +186,19 @@ spec:
             - name: PYTHONPATH
               value: /extra-packages
             {{- end }}
+            {{- with .Values.ui.api.otel.aerospikePyLogLevel }}
+            # aerospike-py Rust-core log bridge verbosity. Applies regardless
+            # of otel.enabled — the bridge routes to stdout either way.
+            - name: AEROSPIKE_PY_LOG_LEVEL
+              value: {{ . | quote }}
+            {{- end }}
             {{- if .Values.ui.api.otel.enabled }}
             - name: OTEL_SDK_DISABLED
               value: "false"
+            # Start aerospike-py's native OTLP span exporter. Only meaningful
+            # when OTel is enabled, so it is set alongside the OTel env.
+            - name: AEROSPIKE_PY_TRACING
+              value: {{ .Values.ui.api.otel.aerospikePyTracing | quote }}
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: {{ required "ui.api.otel.endpoint is required when ui.api.otel.enabled is true" .Values.ui.api.otel.endpoint | quote }}
             - name: OTEL_EXPORTER_OTLP_PROTOCOL
