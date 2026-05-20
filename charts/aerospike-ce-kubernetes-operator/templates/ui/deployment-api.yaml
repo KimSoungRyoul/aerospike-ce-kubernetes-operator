@@ -1,7 +1,6 @@
 {{- if eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true" }}
-{{- if and .Values.ui.autoscaling.enabled .Values.ui.postgresql.enabled }}
-{{- fail "ui.autoscaling.enabled and ui.postgresql.enabled cannot both be true. The embedded PostgreSQL sidecar is single-instance only. Disable ui.postgresql.enabled and provide ui.env.databaseUrl for an external database when using HPA." }}
-{{- end }}
+{{- /* ui.database.type=sqlite vs ui.replicaCount>1 is validated centrally in
+       the "...validate.databaseConfig" helper (rendered via NOTES.txt). */}}
 {{- if and .Values.ui.api.logging.sidecar.enabled (not .Values.ui.api.logging.fileMirror.enabled) }}
 {{- fail "ui.api.logging.sidecar.enabled=true requires ui.api.logging.fileMirror.enabled=true. Without the file mirror the sidecar has nothing to tail. Either enable fileMirror, or rely on a node-level OTel Collector DaemonSet scraping container logs instead." }}
 {{- end }}
@@ -47,7 +46,9 @@ spec:
   */}}
   replicas: {{ .Values.ui.replicaCount }}
   strategy:
-    {{- if .Values.ui.postgresql.enabled }}
+    {{- if eq .Values.ui.database.type "sqlite" }}
+    {{- /* SQLite lives on a single ReadWriteOnce PVC; a RollingUpdate would
+           briefly schedule a surge pod that cannot attach the volume. */}}
     type: Recreate
     {{- else }}
     type: RollingUpdate
@@ -122,8 +123,10 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "aerospike-ce-kubernetes-operator.ui.fullname" . }}-config
+            {{- if eq .Values.ui.database.type "postgresql" }}
             - secretRef:
-                name: {{ .Values.ui.postgresql.existingSecret | default (printf "%s-db" (include "aerospike-ce-kubernetes-operator.ui.fullname" .)) }}
+                name: {{ .Values.ui.database.postgresql.existingSecret | default (printf "%s-db" (include "aerospike-ce-kubernetes-operator.ui.fullname" .)) }}
+            {{- end }}
             {{- with .Values.ui.api.extraEnvFrom }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -215,8 +218,13 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if or .Values.ui.api.extraVolumeMounts .Values.ui.api.extraPipPackages .Values.ui.api.logging.fileMirror.enabled .Values.ui.api.logging.sidecar.enabled }}
+          {{- if or (eq .Values.ui.database.type "sqlite") .Values.ui.api.extraVolumeMounts .Values.ui.api.extraPipPackages .Values.ui.api.logging.fileMirror.enabled .Values.ui.api.logging.sidecar.enabled }}
           volumeMounts:
+            {{- if eq .Values.ui.database.type "sqlite" }}
+            {{- /* SQLite database file (SQLITE_PATH=/app/data/connections.db). */}}
+            - name: acm-data
+              mountPath: /app/data
+            {{- end }}
             {{- with .Values.ui.api.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -266,84 +274,11 @@ spec:
             {{- toYaml . | nindent 12 }}
             {{- end }}
         {{- end }}
-        {{- if .Values.ui.postgresql.enabled }}
-        - name: postgres
-          image: "{{ .Values.ui.postgresql.image.repository }}:{{ .Values.ui.postgresql.image.tag }}"
-          imagePullPolicy: {{ .Values.ui.postgresql.image.pullPolicy }}
-          ports:
-            - name: postgres
-              containerPort: 5432
-              protocol: TCP
-          env:
-            - name: POSTGRES_DB
-              value: {{ .Values.ui.postgresql.database | quote }}
-            - name: POSTGRES_USER
-              value: {{ .Values.ui.postgresql.username | quote }}
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.ui.postgresql.existingSecret | default (printf "%s-db" (include "aerospike-ce-kubernetes-operator.ui.fullname" .)) }}
-                  key: POSTGRES_PASSWORD
-            - name: PGDATA
-              value: /var/lib/postgresql/data/pgdata
-          readinessProbe:
-            exec:
-              command:
-                - pg_isready
-                - -U
-                - {{ .Values.ui.postgresql.username }}
-                - -d
-                - {{ .Values.ui.postgresql.database }}
-            initialDelaySeconds: 5
-            periodSeconds: 10
-            timeoutSeconds: 5
-          livenessProbe:
-            exec:
-              command:
-                - pg_isready
-                - -U
-                - {{ .Values.ui.postgresql.username }}
-                - -d
-                - {{ .Values.ui.postgresql.database }}
-            initialDelaySeconds: 15
-            periodSeconds: 20
-            timeoutSeconds: 5
-          startupProbe:
-            exec:
-              command:
-                - pg_isready
-                - -U
-                - {{ .Values.ui.postgresql.username }}
-                - -d
-                - {{ .Values.ui.postgresql.database }}
-            periodSeconds: 5
-            timeoutSeconds: 3
-            failureThreshold: 20
-          securityContext:
-            runAsUser: 70
-            runAsGroup: 70
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
-              add:
-                - CHOWN
-                - FOWNER
-                - SETGID
-                - SETUID
-          {{- with .Values.ui.postgresql.resources }}
-          resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          volumeMounts:
-            - name: data
-              mountPath: /var/lib/postgresql/data
-        {{- end }}
-      {{- if or .Values.ui.postgresql.enabled .Values.ui.api.extraVolumes .Values.ui.api.extraPipPackages .Values.ui.api.logging.fileMirror.enabled .Values.ui.api.logging.sidecar.enabled }}
+      {{- if or (eq .Values.ui.database.type "sqlite") .Values.ui.api.extraVolumes .Values.ui.api.extraPipPackages .Values.ui.api.logging.fileMirror.enabled .Values.ui.api.logging.sidecar.enabled }}
       volumes:
-        {{- if .Values.ui.postgresql.enabled }}
-        - name: data
-          {{- if .Values.ui.persistence.enabled }}
+        {{- if eq .Values.ui.database.type "sqlite" }}
+        - name: acm-data
+          {{- if .Values.ui.database.sqlite.persistence.enabled }}
           persistentVolumeClaim:
             claimName: {{ include "aerospike-ce-kubernetes-operator.ui.fullname" . }}-data
           {{- else }}

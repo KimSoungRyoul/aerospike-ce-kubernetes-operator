@@ -232,6 +232,74 @@ and [docs/logging.md](https://github.com/aerospike-ce-ecosystem/aerospike-cluste
 in the cluster-manager repo for the full reference and example fluent-bit
 sidecar configuration.
 
+#### Database backend
+
+The api persists cluster connection metadata in a database. Two backends are
+supported via `ui.database.type`:
+
+| `ui.database.type` | Where the data lives | Use when |
+|--------------------|----------------------|----------|
+| `sqlite` (default) | Embedded SQLite file inside the api container, on a PVC (`ui.database.sqlite.persistence`) | Single-instance installs. Zero extra infrastructure. SQLite is single-writer, so `ui.replicaCount` must stay `1`. |
+| `postgresql`       | An **external** PostgreSQL instance you operate (RDS / Cloud SQL / AlloyDB / an in-cluster PostgreSQL operator) | HA / multi-replica. The chart never deploys PostgreSQL itself. |
+
+SQLite (default) — nothing to configure:
+
+```bash
+helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/acko \
+  --version 0.4.0 --namespace aerospike-operator --create-namespace \
+  --set ui.database.sqlite.persistence.size=2Gi
+```
+
+External PostgreSQL — supply the connection URL (or an existing Secret with a
+`DATABASE_URL` key via `ui.database.postgresql.existingSecret`):
+
+```bash
+helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/acko \
+  --version 0.4.0 --namespace aerospike-operator --create-namespace \
+  --set ui.database.type=postgresql \
+  --set ui.database.postgresql.databaseUrl='postgresql://user:pass@db-host:5432/aerospike_manager'
+```
+
+#### Migrating off the embedded PostgreSQL sidecar
+
+Earlier chart versions ran a `postgres` container as a sidecar in the api pod,
+with its data on the `<release>-…-ui-data` PVC. That sidecar is **removed**.
+There is **no automatic data migration**:
+
+- `ui.database.type=sqlite` → the old PostgreSQL files are stranded on the PVC; the api starts on a fresh, empty SQLite database.
+- `ui.database.type=postgresql` → Helm deletes the old PVC; with a `Delete` reclaim policy the data is destroyed.
+
+To protect against silent data loss, the chart **blocks any upgrade** from a
+release that still has the embedded-mode Secret (`<release>-…-ui-db` with a
+`POSTGRES_PASSWORD` key) until you set
+`ui.database.acknowledgeEmbeddedPostgresRemoval=true`.
+
+**Migration runbook (preserve your data → external PostgreSQL):**
+
+```bash
+# 1. Back up the embedded database (old release still running)
+kubectl exec -n <ns> deploy/<release>-aerospike-ce-kubernetes-operator-ui-api \
+  -c postgres -- pg_dump -U aerospike -d aerospike_manager --no-owner --no-privileges \
+  > acm-backup.sql
+
+# 2. Restore into your external PostgreSQL (RDS / Cloud SQL / AlloyDB / …)
+psql "postgresql://user:pass@db-host:5432/aerospike_manager" -v ON_ERROR_STOP=1 < acm-backup.sql
+
+# 3. Upgrade — point at the external DB and acknowledge the sidecar removal
+helm upgrade <release> oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  -n <ns> --reuse-values \
+  --set ui.database.type=postgresql \
+  --set ui.database.postgresql.databaseUrl='postgresql://user:pass@db-host:5432/aerospike_manager' \
+  --set ui.database.acknowledgeEmbeddedPostgresRemoval=true
+```
+
+The api's `init_db()` uses `CREATE TABLE IF NOT EXISTS`, so restoring the full
+dump first and then starting the new api is safe. There is no automated
+PostgreSQL→SQLite path — to land on SQLite instead, re-add connections from the
+UI.
+
+**Value mapping:** `ui.postgresql.enabled: true` → `ui.database.type: postgresql` + `ui.database.postgresql.databaseUrl`; `ui.postgresql.enabled: false` → `ui.database.type: sqlite`; `ui.persistence.*` → `ui.database.sqlite.persistence.*`; `ui.env.databaseUrl` → `ui.database.postgresql.databaseUrl`. Stale `ui.postgresql.*` / `ui.persistence.*` keys fail the install with a migration message.
+
 #### Customizing the UI deployment
 
 You can customize the UI with service annotations, resource defaults, and extra environment variables:

@@ -195,40 +195,36 @@ Aerospike Cluster Manager는 오퍼레이터와 함께 배포되는 풀스택 �
 | `ui.ingress.hosts` | list | values.yaml 참조 | Ingress 호스트 규칙. |
 | `ui.ingress.tls` | list | `[]` | Ingress TLS 설정. |
 
-### PostgreSQL (내장 사이드카)
+### 데이터베이스
+
+api는 클러스터 연결 메타데이터를 데이터베이스에 저장합니다. 백엔드는 `ui.database.type`으로 선택하며, `sqlite`(내장, 기본값) 또는 `postgresql`(외부) 중 하나입니다. 차트는 PostgreSQL을 직접 배포하지 않습니다 — 이전 차트 버전의 임베디드 PostgreSQL 사이드카는 제거되었습니다.
 
 | 키 | 타입 | 기본값 | 설명 |
 |-----|------|---------|-------------|
-| `ui.postgresql.enabled` | bool | `true` | 내장 PostgreSQL 사이드카 컨테이너 배포. 비활성화하여 외부 PostgreSQL 인스턴스 사용. |
-| `ui.postgresql.image.repository` | string | `postgres` | PostgreSQL 컨테이너 이미지. |
-| `ui.postgresql.image.tag` | string | `"17-alpine"` | PostgreSQL 이미지 태그. |
-| `ui.postgresql.image.pullPolicy` | string | `IfNotPresent` | 이미지 풀 정책. |
-| `ui.postgresql.database` | string | `aerospike_manager` | 데이터베이스 이름. |
-| `ui.postgresql.username` | string | `aerospike` | 데이터베이스 사용자. |
-| `ui.postgresql.password` | string | `""` | 데이터베이스 비밀번호 (내장 사이드카 전용). 비어 있으면 첫 설치 시 24자 무작위 비밀번호를 자동 생성하며 업그레이드 시에도 유지됩니다. |
-| `ui.postgresql.existingSecret` | string | `""` | `POSTGRES_PASSWORD`와 `DATABASE_URL` 키를 포함하는 기존 Secret 이름. |
-| `ui.postgresql.resources.requests.cpu` | string | `50m` | CPU 요청. |
-| `ui.postgresql.resources.requests.memory` | string | `128Mi` | 메모리 요청. |
-| `ui.postgresql.resources.limits.cpu` | string | `250m` | CPU 제한. |
-| `ui.postgresql.resources.limits.memory` | string | `256Mi` | 메모리 제한. |
+| `ui.database.type` | string | `sqlite` | 데이터베이스 백엔드: `sqlite`(PVC에 저장되는 내장 파일) 또는 `postgresql`(외부 인스턴스). |
+| `ui.database.acknowledgeEmbeddedPostgresRemoval` | bool | `false` | 업그레이드 안전 게이트. 임베디드 PostgreSQL Secret이 남아 있는 릴리스에서의 업그레이드를 이 값이 `true`가 될 때까지 차단. 임베디드 데이터를 백업한 뒤에만 설정(아래 마이그레이션 안내 참조). 신규 설치에는 영향 없음. |
+| `ui.database.sqlite.persistence.enabled` | bool | `true` | SQLite 데이터베이스 파일을 PVC에 영속 저장. `false`이면 `emptyDir`을 사용하며 Pod 재시작 시 저장된 연결이 사라짐. |
+| `ui.database.sqlite.persistence.storageClassName` | string | `null` | 스토리지 클래스. `null` = 클러스터 기본 StorageClass, `""` = 사전 프로비저닝된 PV, `"name"` = 지정한 StorageClass. |
+| `ui.database.sqlite.persistence.accessMode` | string | `ReadWriteOnce` | PVC 접근 모드. SQLite는 단일 라이터이므로 `ReadWriteOnce` 유지. |
+| `ui.database.sqlite.persistence.size` | string | `1Gi` | SQLite PVC 볼륨 크기. |
+| `ui.database.postgresql.databaseUrl` | string | `""` | 외부 PostgreSQL 인스턴스의 연결 URL. `type=postgresql`일 때 필수(또는 `existingSecret`). |
+| `ui.database.postgresql.existingSecret` | string | `""` | `DATABASE_URL` 키를 포함하는 기존 Secret 이름. `databaseUrl` 대신 사용해 자격 증명을 values 밖에 둠. |
+| `ui.database.postgresql.poolMinSize` | int | `2` | 커넥션 풀 최소 크기 (`DB_POOL_MIN_SIZE`). |
+| `ui.database.postgresql.poolMaxSize` | int | `10` | 커넥션 풀 최대 크기 (`DB_POOL_MAX_SIZE`). |
+| `ui.database.postgresql.commandTimeout` | int | `30` | SQL 명령 실행 타임아웃 (초, `DB_COMMAND_TIMEOUT`). |
 
-내장 PostgreSQL 사이드카에는 `pg_isready`를 실행하는 **startup probe**가 포함되어 있어, UI 컨테이너가 트래픽을 수신하기 전에 데이터베이스가 준비되었는지 확인합니다.
+**SQLite (기본값)** 는 api 컨테이너 내부의 단일 파일에 데이터를 저장하며 PersistentVolumeClaim으로 백업됩니다. 단일 라이터이므로 `ui.replicaCount`는 `1`이어야 합니다 — 그렇지 않으면 차트가 설치를 실패시킵니다.
 
-### 영속성
+**PostgreSQL** 모드는 직접 운영하는 외부 데이터베이스(RDS / Cloud SQL / AlloyDB 같은 관리형 서비스, 또는 클러스터 내 PostgreSQL 오퍼레이터)에 연결합니다. HA·다중 레플리카 배포에 필요합니다.
 
-| 키 | 타입 | 기본값 | 설명 |
-|-----|------|---------|-------------|
-| `ui.persistence.enabled` | bool | `true` | 내장 PostgreSQL 데이터베이스용 영구 스토리지 활성화. |
-| `ui.persistence.storageClassName` | string | `""` | 스토리지 클래스 이름 (비어있으면 기본값). |
-| `ui.persistence.accessMode` | string | `ReadWriteOnce` | 접근 모드. |
-| `ui.persistence.size` | string | `1Gi` | 볼륨 크기. |
+> **마이그레이션:** 임베디드 사이드카 시절의 구버전 `ui.postgresql.*` / `ui.persistence.*` 키는 설치 시 마이그레이션 안내 메시지와 함께 실패합니다. `ui.postgresql.enabled: true` → `ui.database.type: postgresql` + `ui.database.postgresql.databaseUrl`, `ui.postgresql.enabled: false` → `ui.database.type: sqlite`, `ui.persistence.*` → `ui.database.sqlite.persistence.*`, `ui.env.databaseUrl` → `ui.database.postgresql.databaseUrl`로 매핑하세요. 임베디드 PostgreSQL에서 자동 데이터 마이그레이션은 제공되지 않으며, 임베디드 사이드카 릴리스에서의 업그레이드는 `ui.database.acknowledgeEmbeddedPostgresRemoval=true`를 설정할 때까지 차단됩니다. `pg_dump` → 복원 → 업그레이드 런북은 차트 README의 "Migrating off the embedded PostgreSQL sidecar" 절을 참고하세요.
 
 ### 배포 전략 및 정상 종료
 
-UI Deployment는 PostgreSQL 설정에 따라 명시적인 업데이트 전략을 사용합니다:
+api Deployment는 데이터베이스 백엔드에 따라 명시적인 업데이트 전략을 사용합니다:
 
-- **내장 PostgreSQL 사용 시** (`ui.postgresql.enabled=true`): PVC가 한 번에 하나의 Pod에만 마운트될 수 있으므로 `Recreate` 전략 사용.
-- **외부 PostgreSQL 사용 시** (`ui.postgresql.enabled=false`): 무중단 배포를 위해 `RollingUpdate` 전략 사용 (`maxSurge: 1`, `maxUnavailable: 0`).
+- **SQLite** (`ui.database.type=sqlite`): SQLite PVC는 `ReadWriteOnce`이며 한 번에 하나의 Pod에만 마운트될 수 있으므로 `Recreate` 전략 사용.
+- **PostgreSQL** (`ui.database.type=postgresql`): 무중단 배포를 위해 `RollingUpdate` 전략 사용 (`maxSurge: 1`, `maxUnavailable: 0`).
 
 UI 컨테이너에는 **preStop 라이프사이클 훅** (`sleep 5`)이 포함되어 Pod 종료 전 진행 중인 요청이 완료될 수 있도록 합니다. `terminationGracePeriodSeconds` (기본값: 45)와 함께 롤아웃 및 노드 드레인 시 정상 종료를 보장합니다.
 
@@ -288,10 +284,6 @@ UI 컨테이너에는 **preStop 라이프사이클 훅** (`sleep 5`)이 포함�
 | `ui.env.corsOrigins` | string | `""` | 백엔드 CORS 오리진. 비어있으면 CORS 없음 (프론트엔드가 Next.js rewrites로 프록시). |
 | `ui.env.logLevel` | string | `"INFO"` | 로그 레벨: `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
 | `ui.env.logFormat` | string | `"text"` | 로그 형식: `text`(사람이 읽기 쉬운), `json`(구조화된 로깅). |
-| `ui.env.databaseUrl` | string | `""` | 외부 PostgreSQL 연결 URL. `postgresql.enabled`가 `false`일 때만 사용. |
-| `ui.env.dbPoolSize` | int | `5` | DB 커넥션 풀 크기. |
-| `ui.env.dbPoolOverflow` | int | `10` | 풀 크기 초과 시 최대 오버플로 커넥션. |
-| `ui.env.dbPoolTimeout` | int | `30` | 풀 체크아웃 타임아웃 (초). |
 | `ui.env.k8sApiTimeout` | int | `30` | Kubernetes API 요청 타임아웃 (초). |
 
 ### UI 모니터링

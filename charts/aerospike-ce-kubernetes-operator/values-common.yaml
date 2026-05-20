@@ -74,11 +74,8 @@ ui:
         paths:
           - path: /
             pathType: Prefix
-  # Persistent Postgres / DB sidecar belongs on the api side, not on common.
-  postgresql:
-    enabled: false
-  persistence:
-    enabled: false
+  # The common cluster is web-only (ui.api.enabled=false) — no database is
+  # provisioned, so the ui.database.* defaults are left untouched here.
   k8s:
     # Web-only cluster has no in-cluster ACKO operator to talk to.
     enabled: false

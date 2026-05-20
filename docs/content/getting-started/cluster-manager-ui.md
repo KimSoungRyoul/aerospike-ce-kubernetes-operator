@@ -522,6 +522,48 @@ After modifying a template, existing clusters that reference it are not automati
 
 ---
 
+## Database backend
+
+The api persists cluster connection metadata, workspaces, and notes in a
+database. The backend is selected with `ui.database.type`:
+
+- **`sqlite`** (default) — an embedded SQLite file inside the api container,
+  persisted on a PersistentVolumeClaim. No extra infrastructure. SQLite is
+  single-writer, so `ui.replicaCount` must stay `1` (the chart fails the
+  install otherwise).
+- **`postgresql`** — connects to an **external** PostgreSQL instance you
+  operate (RDS, Cloud SQL, AlloyDB, an in-cluster PostgreSQL operator, …).
+  Required for HA / multi-replica. The chart never deploys PostgreSQL itself.
+
+To use an external PostgreSQL, supply the connection URL:
+
+```bash
+helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  --namespace aerospike-operator --create-namespace \
+  --set ui.database.type=postgresql \
+  --set ui.database.postgresql.databaseUrl="postgresql://user:pass@db-host:5432/aerospike_manager"
+```
+
+:::tip
+To keep credentials out of values, set `ui.database.postgresql.existingSecret`
+to an existing Kubernetes Secret name. The Secret must contain a `DATABASE_URL` key.
+:::
+
+:::warning
+The embedded PostgreSQL sidecar has been **removed**. Stale `ui.postgresql.*` /
+`ui.persistence.*` keys fail the install with a migration message. Map
+`ui.postgresql.enabled: true` → `ui.database.type: postgresql` +
+`ui.database.postgresql.databaseUrl`, `ui.postgresql.enabled: false` →
+`ui.database.type: sqlite`, and `ui.persistence.*` →
+`ui.database.sqlite.persistence.*`. There is no automatic data migration —
+any upgrade from an embedded-sidecar release is blocked until
+`ui.database.acknowledgeEmbeddedPostgresRemoval=true`. See the chart README
+section "Migrating off the embedded PostgreSQL sidecar" for the `pg_dump` →
+restore → upgrade runbook.
+:::
+
+---
+
 ## Configuration Options
 
 | Parameter | Description | Default |
@@ -536,22 +578,23 @@ After modifying a template, existing clusters that reference it are not automati
 | `ui.service.backendPort` | Backend (FastAPI) port | `8000` |
 | `ui.service.annotations` | Service annotations (cloud LB configuration, etc.) | `{}` |
 | `ui.ingress.enabled` | Create Ingress | `false` |
-| `ui.persistence.enabled` | Use PostgreSQL PVC | `true` |
-| `ui.persistence.size` | PVC storage size | `1Gi` |
 | `ui.k8s.enabled` | K8s cluster management feature | `true` |
 | `ui.rbac.create` | Auto-create ClusterRole/Binding (includes permissions for AerospikeCluster, Template, and HPA management) | `true` |
 | `ui.resources.requests.cpu` | UI container CPU request | `100m` |
 | `ui.resources.requests.memory` | UI container memory request | `256Mi` |
 | `ui.resources.limits.cpu` | UI container CPU limit | `200m` |
 | `ui.resources.limits.memory` | UI container memory limit | `512Mi` |
-| `ui.postgresql.enabled` | Deploy embedded PostgreSQL sidecar | `true` |
-| `ui.env.databaseUrl` | External PostgreSQL URL (when `postgresql.enabled=false`) | `""` |
+| `ui.database.type` | Database backend: `sqlite` (embedded, default) or `postgresql` (external) | `sqlite` |
+| `ui.database.sqlite.persistence.enabled` | Persist the SQLite database file on a PVC | `true` |
+| `ui.database.sqlite.persistence.size` | SQLite PVC storage size | `1Gi` |
+| `ui.database.postgresql.databaseUrl` | External PostgreSQL connection URL (when `type=postgresql`) | `""` |
+| `ui.database.postgresql.existingSecret` | Existing Secret with a `DATABASE_URL` key (alternative to `databaseUrl`) | `""` |
 | `ui.env.corsOrigins` | Backend CORS origins (empty string = disable CORS; frontend proxies via Next.js rewrites) | `""` |
 | `ui.env.logLevel` | Log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) | `"INFO"` |
 | `ui.env.logFormat` | Log format: `"text"` (human-readable), `"json"` (structured logging) | `"text"` |
-| `ui.env.dbPoolSize` | DB connection pool size | `5` |
-| `ui.env.dbPoolOverflow` | Maximum additional connections when pool is full | `10` |
-| `ui.env.dbPoolTimeout` | Timeout for acquiring a connection from the pool (seconds) | `30` |
+| `ui.database.postgresql.poolMinSize` | PostgreSQL connection pool minimum size (when `type=postgresql`) | `2` |
+| `ui.database.postgresql.poolMaxSize` | PostgreSQL connection pool maximum size (when `type=postgresql`) | `10` |
+| `ui.database.postgresql.commandTimeout` | PostgreSQL SQL command timeout in seconds (when `type=postgresql`) | `30` |
 | `ui.env.k8sApiTimeout` | Kubernetes API request timeout (seconds) | `30` |
 | `ui.extraEnv` | Additional environment variables for the UI container | `[]` |
 | `ui.metrics.serviceMonitor.enabled` | Create ServiceMonitor for UI backend metrics | `false` |
@@ -575,24 +618,25 @@ You can tune the UI backend's environment variables via Helm values. These setti
 
 ### Database Connection Pool
 
-Tune the connection pool for the embedded PostgreSQL sidecar or an external PostgreSQL instance:
+When `ui.database.type=postgresql`, tune the connection pool for the external
+PostgreSQL instance. These settings have no effect on the default SQLite backend:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `ui.env.dbPoolSize` | `5` | Base connection pool size. Adjust to match the number of concurrent requests. |
-| `ui.env.dbPoolOverflow` | `10` | Maximum additional connections that can be created when the pool is full. Useful for handling traffic spikes. |
-| `ui.env.dbPoolTimeout` | `30` | Maximum time (seconds) to wait for an idle connection from the pool. Returns an error if the timeout is exceeded. |
+| `ui.database.postgresql.poolMinSize` | `2` | Minimum number of connections kept open in the pool (`DB_POOL_MIN_SIZE`). |
+| `ui.database.postgresql.poolMaxSize` | `10` | Maximum number of connections the pool may open (`DB_POOL_MAX_SIZE`). Useful for handling traffic spikes. |
+| `ui.database.postgresql.commandTimeout` | `30` | Maximum time (seconds) a single SQL command may run before timing out (`DB_COMMAND_TIMEOUT`). |
 
 ```bash
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
   --namespace aerospike-operator --create-namespace \
-  --set ui.env.dbPoolSize=10 \
-  --set ui.env.dbPoolOverflow=20 \
-  --set ui.env.dbPoolTimeout=60
+  --set ui.database.type=postgresql \
+  --set ui.database.postgresql.databaseUrl='postgresql://user:pass@db-host:5432/aerospike_manager' \
+  --set ui.database.postgresql.poolMaxSize=20
 ```
 
 :::tip
-In environments with many concurrent users, increase `dbPoolSize`. A good rule of thumb is to set `dbPoolSize` close to the expected number of concurrent requests and `dbPoolOverflow` to roughly double that.
+In environments with many concurrent users, increase `poolMaxSize`. A good rule of thumb is to set `poolMaxSize` close to the expected number of concurrent requests.
 :::
 
 ### Kubernetes API Timeout
