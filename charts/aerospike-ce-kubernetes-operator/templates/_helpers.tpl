@@ -384,6 +384,56 @@ preconditions are not met, so the helper is safe to call unconditionally.
 {{- end }}
 
 {{/*
+Database backend validation.
+The embedded PostgreSQL sidecar was removed: the api now runs on an embedded
+SQLite file (default) or connects to an EXTERNAL PostgreSQL. Fail fast on
+stale sidecar-era value keys and on invalid backend combinations.
+*/}}
+{{- define "aerospike-ce-kubernetes-operator.validate.databaseConfig" -}}
+{{- if hasKey .Values.ui "postgresql" -}}
+{{- fail "ui.postgresql.* has been removed: the embedded PostgreSQL sidecar is no longer shipped. Set ui.database.type=sqlite (embedded, default) or ui.database.type=postgresql with ui.database.postgresql.databaseUrl / existingSecret pointing at an EXTERNAL database. See the chart README 'Database' section for the migration table." -}}
+{{- end -}}
+{{- if hasKey .Values.ui "persistence" -}}
+{{- fail "ui.persistence.* has been renamed: SQLite persistence now lives under ui.database.sqlite.persistence.*" -}}
+{{- end -}}
+{{- if hasKey .Values.ui.env "databaseUrl" -}}
+{{- fail "ui.env.databaseUrl has moved to ui.database.postgresql.databaseUrl (and requires ui.database.type=postgresql)." -}}
+{{- end -}}
+{{- /* The backend enum is validated unconditionally: configmap.yaml renders
+       ENABLE_POSTGRES from ui.database.type even in web-only installs, so a
+       typo must not slip through (it would silently fall back to SQLite). */ -}}
+{{- $type := .Values.ui.database.type -}}
+{{- if not (has $type (list "sqlite" "postgresql")) -}}
+{{- fail (printf "ui.database.type must be \"sqlite\" or \"postgresql\", got %q." $type) -}}
+{{- end -}}
+{{- /* Upgrade safety: chart versions before this one ran an embedded PostgreSQL
+       sidecar whose database lived in the "<ui.fullname>-db" Secret (carrying a
+       POSTGRES_PASSWORD key) + "<ui.fullname>-data" PVC. That sidecar is gone
+       and there is NO automatic data migration. Detect the leftover
+       embedded-mode Secret and refuse the upgrade until the operator
+       acknowledges it (after backing the data up). `lookup` is empty on fresh
+       installs and on `helm template`, so this fires only on a real upgrade. */ -}}
+{{- if not .Values.ui.database.acknowledgeEmbeddedPostgresRemoval -}}
+{{- $dbSecretName := printf "%s-db" (include "aerospike-ce-kubernetes-operator.ui.fullname" .) -}}
+{{- $dbSecret := lookup "v1" "Secret" .Release.Namespace $dbSecretName -}}
+{{- if and $dbSecret (hasKey (default (dict) $dbSecret.data) "POSTGRES_PASSWORD") -}}
+{{- fail (printf "Upgrade blocked: Secret %q carries a POSTGRES_PASSWORD key, so this release previously ran the embedded PostgreSQL sidecar (removed in this chart version). Upgrading does NOT migrate that data -- with ui.database.type=sqlite the old database is stranded on the PVC, with type=postgresql the PVC is deleted. Back it up first (pg_dump the embedded database), restore it into your chosen backend, then re-run with ui.database.acknowledgeEmbeddedPostgresRemoval=true. See the chart README 'Database' migration section." $dbSecretName) -}}
+{{- end -}}
+{{- end -}}
+{{- /* The remaining checks only matter when the api Deployment is rendered. */ -}}
+{{- if eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true" -}}
+{{- if eq $type "postgresql" -}}
+{{- if and (not .Values.ui.database.postgresql.databaseUrl) (not .Values.ui.database.postgresql.existingSecret) -}}
+{{- fail "ui.database.type=postgresql requires either ui.database.postgresql.databaseUrl or ui.database.postgresql.existingSecret — the chart connects to an external PostgreSQL and never provisions one." -}}
+{{- end -}}
+{{- end -}}
+{{- if and (eq $type "sqlite") (gt (int .Values.ui.replicaCount) 1) -}}
+{{- fail "ui.database.type=sqlite is single-writer and is incompatible with ui.replicaCount > 1. Switch to ui.database.type=postgresql with an external database for multi-replica / HA deployments." -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Aggregate validation entry-point. Templates can `include` this helper once
 (typically from NOTES.txt or a dedicated _validations partial) to enforce
 all gates uniformly.
@@ -395,4 +445,5 @@ all gates uniformly.
 {{- include "aerospike-ce-kubernetes-operator.validate.webOidcClientId" . -}}
 {{- include "aerospike-ce-kubernetes-operator.validate.caSecretName" . -}}
 {{- include "aerospike-ce-kubernetes-operator.validate.webhookTlsSource" . -}}
+{{- include "aerospike-ce-kubernetes-operator.validate.databaseConfig" . -}}
 {{- end }}

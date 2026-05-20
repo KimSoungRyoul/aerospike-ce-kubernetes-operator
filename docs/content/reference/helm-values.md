@@ -212,40 +212,53 @@ Each UI component has its own Service.
 | `ui.ingress.hosts` | list | See values.yaml | Ingress host rules. |
 | `ui.ingress.tls` | list | `[]` | Ingress TLS configuration. |
 
-### PostgreSQL (Embedded Sidecar)
+### Database
+
+The api persists cluster connection metadata in a database. The backend is
+selected by `ui.database.type` — `sqlite` (embedded, default) or `postgresql`
+(external). The chart never deploys PostgreSQL itself; the embedded PostgreSQL
+sidecar of earlier chart versions has been removed.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `ui.postgresql.enabled` | bool | `true` | Deploy an embedded PostgreSQL sidecar container. Disable to use an external PostgreSQL instance. |
-| `ui.postgresql.image.repository` | string | `postgres` | PostgreSQL container image. |
-| `ui.postgresql.image.tag` | string | `"17-alpine"` | PostgreSQL image tag. |
-| `ui.postgresql.image.pullPolicy` | string | `IfNotPresent` | Image pull policy. |
-| `ui.postgresql.database` | string | `aerospike_manager` | Database name. |
-| `ui.postgresql.username` | string | `aerospike` | Database user. |
-| `ui.postgresql.password` | string | `""` | Database password (embedded sidecar only). When empty, the chart auto-generates a random 24-character password on first install and preserves it across upgrades. |
-| `ui.postgresql.existingSecret` | string | `""` | Existing Secret name containing `POSTGRES_PASSWORD` and `DATABASE_URL` keys. |
-| `ui.postgresql.resources.requests.cpu` | string | `50m` | CPU request. |
-| `ui.postgresql.resources.requests.memory` | string | `128Mi` | Memory request. |
-| `ui.postgresql.resources.limits.cpu` | string | `250m` | CPU limit. |
-| `ui.postgresql.resources.limits.memory` | string | `256Mi` | Memory limit. |
+| `ui.database.type` | string | `sqlite` | Database backend: `sqlite` (embedded file on a PVC) or `postgresql` (external instance). |
+| `ui.database.acknowledgeEmbeddedPostgresRemoval` | bool | `false` | Upgrade-safety gate. The chart blocks any upgrade from a release that still carries the embedded-PostgreSQL Secret until this is `true`. Set it only after backing the embedded database up (see the migration note below). No effect on fresh installs. |
+| `ui.database.sqlite.persistence.enabled` | bool | `true` | Persist the SQLite database file on a PVC. When `false`, an `emptyDir` is used and stored connections are lost on pod restart. |
+| `ui.database.sqlite.persistence.storageClassName` | string | `null` | Storage class. `null` = cluster default StorageClass, `""` = pre-provisioned PV, `"name"` = specified StorageClass. |
+| `ui.database.sqlite.persistence.accessMode` | string | `ReadWriteOnce` | PVC access mode. SQLite is single-writer; keep `ReadWriteOnce`. |
+| `ui.database.sqlite.persistence.size` | string | `1Gi` | SQLite PVC volume size. |
+| `ui.database.postgresql.databaseUrl` | string | `""` | Connection URL of the external PostgreSQL instance. Required (or `existingSecret`) when `type=postgresql`. |
+| `ui.database.postgresql.existingSecret` | string | `""` | Existing Secret name containing a `DATABASE_URL` key. Use instead of `databaseUrl` to keep credentials out of values. |
+| `ui.database.postgresql.poolMinSize` | int | `2` | Connection pool minimum size (`DB_POOL_MIN_SIZE`). |
+| `ui.database.postgresql.poolMaxSize` | int | `10` | Connection pool maximum size (`DB_POOL_MAX_SIZE`). |
+| `ui.database.postgresql.commandTimeout` | int | `30` | SQL command execution timeout in seconds (`DB_COMMAND_TIMEOUT`). |
 
-The embedded PostgreSQL sidecar includes a **startup probe** that runs `pg_isready` to verify database readiness before the UI container begins accepting traffic. This prevents the backend from attempting database connections before PostgreSQL has finished initialization.
+**SQLite (default)** stores data in a single file inside the api container,
+backed by a PersistentVolumeClaim. It is single-writer, so `ui.replicaCount`
+must stay `1` — the chart fails the install otherwise.
 
-### Persistence
+**PostgreSQL** mode connects to an external database that you operate (managed
+services such as RDS / Cloud SQL / AlloyDB, or an in-cluster PostgreSQL
+operator). Required for HA / multi-replica deployments.
 
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `ui.persistence.enabled` | bool | `true` | Enable persistent storage for the embedded PostgreSQL database. |
-| `ui.persistence.storageClassName` | string | `null` | Storage class name. `null` = use cluster default StorageClass, `""` = disable dynamic provisioning, `"name"` = use specified StorageClass. |
-| `ui.persistence.accessMode` | string | `ReadWriteOnce` | Access mode. |
-| `ui.persistence.size` | string | `1Gi` | Volume size. |
+> **Migration:** stale `ui.postgresql.*` and `ui.persistence.*` keys from the
+> embedded-sidecar era fail the install with a migration message. Map
+> `ui.postgresql.enabled: true` → `ui.database.type: postgresql` +
+> `ui.database.postgresql.databaseUrl`, `ui.postgresql.enabled: false` →
+> `ui.database.type: sqlite`, `ui.persistence.*` →
+> `ui.database.sqlite.persistence.*`, and `ui.env.databaseUrl` →
+> `ui.database.postgresql.databaseUrl`. There is no automatic data migration
+> from the old embedded PostgreSQL — any upgrade from an embedded-sidecar
+> release is blocked until `ui.database.acknowledgeEmbeddedPostgresRemoval=true`.
+> See the chart README "Migrating off the embedded PostgreSQL sidecar" for the
+> `pg_dump` → restore → upgrade runbook.
 
 ### Deployment Strategy & Graceful Shutdown
 
-The UI Deployment uses an explicit update strategy based on the PostgreSQL configuration:
+The api Deployment uses an explicit update strategy based on the database backend:
 
-- **With embedded PostgreSQL** (`ui.postgresql.enabled=true`): Uses `Recreate` strategy because the PVC can only be mounted by one pod at a time.
-- **Without embedded PostgreSQL** (`ui.postgresql.enabled=false`): Uses `RollingUpdate` strategy with `maxSurge: 1` and `maxUnavailable: 0` for zero-downtime deployments.
+- **SQLite** (`ui.database.type=sqlite`): Uses `Recreate` strategy — the SQLite PVC is `ReadWriteOnce` and can only be mounted by one pod at a time.
+- **PostgreSQL** (`ui.database.type=postgresql`): Uses `RollingUpdate` strategy with `maxSurge: 1` and `maxUnavailable: 0` for zero-downtime deployments.
 
 The UI container includes a **preStop lifecycle hook** (`sleep 5`) to allow in-flight requests to complete before the pod is terminated. Combined with `terminationGracePeriodSeconds` (default: 45), this ensures graceful shutdown during rollouts and node drains.
 
@@ -322,10 +335,6 @@ The api Deployment has liveness / readiness / startup probes; the web Deployment
 | `ui.env.corsOrigins` | string | `""` | Backend CORS origins. Empty means no CORS (the web pod proxies `/api/*` instead). |
 | `ui.env.logLevel` | string | `"INFO"` | Log level: `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
 | `ui.env.logFormat` | string | `"text"` | Log format: `text` for human-readable, `json` for structured logging. |
-| `ui.env.databaseUrl` | string | `""` | External PostgreSQL connection URL. Only used when `postgresql.enabled` is `false`. |
-| `ui.env.dbPoolSize` | int | `5` | DB connection pool size. |
-| `ui.env.dbPoolOverflow` | int | `10` | Max overflow connections beyond pool size. |
-| `ui.env.dbPoolTimeout` | int | `30` | Pool checkout timeout in seconds. |
 | `ui.env.k8sApiTimeout` | int | `30` | Kubernetes API request timeout in seconds. |
 
 ### UI Monitoring

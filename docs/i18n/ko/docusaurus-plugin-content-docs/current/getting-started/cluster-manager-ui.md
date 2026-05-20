@@ -7,7 +7,7 @@ title: 클러스터 매니저 UI
 
 [Aerospike Cluster Manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager)는 Aerospike CE 클러스터를 관리하기 위한 웹 기반 GUI입니다. 오퍼레이터 Helm 차트에 번들로 포함되어 있으며, 오퍼레이터와 함께 선택적 컴포넌트로 배포할 수 있습니다.
 
-UI에는 클러스터 연결 프로파일을 저장하기 위한 PostgreSQL 사이드카(PVC 포함)가 내장되어 있습니다.
+UI는 클러스터 연결 프로파일을 데이터베이스에 저장합니다. 기본 백엔드는 api 컨테이너에 내장된 SQLite 파일(PVC에 영속 저장)이며, HA·다중 레플리카가 필요하면 외부 PostgreSQL 인스턴스를 사용할 수 있습니다. 차트는 PostgreSQL을 직접 배포하지 않습니다.
 
 ---
 
@@ -84,12 +84,14 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kuber
 | `ui.api.service.type` / `ui.web.service.type` | 컴포넌트별 서비스 타입 | `ClusterIP` |
 | `ui.api.service.port` | API 서비스 포트 (컨테이너 8000으로 전달) | `80` |
 | `ui.web.service.port` | Web 서비스 포트 (브라우저 접근 / Ingress 대상) | `3100` |
-| `ui.postgresql.enabled` | 내장 PostgreSQL 사이드카 배포 | `true` |
+| `ui.database.type` | 데이터베이스 백엔드: `sqlite`(내장, 기본값) 또는 `postgresql`(외부) | `sqlite` |
+| `ui.database.sqlite.persistence.enabled` | SQLite 데이터베이스 파일을 PVC에 영속 저장 | `true` |
+| `ui.database.sqlite.persistence.size` | SQLite PVC 스토리지 크기 | `1Gi` |
+| `ui.database.sqlite.persistence.storageClassName` | SQLite PVC 스토리지 클래스 | `null` |
+| `ui.database.postgresql.databaseUrl` | 외부 PostgreSQL 연결 URL (`type=postgresql` 일 때) | `""` |
+| `ui.database.postgresql.existingSecret` | `DATABASE_URL` 키를 포함하는 기존 Secret (`databaseUrl` 대안) | `""` |
 | `ui.k8s.enabled` | K8s 클러스터 관리 기능 활성화 | `true` |
 | `ui.ingress.enabled` | 외부 접근용 Ingress 생성 | `false` |
-| `ui.persistence.enabled` | PostgreSQL 데이터용 PVC 활성화 | `true` |
-| `ui.persistence.size` | PVC 스토리지 크기 | `1Gi` |
-| `ui.env.databaseUrl` | 외부 PostgreSQL URL (`postgresql.enabled=false` 일 때) | `""` |
 | `ui.rbac.create` | K8s API 접근용 ClusterRole 및 ClusterRoleBinding 생성 (AerospikeCluster, Template, HPA 관리 권한 포함) | `true` |
 | `ui.serviceAccount.create` | UI Pod용 ServiceAccount 생성 | `true` |
 | `ui.networkPolicy.enabled` | UI Pod 네트워크 트래픽 제한 | `false` |
@@ -97,8 +99,6 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kuber
 | `ui.web.service.annotations` | Web 서비스 어노테이션 (클라우드 LB 설정 등) | `{}` |
 | `ui.api.resources` | API 컨테이너 CPU/메모리 requests → limits | `100m`/`256Mi` → `200m`/`512Mi` |
 | `ui.web.resources` | Web 컨테이너 CPU/메모리 requests → limits | `50m`/`128Mi` → `150m`/`384Mi` |
-| `ui.persistence.storageClassName` | PostgreSQL PVC 스토리지 클래스 (`null`=클러스터 기본 StorageClass) | `null` |
-| `ui.postgresql.existingSecret` | 데이터베이스 자격 증명에 기존 Secret 사용 | `""` |
 | `ui.extraEnv` | UI 컨테이너에 추가할 환경 변수 목록 | `[]` |
 
 외부 OpenTelemetry Collector로 로그를 라우팅하는 설정(`fileMirror` + OTLP-forwarder 사이드카)은 아래의 [로깅](#로깅) 섹션을 참고하세요.
@@ -204,7 +204,7 @@ ui:
 
 ### 연결 관리
 
-색상 코드가 있는 프로파일로 여러 Aerospike 클러스터 연결을 관리합니다. 각 연결은 호스트, 포트, 선택적 인증 정보를 저장하며, 프로파일은 내장 PostgreSQL 데이터베이스에 영속 저장됩니다.
+색상 코드가 있는 프로파일로 여러 Aerospike 클러스터 연결을 관리합니다. 각 연결은 호스트, 포트, 선택적 인증 정보를 저장하며, 프로파일은 데이터베이스(기본값 내장 SQLite, 또는 외부 PostgreSQL)에 영속 저장됩니다.
 
 ### 클러스터 모니터링
 
@@ -403,19 +403,28 @@ Aerospike 클러스터에 등록된 사용자 정의 함수(Lua 모듈)를 업�
 
 ---
 
-## 외부 PostgreSQL 사용
+## 데이터베이스 백엔드
 
-내장 사이드카 대신 기존 PostgreSQL 인스턴스를 사용하려면:
+api는 클러스터 연결 메타데이터를 데이터베이스에 저장하며, `ui.database.type`으로 백엔드를 선택합니다.
+
+- **`sqlite`** (기본값) — api 컨테이너에 내장된 SQLite 파일을 PVC에 영속 저장합니다. 추가 인프라가 필요 없습니다. SQLite는 단일 라이터(single-writer)이므로 `ui.replicaCount`는 `1`이어야 합니다(그렇지 않으면 차트가 설치를 실패시킵니다).
+- **`postgresql`** — 직접 운영하는 **외부** PostgreSQL 인스턴스(RDS, Cloud SQL, AlloyDB, 클러스터 내 PostgreSQL 오퍼레이터 등)에 연결합니다. HA·다중 레플리카에 필요합니다. 차트는 PostgreSQL을 직접 배포하지 않습니다.
+
+외부 PostgreSQL을 사용하려면 연결 URL을 지정합니다:
 
 ```bash
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
   --namespace aerospike-operator --create-namespace \
-  --set ui.postgresql.enabled=false \
-  --set ui.env.databaseUrl="postgresql://user:pass@db-host:5432/aerospike_manager"
+  --set ui.database.type=postgresql \
+  --set ui.database.postgresql.databaseUrl="postgresql://user:pass@db-host:5432/aerospike_manager"
 ```
 
 :::tip
-`ui.postgresql.existingSecret`에 Secret 이름을 설정하여 기존 Kubernetes Secret의 데이터베이스 자격 증명을 사용할 수도 있습니다. Secret에는 `POSTGRES_PASSWORD`와 `DATABASE_URL` 키가 포함되어야 합니다.
+자격 증명을 values에 노출하지 않으려면 `ui.database.postgresql.existingSecret`에 기존 Kubernetes Secret 이름을 지정합니다. Secret에는 `DATABASE_URL` 키가 포함되어야 합니다.
+:::
+
+:::warning
+임베디드 PostgreSQL 사이드카는 제거되었습니다. 구버전의 `ui.postgresql.*` / `ui.persistence.*` 키는 이제 설치 시 마이그레이션 안내 메시지와 함께 실패합니다. `ui.postgresql.enabled: true` → `ui.database.type: postgresql` + `ui.database.postgresql.databaseUrl`, `ui.postgresql.enabled: false` → `ui.database.type: sqlite`, `ui.persistence.*` → `ui.database.sqlite.persistence.*`로 매핑하세요. 기존 임베디드 PostgreSQL PVC에서 자동 데이터 마이그레이션은 제공되지 않습니다.
 :::
 
 ---

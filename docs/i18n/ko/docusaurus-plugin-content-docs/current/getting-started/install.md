@@ -441,22 +441,27 @@ helm install aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosyst
 | `ui.api.service.port` | `80` | API 서비스 포트 (컨테이너 포트 8000으로 전달) |
 | `ui.web.service.port` | `3100` | Web 서비스 포트 (브라우저 접근 / Ingress 대상) |
 | `ui.ingress.enabled` | `false` | 외부 접근을 위한 Ingress 생성 |
-| `ui.postgresql.enabled` | `true` | 임베디드 PostgreSQL 사이드카 배포 |
-| `ui.persistence.enabled` | `true` | PostgreSQL 데이터용 PVC 활성화 |
-| `ui.persistence.size` | `1Gi` | PVC 스토리지 크기 |
+| `ui.database.type` | `sqlite` | 데이터베이스 백엔드: `sqlite`(내장, 기본값) 또는 `postgresql`(외부) |
+| `ui.database.sqlite.persistence.enabled` | `true` | SQLite 데이터베이스 파일을 PVC에 영속 저장 |
+| `ui.database.sqlite.persistence.size` | `1Gi` | SQLite PVC 스토리지 크기 |
+| `ui.database.postgresql.databaseUrl` | `""` | 외부 PostgreSQL 연결 URL (`type=postgresql`일 때) |
+| `ui.database.postgresql.existingSecret` | `""` | `DATABASE_URL` 키를 포함하는 기존 Secret (`databaseUrl` 대안) |
 | `ui.k8s.enabled` | `true` | K8s 클러스터 관리 기능 활성화 (UI에서 클러스터 생성) |
-| `ui.env.databaseUrl` | `""` | 외부 PostgreSQL URL (`postgresql.enabled=false`일 때 사용) |
 
 ### 외부 PostgreSQL 사용
 
-임베디드 사이드카 대신 기존 PostgreSQL 인스턴스를 사용하려면:
+기본 백엔드는 내장 SQLite입니다. 임베디드 PostgreSQL 사이드카는 제거되었으며, PostgreSQL은 외부 인스턴스로만 사용할 수 있습니다. 직접 운영하는 외부 PostgreSQL에 연결하려면:
 
 ```bash
 helm install aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
   -n aerospike-operator --create-namespace \
-  --set ui.postgresql.enabled=false \
-  --set ui.env.databaseUrl="postgresql://user:pass@db-host:5432/aerospike_manager"
+  --set ui.database.type=postgresql \
+  --set ui.database.postgresql.databaseUrl="postgresql://user:pass@db-host:5432/aerospike_manager"
 ```
+
+:::warning
+구버전의 `ui.postgresql.*` / `ui.persistence.*` 키는 이제 설치 시 마이그레이션 안내 메시지와 함께 실패합니다. `ui.postgresql.enabled: true` → `ui.database.type: postgresql` + `ui.database.postgresql.databaseUrl`, `ui.postgresql.enabled: false` → `ui.database.type: sqlite`, `ui.persistence.*` → `ui.database.sqlite.persistence.*`로 매핑하세요.
+:::
 
 ## 설치 확인
 

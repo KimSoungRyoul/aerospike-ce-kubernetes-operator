@@ -1,4 +1,11 @@
-{{- if and (eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true") .Values.ui.persistence.enabled .Values.ui.postgresql.enabled }}
+{{- /*
+PersistentVolumeClaim for the embedded SQLite database.
+
+Rendered only when ui.database.type=sqlite and persistence is enabled. The
+api container mounts this at /app/data (SQLITE_PATH=/app/data/connections.db).
+The PostgreSQL backend is external-only and provisions no storage here.
+*/}}
+{{- if and (eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true") (eq .Values.ui.database.type "sqlite") .Values.ui.database.sqlite.persistence.enabled }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -8,11 +15,11 @@ metadata:
     {{- include "aerospike-ce-kubernetes-operator.ui.labels" . | nindent 4 }}
 spec:
   accessModes:
-    - {{ .Values.ui.persistence.accessMode }}
-  {{- if not (kindIs "invalid" .Values.ui.persistence.storageClassName) }}
-  storageClassName: {{ .Values.ui.persistence.storageClassName | quote }}
+    - {{ .Values.ui.database.sqlite.persistence.accessMode }}
+  {{- if not (kindIs "invalid" .Values.ui.database.sqlite.persistence.storageClassName) }}
+  storageClassName: {{ .Values.ui.database.sqlite.persistence.storageClassName | quote }}
   {{- end }}
   resources:
     requests:
-      storage: {{ .Values.ui.persistence.size }}
+      storage: {{ .Values.ui.database.sqlite.persistence.size }}
 {{- end }}
