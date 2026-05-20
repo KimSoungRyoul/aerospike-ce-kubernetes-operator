@@ -531,11 +531,38 @@ database. The backend is selected with `ui.database.type`:
   persisted on a PersistentVolumeClaim. No extra infrastructure. SQLite is
   single-writer, so `ui.replicaCount` must stay `1` (the chart fails the
   install otherwise).
-- **`postgresql`** — connects to an **external** PostgreSQL instance you
-  operate (RDS, Cloud SQL, AlloyDB, an in-cluster PostgreSQL operator, …).
-  Required for HA / multi-replica. The chart never deploys PostgreSQL itself.
+- **`postgresql`** — a PostgreSQL database, in one of two sub-modes:
+  - **chart-managed** (`ui.database.postgresql.deploy=true`) — the chart
+    provisions a single-replica PostgreSQL StatefulSet (data on a PVC) and
+    wires the api to it automatically. Turnkey, but not highly available.
+  - **external** (`deploy=false`, default) — connects to a PostgreSQL
+    instance you operate (RDS, Cloud SQL, AlloyDB, an in-cluster operator, …).
+    The right choice for HA / multi-replica.
 
-To use an external PostgreSQL, supply the connection URL:
+### Chart-managed PostgreSQL
+
+Let the chart run PostgreSQL for you — no external database required:
+
+```bash
+helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  --namespace aerospike-operator --create-namespace \
+  --set ui.database.type=postgresql \
+  --set ui.database.postgresql.deploy=true
+```
+
+This renders a `<release>-...-ui-postgres` StatefulSet (official `postgres`
+image, data on an 8Gi PVC), a Service, and a Secret holding an auto-generated
+password. The api's `DATABASE_URL` is wired automatically. Tune the database
+via `ui.database.postgresql.image` / `.auth` / `.persistence` / `.resources`.
+
+:::warning
+The chart-managed StatefulSet is **single-replica** — convenient, not highly
+available. For production HA, use an external PostgreSQL instead (below).
+:::
+
+### External PostgreSQL
+
+To connect to a PostgreSQL instance you operate, supply the connection URL:
 
 ```bash
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
@@ -583,10 +610,11 @@ restore → upgrade runbook.
 | `ui.rbac.create` | Auto-create ClusterRole/Binding (includes permissions for AerospikeCluster, Template, and HPA management) | `true` |
 | `ui.api.resources` | API container CPU/memory requests → limits | `100m`/`256Mi` → `200m`/`512Mi` |
 | `ui.web.resources` | Web container CPU/memory requests → limits | `50m`/`128Mi` → `150m`/`384Mi` |
-| `ui.database.type` | Database backend: `sqlite` (embedded, default) or `postgresql` (external) | `sqlite` |
+| `ui.database.type` | Database backend: `sqlite` (embedded, default) or `postgresql` | `sqlite` |
 | `ui.database.sqlite.persistence.enabled` | Persist the SQLite database file on a PVC | `true` |
 | `ui.database.sqlite.persistence.size` | SQLite PVC storage size | `1Gi` |
-| `ui.database.postgresql.databaseUrl` | External PostgreSQL connection URL (when `type=postgresql`) | `""` |
+| `ui.database.postgresql.deploy` | Provision a chart-managed PostgreSQL StatefulSet (when `type=postgresql`) | `false` |
+| `ui.database.postgresql.databaseUrl` | External PostgreSQL connection URL (when `type=postgresql`, `deploy=false`) | `""` |
 | `ui.database.postgresql.existingSecret` | Existing Secret with a `DATABASE_URL` key (alternative to `databaseUrl`) | `""` |
 | `ui.env.corsOrigins` | Backend CORS origins (empty string = disable CORS; frontend proxies via Next.js rewrites) | `""` |
 | `ui.env.logLevel` | Log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) | `"INFO"` |

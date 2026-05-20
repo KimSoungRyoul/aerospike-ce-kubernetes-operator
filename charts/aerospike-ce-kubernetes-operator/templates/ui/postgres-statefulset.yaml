@@ -1,0 +1,128 @@
+{{- /*
+Chart-managed PostgreSQL StatefulSet (ui.database.postgresql.deploy=true).
+
+A single-replica PostgreSQL running the official postgres image with its data
+directory (PGDATA) on a per-pod PersistentVolumeClaim. The api consumes
+DATABASE_URL from the "<ui.fullname>-postgres" Secret (postgres-secret.yaml).
+
+This is a convenience backend — single-replica, NOT highly available. For
+production HA use an external managed PostgreSQL (deploy=false).
+*/}}
+{{- if and (eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true") (eq .Values.ui.database.type "postgresql") .Values.ui.database.postgresql.deploy }}
+{{- $pg := .Values.ui.database.postgresql -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "aerospike-ce-kubernetes-operator.ui.postgres.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aerospike-ce-kubernetes-operator.ui.postgres.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  serviceName: {{ include "aerospike-ce-kubernetes-operator.ui.postgres.fullname" . }}
+  selector:
+    matchLabels:
+      {{- include "aerospike-ce-kubernetes-operator.ui.postgres.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "aerospike-ce-kubernetes-operator.ui.postgres.selectorLabels" . | nindent 8 }}
+      {{- with .Values.ui.podLabels }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/ui/postgres-secret.yaml") . | sha256sum }}
+      {{- with .Values.ui.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.ui.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $pg.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.ui.terminationGracePeriodSeconds | default 45 }}
+      containers:
+        - name: postgres
+          image: "{{ $pg.image.repository }}:{{ $pg.image.tag }}"
+          imagePullPolicy: {{ $pg.image.pullPolicy }}
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+          env:
+            - name: POSTGRES_DB
+              value: {{ $pg.auth.database | quote }}
+            - name: POSTGRES_USER
+              value: {{ $pg.auth.username | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aerospike-ce-kubernetes-operator.ui.postgres.fullname" . }}
+                  key: POSTGRES_PASSWORD
+            {{- /* PGDATA is a sub-directory of the mounted volume so the
+                   volume root (which may carry a lost+found) is never the
+                   data directory. */}}
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          {{- with $pg.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", {{ $pg.auth.username | quote }}, "-d", {{ $pg.auth.database | quote }}]
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", {{ $pg.auth.username | quote }}, "-d", {{ $pg.auth.database | quote }}]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          {{- with $pg.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      {{- with $pg.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $pg.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $pg.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if not $pg.persistence.enabled }}
+      volumes:
+        - name: data
+          emptyDir: {}
+      {{- end }}
+  {{- if $pg.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "aerospike-ce-kubernetes-operator.ui.postgres.labels" . | nindent 10 }}
+      spec:
+        accessModes:
+          - {{ $pg.persistence.accessMode }}
+        {{- if not (kindIs "invalid" $pg.persistence.storageClassName) }}
+        storageClassName: {{ $pg.persistence.storageClassName | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $pg.persistence.size }}
+  {{- end }}
+{{- end }}

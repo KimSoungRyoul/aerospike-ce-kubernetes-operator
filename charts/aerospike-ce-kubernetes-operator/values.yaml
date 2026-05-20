@@ -781,10 +781,12 @@ ui:
   #     SQLite is single-writer: keep ui.replicaCount=1 (the chart fails the
   #     install otherwise). Best for single-instance / small deployments.
   #
-  #   postgresql — an EXTERNAL PostgreSQL instance that you operate (managed
-  #     services such as RDS / Cloud SQL / AlloyDB, an in-cluster PostgreSQL
-  #     operator, etc.). Required for HA / multi-replica. This chart never
-  #     deploys PostgreSQL itself — there is no embedded sidecar.
+  #   postgresql — a PostgreSQL database. Either an EXTERNAL instance you
+  #     operate (managed services such as RDS / Cloud SQL / AlloyDB, an
+  #     in-cluster PostgreSQL operator, etc.), or — when
+  #     database.postgresql.deploy=true — a single-replica PostgreSQL
+  #     StatefulSet that this chart provisions and wires up for you.
+  #     Required for HA / multi-replica. There is no embedded sidecar.
   # =============================================================================
   database:
     # -- Database backend: "sqlite" (embedded, default) or "postgresql" (external).
@@ -817,21 +819,100 @@ ui:
         size: 1Gi
 
     # -- PostgreSQL backend settings. Used only when database.type=postgresql.
-    # The chart connects to an external database; it does not provision one.
     postgresql:
+      # -- Deploy a chart-managed PostgreSQL StatefulSet instead of connecting
+      # to an external instance.
+      #   false (default) — connect to an EXTERNAL PostgreSQL via databaseUrl /
+      #     existingSecret; the chart provisions no database.
+      #   true            — the chart renders a single-replica PostgreSQL
+      #     StatefulSet + Service + Secret and wires the api's DATABASE_URL to
+      #     it automatically (databaseUrl / existingSecret are then ignored).
+      # NOTE: the StatefulSet is single-replica — convenient, not
+      # highly-available. For production HA run an external managed database
+      # and leave deploy=false.
+      deploy: false
+
       # -- Full connection URL of the external PostgreSQL instance.
-      # Example: "postgresql://user:pass@db-host:5432/aerospike_manager"
+      # Used only when deploy=false. Example:
+      #   "postgresql://user:pass@db-host:5432/aerospike_manager"
       # Leave empty and set existingSecret to keep credentials out of values.
       databaseUrl: ""
-      # -- Use an existing Secret instead of databaseUrl.
-      # The Secret must contain a DATABASE_URL key.
+      # -- Use an existing Secret (with a DATABASE_URL key) instead of
+      # databaseUrl. Used only when deploy=false.
       existingSecret: ""
+
       # -- Connection pool minimum size (DB_POOL_MIN_SIZE)
       poolMinSize: 2
       # -- Connection pool maximum size (DB_POOL_MAX_SIZE)
       poolMaxSize: 10
       # -- SQL command execution timeout in seconds (DB_COMMAND_TIMEOUT)
       commandTimeout: 30
+
+      # -----------------------------------------------------------------------
+      # Chart-managed PostgreSQL — every setting below applies only when
+      # deploy=true. The chart renders a StatefulSet running the official
+      # postgres image with its data directory on a PersistentVolumeClaim.
+      # -----------------------------------------------------------------------
+      # -- PostgreSQL container image (used only when deploy=true).
+      image:
+        repository: postgres
+        tag: "17"
+        pullPolicy: IfNotPresent
+      # -- Database name / credentials created on first start (deploy=true).
+      auth:
+        # -- Database name.
+        database: aerospike_manager
+        # -- Database user.
+        username: aerospike
+        # -- Password. When empty the chart generates a 24-character random
+        # password on first install and preserves it across `helm upgrade` by
+        # re-reading the existing Secret. `helm uninstall` deletes the Secret;
+        # set an explicit password if credentials must survive a full
+        # uninstall/reinstall against a retained data volume.
+        password: ""
+      # -- Data directory persistence for the PostgreSQL StatefulSet.
+      persistence:
+        # -- Persist the data directory on a PVC (volumeClaimTemplate). When
+        # false an emptyDir is used and all data is lost on pod restart.
+        enabled: true
+        # -- Storage class. null = cluster default StorageClass,
+        # "" = pre-provisioned PV, "name" = a specific StorageClass.
+        storageClassName: null
+        # -- Access mode.
+        accessMode: ReadWriteOnce
+        # -- Volume size.
+        size: 8Gi
+      # -- Resource requests / limits for the PostgreSQL container.
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+      # -- Pod-level securityContext. The official postgres image runs as
+      # uid/gid 999; fsGroup makes the data volume group-writable so the
+      # container can run non-root.
+      podSecurityContext:
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      # -- Container-level securityContext for the PostgreSQL container.
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: false
+        capabilities:
+          drop:
+            - ALL
+      # -- Node selector for the PostgreSQL pod.
+      nodeSelector: {}
+      # -- Tolerations for the PostgreSQL pod.
+      tolerations: []
+      # -- Affinity rules for the PostgreSQL pod.
+      affinity: {}
 
   # =============================================================================
   # K8s Cluster Management

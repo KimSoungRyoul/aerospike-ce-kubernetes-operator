@@ -23,6 +23,13 @@ spec:
         - port: {{ .Values.ui.web.service.port }}
           protocol: TCP
         {{- end }}
+        {{- if and (eq .Values.ui.database.type "postgresql") .Values.ui.database.postgresql.deploy }}
+        {{- /* This NetworkPolicy's podSelector also matches the chart-managed
+               PostgreSQL pod (it shares the ui.selectorLabels); allow the
+               api -> PostgreSQL connection on 5432. */}}
+        - port: 5432
+          protocol: TCP
+        {{- end }}
       {{- with .Values.ui.networkPolicy.ingressFrom }}
       from:
         {{- toYaml . | nindent 8 }}
@@ -53,7 +60,7 @@ spec:
         - port: {{ .Values.ui.aerospikePorts.heartbeat }}
           protocol: TCP
     {{- if eq .Values.ui.database.type "postgresql" }}
-    # External PostgreSQL
+    # PostgreSQL (external instance or chart-managed pod)
     - ports:
         - port: 5432
           protocol: TCP

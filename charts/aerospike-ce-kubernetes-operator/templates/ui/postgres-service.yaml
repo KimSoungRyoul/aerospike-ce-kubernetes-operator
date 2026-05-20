@@ -1,0 +1,25 @@
+{{- /*
+ClusterIP Service for the chart-managed PostgreSQL StatefulSet
+(ui.database.postgresql.deploy=true). Doubles as the StatefulSet's
+serviceName. The api reaches PostgreSQL at "<name>:5432" via this stable VIP.
+
+Not rendered for an external PostgreSQL (deploy=false).
+*/}}
+{{- if and (eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true") (eq .Values.ui.database.type "postgresql") .Values.ui.database.postgresql.deploy }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "aerospike-ce-kubernetes-operator.ui.postgres.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aerospike-ce-kubernetes-operator.ui.postgres.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+      protocol: TCP
+  selector:
+    {{- include "aerospike-ce-kubernetes-operator.ui.postgres.selectorLabels" . | nindent 4 }}
+{{- end }}
