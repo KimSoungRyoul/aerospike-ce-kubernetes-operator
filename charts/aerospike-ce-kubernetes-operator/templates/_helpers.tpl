@@ -399,11 +399,15 @@ stale sidecar-era value keys and on invalid backend combinations.
 {{- if hasKey .Values.ui.env "databaseUrl" -}}
 {{- fail "ui.env.databaseUrl has moved to ui.database.postgresql.databaseUrl (and requires ui.database.type=postgresql)." -}}
 {{- end -}}
-{{- if eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true" -}}
+{{- /* The backend enum is validated unconditionally: configmap.yaml renders
+       ENABLE_POSTGRES from ui.database.type even in web-only installs, so a
+       typo must not slip through (it would silently fall back to SQLite). */ -}}
 {{- $type := .Values.ui.database.type -}}
 {{- if not (has $type (list "sqlite" "postgresql")) -}}
 {{- fail (printf "ui.database.type must be \"sqlite\" or \"postgresql\", got %q." $type) -}}
 {{- end -}}
+{{- /* The remaining checks only matter when the api Deployment is rendered. */ -}}
+{{- if eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true" -}}
 {{- if eq $type "postgresql" -}}
 {{- if and (not .Values.ui.database.postgresql.databaseUrl) (not .Values.ui.database.postgresql.existingSecret) -}}
 {{- fail "ui.database.type=postgresql requires either ui.database.postgresql.databaseUrl or ui.database.postgresql.existingSecret — the chart connects to an external PostgreSQL and never provisions one." -}}
