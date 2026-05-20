@@ -218,7 +218,7 @@ The api persists cluster connection metadata in a database. The backend is
 selected by `ui.database.type` — `sqlite` (embedded, default) or `postgresql`.
 For `postgresql` you can either connect to an external instance, or set
 `ui.database.postgresql.deploy=true` to have the chart provision a
-single-replica PostgreSQL StatefulSet for you. The embedded PostgreSQL
+single-replica PostgreSQL Deployment for you. The embedded PostgreSQL
 *sidecar* of earlier chart versions has been removed.
 
 | Key | Type | Default | Description |
@@ -230,7 +230,7 @@ single-replica PostgreSQL StatefulSet for you. The embedded PostgreSQL
 | `ui.database.sqlite.persistence.accessMode` | string | `ReadWriteOnce` | PVC access mode. SQLite is single-writer; keep `ReadWriteOnce`. |
 | `ui.database.sqlite.persistence.size` | string | `1Gi` | SQLite PVC volume size. |
 | `ui.database.postgresql.databaseUrl` | string | `""` | Connection URL of the external PostgreSQL instance. Required (or `existingSecret`) when `type=postgresql`. |
-| `ui.database.postgresql.existingSecret` | string | `""` | Existing Secret name containing a `DATABASE_URL` key. Use instead of `databaseUrl` to keep credentials out of values. |
+| `ui.database.postgresql.existingSecret` | string | `""` | Existing Secret holding the database credentials. With `deploy=false` it needs a `DATABASE_URL` key. With `deploy=true` it needs both `POSTGRES_PASSWORD` and `DATABASE_URL` — the chart then renders no Secret of its own (the GitOps-safe way to keep the password stable across `helm template` renders). |
 | `ui.database.postgresql.poolMinSize` | int | `2` | Connection pool minimum size (`DB_POOL_MIN_SIZE`). |
 | `ui.database.postgresql.poolMaxSize` | int | `10` | Connection pool maximum size (`DB_POOL_MAX_SIZE`). |
 | `ui.database.postgresql.commandTimeout` | int | `30` | SQL command execution timeout in seconds (`DB_COMMAND_TIMEOUT`). |
@@ -239,14 +239,14 @@ The keys below provision a **chart-managed** PostgreSQL and apply only when `ui.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `ui.database.postgresql.deploy` | bool | `false` | When `true`, the chart provisions a single-replica PostgreSQL StatefulSet + Service + Secret and wires the api's `DATABASE_URL` to it automatically (`databaseUrl` / `existingSecret` are then ignored and rejected). When `false`, connect to an external instance. |
+| `ui.database.postgresql.deploy` | bool | `false` | When `true`, the chart provisions a single-replica PostgreSQL Deployment + Service + data PVC + Secret and wires the api's `DATABASE_URL` to it automatically. `databaseUrl` is rejected; set `existingSecret` to supply your own credentials Secret. When `false`, connect to an external instance. |
 | `ui.database.postgresql.image.repository` | string | `postgres` | Chart-managed PostgreSQL image repository. |
 | `ui.database.postgresql.image.tag` | string | `"17"` | PostgreSQL image tag. |
 | `ui.database.postgresql.image.pullPolicy` | string | `IfNotPresent` | PostgreSQL image pull policy. |
 | `ui.database.postgresql.auth.database` | string | `aerospike_manager` | Database name created on first start. |
 | `ui.database.postgresql.auth.username` | string | `aerospike` | Database user. |
 | `ui.database.postgresql.auth.password` | string | `""` | Database password. Empty = a 24-character random password is generated on first install and preserved across `helm upgrade`. |
-| `ui.database.postgresql.persistence.enabled` | bool | `true` | Persist the data directory on a PVC (`volumeClaimTemplate`). When `false`, an `emptyDir` is used and all data is lost on pod restart. |
+| `ui.database.postgresql.persistence.enabled` | bool | `true` | Persist the data directory on a PVC (`helm.sh/resource-policy: keep`, so it survives `helm uninstall`). When `false`, an `emptyDir` is used and all data is lost on pod restart. |
 | `ui.database.postgresql.persistence.storageClassName` | string | `null` | Storage class for the PostgreSQL PVC. `null` = cluster default, `""` = pre-provisioned PV, `"name"` = specified StorageClass. |
 | `ui.database.postgresql.persistence.accessMode` | string | `ReadWriteOnce` | PostgreSQL PVC access mode. |
 | `ui.database.postgresql.persistence.size` | string | `8Gi` | PostgreSQL PVC volume size. |
@@ -265,8 +265,11 @@ must stay `1` — the chart fails the install otherwise.
 connects to an **external** database that you operate (managed services such
 as RDS / Cloud SQL / AlloyDB, or an in-cluster PostgreSQL operator) — the
 right choice for HA / multi-replica. With `deploy=true` the chart provisions a
-**single-replica** PostgreSQL StatefulSet (data on a PVC) and wires the api to
-it automatically — turnkey, but not highly available.
+**single-replica** PostgreSQL Deployment (`Recreate` strategy, data on a
+`keep`-policy PVC) and wires the api to it automatically — turnkey, but not
+highly available. For GitOps either set `ui.database.postgresql.auth.password`
+explicitly or point `ui.database.postgresql.existingSecret` at your own Secret,
+so a client-side `helm template` does not regenerate the password each render.
 
 > **Migration:** stale `ui.postgresql.*` and `ui.persistence.*` keys from the
 > embedded-sidecar era fail the install with a migration message. Map

@@ -207,7 +207,7 @@ UI 컴포넌트별로 각각의 서비스가 생성됩니다.
 
 ### 데이터베이스
 
-api는 클러스터 연결 메타데이터를 데이터베이스에 저장합니다. 백엔드는 `ui.database.type`으로 선택하며, `sqlite`(내장, 기본값) 또는 `postgresql` 중 하나입니다. `postgresql`은 외부 인스턴스에 연결하거나, `ui.database.postgresql.deploy=true`로 차트가 단일 레플리카 PostgreSQL StatefulSet을 직접 프로비저닝하도록 할 수 있습니다. 이전 차트 버전의 임베디드 PostgreSQL *사이드카*는 제거되었습니다.
+api는 클러스터 연결 메타데이터를 데이터베이스에 저장합니다. 백엔드는 `ui.database.type`으로 선택하며, `sqlite`(내장, 기본값) 또는 `postgresql` 중 하나입니다. `postgresql`은 외부 인스턴스에 연결하거나, `ui.database.postgresql.deploy=true`로 차트가 단일 레플리카 PostgreSQL Deployment를 직접 프로비저닝하도록 할 수 있습니다. 이전 차트 버전의 임베디드 PostgreSQL *사이드카*는 제거되었습니다.
 
 | 키 | 타입 | 기본값 | 설명 |
 |-----|------|---------|-------------|
@@ -218,7 +218,7 @@ api는 클러스터 연결 메타데이터를 데이터베이스에 저장합니
 | `ui.database.sqlite.persistence.accessMode` | string | `ReadWriteOnce` | PVC 접근 모드. SQLite는 단일 라이터이므로 `ReadWriteOnce` 유지. |
 | `ui.database.sqlite.persistence.size` | string | `1Gi` | SQLite PVC 볼륨 크기. |
 | `ui.database.postgresql.databaseUrl` | string | `""` | 외부 PostgreSQL 인스턴스의 연결 URL. `type=postgresql`일 때 필수(또는 `existingSecret`). |
-| `ui.database.postgresql.existingSecret` | string | `""` | `DATABASE_URL` 키를 포함하는 기존 Secret 이름. `databaseUrl` 대신 사용해 자격 증명을 values 밖에 둠. |
+| `ui.database.postgresql.existingSecret` | string | `""` | 데이터베이스 자격 증명을 담은 기존 Secret. `deploy=false`이면 `DATABASE_URL` 키가, `deploy=true`이면 `POSTGRES_PASSWORD`와 `DATABASE_URL` 키가 모두 필요. `deploy=true`에서 지정하면 차트가 자체 Secret을 렌더링하지 않음(`helm template` 렌더 간 비밀번호를 안정적으로 유지하는 GitOps 안전 방식). |
 | `ui.database.postgresql.poolMinSize` | int | `2` | 커넥션 풀 최소 크기 (`DB_POOL_MIN_SIZE`). |
 | `ui.database.postgresql.poolMaxSize` | int | `10` | 커넥션 풀 최대 크기 (`DB_POOL_MAX_SIZE`). |
 | `ui.database.postgresql.commandTimeout` | int | `30` | SQL 명령 실행 타임아웃 (초, `DB_COMMAND_TIMEOUT`). |
@@ -227,14 +227,14 @@ api는 클러스터 연결 메타데이터를 데이터베이스에 저장합니
 
 | 키 | 타입 | 기본값 | 설명 |
 |-----|------|---------|-------------|
-| `ui.database.postgresql.deploy` | bool | `false` | `true`이면 차트가 단일 레플리카 PostgreSQL StatefulSet + Service + Secret을 프로비저닝하고 api의 `DATABASE_URL`을 자동 연결(`databaseUrl` / `existingSecret`은 무시·거부됨). `false`이면 외부 인스턴스에 연결. |
+| `ui.database.postgresql.deploy` | bool | `false` | `true`이면 차트가 단일 레플리카 PostgreSQL Deployment + Service + 데이터 PVC + Secret을 프로비저닝하고 api의 `DATABASE_URL`을 자동 연결. `databaseUrl`은 거부되며, 자체 자격 증명 Secret을 쓰려면 `existingSecret`을 설정. `false`이면 외부 인스턴스에 연결. |
 | `ui.database.postgresql.image.repository` | string | `postgres` | 차트 관리형 PostgreSQL 이미지 리포지토리. |
 | `ui.database.postgresql.image.tag` | string | `"17"` | PostgreSQL 이미지 태그. |
 | `ui.database.postgresql.image.pullPolicy` | string | `IfNotPresent` | PostgreSQL 이미지 풀 정책. |
 | `ui.database.postgresql.auth.database` | string | `aerospike_manager` | 첫 시작 시 생성되는 데이터베이스 이름. |
 | `ui.database.postgresql.auth.username` | string | `aerospike` | 데이터베이스 사용자. |
-| `ui.database.postgresql.auth.password` | string | `""` | 데이터베이스 비밀번호. 비우면 첫 설치 시 24자 무작위 비밀번호를 생성하고 `helm upgrade` 시에도 유지. |
-| `ui.database.postgresql.persistence.enabled` | bool | `true` | PostgreSQL 데이터 디렉터리를 PVC(volumeClaimTemplate)에 영속 저장. `false`이면 `emptyDir`을 사용하며 Pod 재시작 시 데이터가 모두 사라짐. |
+| `ui.database.postgresql.auth.password` | string | `""` | 데이터베이스 비밀번호. 비우면 첫 설치 시 24자 무작위 비밀번호를 생성하고 `helm upgrade` 시에도 유지. GitOps 주의: 클라이언트사이드 `helm template`(ArgoCD / Flux / kustomize)은 Secret을 다시 읽지 못해 빈 비밀번호가 매 렌더마다 재생성됨 — GitOps에서는 이 값을 명시하거나 `existingSecret`을 사용. |
+| `ui.database.postgresql.persistence.enabled` | bool | `true` | PostgreSQL 데이터 디렉터리를 PVC에 영속 저장(`helm.sh/resource-policy: keep` — `helm uninstall` 후에도 유지). `false`이면 `emptyDir`을 사용하며 Pod 재시작 시 데이터가 모두 사라짐. |
 | `ui.database.postgresql.persistence.storageClassName` | string | `null` | PostgreSQL PVC 스토리지 클래스. `null` = 클러스터 기본값, `""` = 사전 프로비저닝 PV, `"name"` = 지정 StorageClass. |
 | `ui.database.postgresql.persistence.accessMode` | string | `ReadWriteOnce` | PostgreSQL PVC 접근 모드. |
 | `ui.database.postgresql.persistence.size` | string | `8Gi` | PostgreSQL PVC 볼륨 크기. |
@@ -247,7 +247,7 @@ api는 클러스터 연결 메타데이터를 데이터베이스에 저장합니
 
 **SQLite (기본값)** 는 api 컨테이너 내부의 단일 파일에 데이터를 저장하며 PersistentVolumeClaim으로 백업됩니다. 단일 라이터이므로 `ui.replicaCount`는 `1`이어야 합니다 — 그렇지 않으면 차트가 설치를 실패시킵니다.
 
-**PostgreSQL** 모드는 두 가지 하위 모드를 가집니다. `deploy=false`(기본값)이면 직접 운영하는 **외부** 데이터베이스(RDS / Cloud SQL / AlloyDB 같은 관리형 서비스, 또는 클러스터 내 PostgreSQL 오퍼레이터)에 연결하며 HA·다중 레플리카에 적합합니다. `deploy=true`이면 차트가 **단일 레플리카** PostgreSQL StatefulSet(데이터는 PVC)을 프로비저닝하고 api를 자동 연결합니다 — 간편하지만 고가용성은 아닙니다.
+**PostgreSQL** 모드는 두 가지 하위 모드를 가집니다. `deploy=false`(기본값)이면 직접 운영하는 **외부** 데이터베이스(RDS / Cloud SQL / AlloyDB 같은 관리형 서비스, 또는 클러스터 내 PostgreSQL 오퍼레이터)에 연결하며 HA·다중 레플리카에 적합합니다. `deploy=true`이면 차트가 **단일 레플리카** PostgreSQL Deployment(`Recreate` 전략, 데이터는 `keep` 정책 PVC)를 프로비저닝하고 api를 자동 연결합니다 — 간편하지만 고가용성은 아닙니다. GitOps에서는 `ui.database.postgresql.auth.password`를 명시하거나 `ui.database.postgresql.existingSecret`을 직접 관리하는 Secret에 지정해, 클라이언트사이드 `helm template`이 매 렌더마다 비밀번호를 재생성하지 않도록 하세요.
 
 > **마이그레이션:** 임베디드 사이드카 시절의 구버전 `ui.postgresql.*` / `ui.persistence.*` 키는 설치 시 마이그레이션 안내 메시지와 함께 실패합니다. `ui.postgresql.enabled: true` → `ui.database.type: postgresql` + `ui.database.postgresql.databaseUrl`, `ui.postgresql.enabled: false` → `ui.database.type: sqlite`, `ui.persistence.*` → `ui.database.sqlite.persistence.*`, `ui.env.databaseUrl` → `ui.database.postgresql.databaseUrl`로 매핑하세요. 임베디드 PostgreSQL에서 자동 데이터 마이그레이션은 제공되지 않으며, 임베디드 사이드카 릴리스에서의 업그레이드는 `ui.database.acknowledgeEmbeddedPostgresRemoval=true`를 설정할 때까지 차단됩니다. `pg_dump` → 복원 → 업그레이드 런북은 차트 README의 "Migrating off the embedded PostgreSQL sidecar" 절을 참고하세요.
 

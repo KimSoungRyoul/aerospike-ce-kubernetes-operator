@@ -785,7 +785,7 @@ ui:
   #     operate (managed services such as RDS / Cloud SQL / AlloyDB, an
   #     in-cluster PostgreSQL operator, etc.), or — when
   #     database.postgresql.deploy=true — a single-replica PostgreSQL
-  #     StatefulSet that this chart provisions and wires up for you.
+  #     Deployment that this chart provisions and wires up for you.
   #     Required for HA / multi-replica. There is no embedded sidecar.
   # =============================================================================
   database:
@@ -820,14 +820,15 @@ ui:
 
     # -- PostgreSQL backend settings. Used only when database.type=postgresql.
     postgresql:
-      # -- Deploy a chart-managed PostgreSQL StatefulSet instead of connecting
+      # -- Deploy a chart-managed PostgreSQL Deployment instead of connecting
       # to an external instance.
       #   false (default) — connect to an EXTERNAL PostgreSQL via databaseUrl /
       #     existingSecret; the chart provisions no database.
       #   true            — the chart renders a single-replica PostgreSQL
-      #     StatefulSet + Service + Secret and wires the api's DATABASE_URL to
-      #     it automatically (databaseUrl / existingSecret are then ignored).
-      # NOTE: the StatefulSet is single-replica — convenient, not
+      #     Deployment + Service + data PVC + Secret and wires the api's
+      #     DATABASE_URL to it automatically. databaseUrl is ignored; set
+      #     existingSecret to supply your own credentials Secret (see below).
+      # NOTE: the Deployment is single-replica — convenient, not
       # highly-available. For production HA run an external managed database
       # and leave deploy=false.
       deploy: false
@@ -837,8 +838,15 @@ ui:
       #   "postgresql://user:pass@db-host:5432/aerospike_manager"
       # Leave empty and set existingSecret to keep credentials out of values.
       databaseUrl: ""
-      # -- Use an existing Secret (with a DATABASE_URL key) instead of
-      # databaseUrl. Used only when deploy=false.
+      # -- Name of an existing Secret holding the database credentials.
+      #   deploy=false — the Secret needs a DATABASE_URL key (external instance).
+      #   deploy=true  — the Secret needs BOTH a POSTGRES_PASSWORD key and a
+      #     DATABASE_URL key. The chart then skips its own randomly-generated
+      #     Secret and reads credentials from yours — the GitOps-safe way to
+      #     keep the password stable across client-side `helm template` renders
+      #     (ArgoCD / Flux / kustomize). The DATABASE_URL must point at the
+      #     chart's in-cluster PostgreSQL Service and use the auth.username /
+      #     auth.database below; auth.password must stay empty.
       existingSecret: ""
 
       # -- Connection pool minimum size (DB_POOL_MIN_SIZE)
@@ -850,7 +858,7 @@ ui:
 
       # -----------------------------------------------------------------------
       # Chart-managed PostgreSQL — every setting below applies only when
-      # deploy=true. The chart renders a StatefulSet running the official
+      # deploy=true. The chart renders a Deployment running the official
       # postgres image with its data directory on a PersistentVolumeClaim.
       # -----------------------------------------------------------------------
       # -- PostgreSQL container image (used only when deploy=true).
@@ -866,14 +874,21 @@ ui:
         username: aerospike
         # -- Password. When empty the chart generates a 24-character random
         # password on first install and preserves it across `helm upgrade` by
-        # re-reading the existing Secret. `helm uninstall` deletes the Secret;
-        # set an explicit password if credentials must survive a full
-        # uninstall/reinstall against a retained data volume.
+        # re-reading the existing Secret.
+        # GitOps caveat: a client-side `helm template` (ArgoCD / Flux /
+        # kustomize) cannot re-read the Secret, so an empty password is
+        # regenerated on every render. For GitOps set this explicitly, or use
+        # existingSecret above. `helm uninstall` deletes the chart's Secret but
+        # KEEPS the data PVC (helm.sh/resource-policy: keep); set an explicit
+        # password (or existingSecret) so credentials survive a full
+        # uninstall/reinstall against that retained volume.
         password: ""
-      # -- Data directory persistence for the PostgreSQL StatefulSet.
+      # -- Data directory persistence for the chart-managed PostgreSQL.
       persistence:
-        # -- Persist the data directory on a PVC (volumeClaimTemplate). When
-        # false an emptyDir is used and all data is lost on pod restart.
+        # -- Persist the data directory on a PersistentVolumeClaim. The PVC
+        # carries helm.sh/resource-policy: keep, so it survives `helm
+        # uninstall`. When false an emptyDir is used and all data is lost on
+        # pod restart.
         enabled: true
         # -- Storage class. null = cluster default StorageClass,
         # "" = pre-provisioned PV, "name" = a specific StorageClass.

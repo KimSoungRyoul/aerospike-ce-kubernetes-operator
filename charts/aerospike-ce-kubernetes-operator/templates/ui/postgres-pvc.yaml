@@ -1,0 +1,33 @@
+{{- /*
+PersistentVolumeClaim for the chart-managed PostgreSQL Deployment
+(ui.database.postgresql.deploy=true with persistence.enabled=true).
+
+The Deployment (postgres-deployment.yaml) mounts this at
+/var/lib/postgresql/data. The "helm.sh/resource-policy: keep" annotation
+makes `helm uninstall` leave the volume in place so the database survives an
+uninstall/reinstall — delete the PVC by hand to discard the data.
+
+Not rendered when persistence.enabled=false (the Deployment falls back to an
+emptyDir and all data is lost on pod restart).
+*/}}
+{{- if and (eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true") (eq .Values.ui.database.type "postgresql") .Values.ui.database.postgresql.deploy .Values.ui.database.postgresql.persistence.enabled }}
+{{- $pg := .Values.ui.database.postgresql -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "aerospike-ce-kubernetes-operator.ui.postgres.pvcName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "aerospike-ce-kubernetes-operator.ui.postgres.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - {{ $pg.persistence.accessMode }}
+  {{- if not (kindIs "invalid" $pg.persistence.storageClassName) }}
+  storageClassName: {{ $pg.persistence.storageClassName | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $pg.persistence.size }}
+{{- end }}

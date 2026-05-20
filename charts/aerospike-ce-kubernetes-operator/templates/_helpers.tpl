@@ -219,16 +219,29 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
 {{/*
+Name of the data PVC for the chart-managed PostgreSQL Deployment
+(ui.database.postgresql.deploy=true with persistence.enabled=true).
+*/}}
+{{- define "aerospike-ce-kubernetes-operator.ui.postgres.pvcName" -}}
+{{- include "aerospike-ce-kubernetes-operator.ui.postgres.fullname" . }}-data
+{{- end }}
+
+{{/*
 Name of the Secret carrying the api's DATABASE_URL.
-- deploy=true  -> the chart's own "<ui.fullname>-postgres" Secret.
-- deploy=false -> the user's existingSecret, else the chart's "<ui.fullname>-db"
-  Secret built from databaseUrl.
+- existingSecret set -> the operator-supplied Secret (works for an external
+  database AND, with deploy=true, as a GitOps-safe alternative to the chart's
+  randomly-generated Secret — it then also carries POSTGRES_PASSWORD).
+- deploy=true        -> the chart's own "<ui.fullname>-postgres" Secret.
+- deploy=false       -> the chart's "<ui.fullname>-db" Secret built from
+  databaseUrl.
 */}}
 {{- define "aerospike-ce-kubernetes-operator.ui.database.secretName" -}}
-{{- if .Values.ui.database.postgresql.deploy -}}
+{{- if .Values.ui.database.postgresql.existingSecret -}}
+{{- .Values.ui.database.postgresql.existingSecret -}}
+{{- else if .Values.ui.database.postgresql.deploy -}}
 {{- include "aerospike-ce-kubernetes-operator.ui.postgres.fullname" . -}}
 {{- else -}}
-{{- .Values.ui.database.postgresql.existingSecret | default (printf "%s-db" (include "aerospike-ce-kubernetes-operator.ui.fullname" .)) -}}
+{{- printf "%s-db" (include "aerospike-ce-kubernetes-operator.ui.fullname" .) -}}
 {{- end -}}
 {{- end }}
 
@@ -459,19 +472,31 @@ stale sidecar-era value keys and on invalid backend combinations.
 {{- if eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true" -}}
 {{- if eq $type "postgresql" -}}
 {{- if .Values.ui.database.postgresql.deploy -}}
-{{- /* Chart-managed PostgreSQL: the chart provisions the database and builds
-       DATABASE_URL itself, so the external-connection keys must be unset. */ -}}
-{{- if .Values.ui.database.postgresql.existingSecret -}}
-{{- fail "ui.database.postgresql.deploy=true provisions a chart-managed PostgreSQL and builds its own Secret — unset ui.database.postgresql.existingSecret (it applies only to an external database)." -}}
-{{- end -}}
+{{- /* Chart-managed PostgreSQL: the chart provisions the database (Deployment
+       + Service + data PVC). databaseUrl is an INLINE external connection URL
+       and never applies here. existingSecret IS allowed — it lets an operator
+       supply a pre-baked Secret (sealed-secret / vault) carrying
+       POSTGRES_PASSWORD + DATABASE_URL instead of the chart's
+       randomly-generated one. That is the GitOps-safe path: a client-side
+       `helm template` (ArgoCD / Flux / kustomize) cannot preserve a random
+       password across renders, so it would otherwise regenerate it every
+       reconcile. */ -}}
 {{- if .Values.ui.database.postgresql.databaseUrl -}}
-{{- fail "ui.database.postgresql.deploy=true provisions a chart-managed PostgreSQL and builds DATABASE_URL itself — unset ui.database.postgresql.databaseUrl (it applies only to an external database)." -}}
+{{- fail "ui.database.postgresql.deploy=true provisions a chart-managed PostgreSQL and builds DATABASE_URL itself — unset ui.database.postgresql.databaseUrl (it applies only to an external database). To supply credentials yourself, use ui.database.postgresql.existingSecret instead." -}}
 {{- end -}}
-{{- /* The password is embedded verbatim in DATABASE_URL; reject characters
-       that would corrupt the connection string (the auto-generated default
-       is always safe). */ -}}
+{{- if .Values.ui.database.postgresql.existingSecret -}}
+{{- /* The operator-supplied Secret carries the password, so auth.password
+       would be silently ignored — reject the ambiguous combination. */ -}}
+{{- if .Values.ui.database.postgresql.auth.password -}}
+{{- fail "ui.database.postgresql.deploy=true with existingSecret reads the password from that Secret — unset ui.database.postgresql.auth.password (it would be ignored). The existingSecret must carry both POSTGRES_PASSWORD and a DATABASE_URL pointing at the chart's in-cluster PostgreSQL Service." -}}
+{{- end -}}
+{{- else -}}
+{{- /* Chart-generated Secret: the password is embedded verbatim in
+       DATABASE_URL; reject characters that would corrupt the connection
+       string (the auto-generated default is always safe). */ -}}
 {{- if and .Values.ui.database.postgresql.auth.password (not (regexMatch "^[A-Za-z0-9._~-]+$" .Values.ui.database.postgresql.auth.password)) -}}
 {{- fail "ui.database.postgresql.auth.password contains a character outside [A-Za-z0-9._~-]. The chart embeds it verbatim in DATABASE_URL, so URL-special characters (@ : / ? # ...) would corrupt the connection string. Use a password from that set, or leave it empty to auto-generate one." -}}
+{{- end -}}
 {{- end -}}
 {{- else -}}
 {{- /* External PostgreSQL: a connection URL is mandatory. */ -}}

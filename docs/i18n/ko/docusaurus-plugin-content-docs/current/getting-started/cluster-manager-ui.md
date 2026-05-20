@@ -7,7 +7,7 @@ title: 클러스터 매니저 UI
 
 [Aerospike Cluster Manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager)는 Aerospike CE 클러스터를 관리하기 위한 웹 기반 GUI입니다. 오퍼레이터 Helm 차트에 번들로 포함되어 있으며, 오퍼레이터와 함께 선택적 컴포넌트로 배포할 수 있습니다.
 
-UI는 클러스터 연결 프로파일을 데이터베이스에 저장합니다. 기본 백엔드는 api 컨테이너에 내장된 SQLite 파일(PVC에 영속 저장)이며, `postgresql`로 전환하면 차트가 직접 띄우는 PostgreSQL StatefulSet 또는 직접 운영하는 외부 PostgreSQL 인스턴스를 사용할 수 있습니다.
+UI는 클러스터 연결 프로파일을 데이터베이스에 저장합니다. 기본 백엔드는 api 컨테이너에 내장된 SQLite 파일(PVC에 영속 저장)이며, `postgresql`로 전환하면 차트가 직접 띄우는 PostgreSQL Deployment 또는 직접 운영하는 외부 PostgreSQL 인스턴스를 사용할 수 있습니다.
 
 ---
 
@@ -88,9 +88,9 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kuber
 | `ui.database.sqlite.persistence.enabled` | SQLite 데이터베이스 파일을 PVC에 영속 저장 | `true` |
 | `ui.database.sqlite.persistence.size` | SQLite PVC 스토리지 크기 | `1Gi` |
 | `ui.database.sqlite.persistence.storageClassName` | SQLite PVC 스토리지 클래스 | `null` |
-| `ui.database.postgresql.deploy` | 차트 관리형 PostgreSQL StatefulSet 프로비저닝 (`type=postgresql` 일 때) | `false` |
+| `ui.database.postgresql.deploy` | 차트 관리형 PostgreSQL Deployment 프로비저닝 (`type=postgresql` 일 때) | `false` |
 | `ui.database.postgresql.databaseUrl` | 외부 PostgreSQL 연결 URL (`type=postgresql`, `deploy=false` 일 때) | `""` |
-| `ui.database.postgresql.existingSecret` | `DATABASE_URL` 키를 포함하는 기존 Secret (`databaseUrl` 대안) | `""` |
+| `ui.database.postgresql.existingSecret` | 기존 자격 증명 Secret. `deploy=false`: `DATABASE_URL` 필요. `deploy=true`: `POSTGRES_PASSWORD` + `DATABASE_URL` 필요 | `""` |
 | `ui.k8s.enabled` | K8s 클러스터 관리 기능 활성화 | `true` |
 | `ui.ingress.enabled` | 외부 접근용 Ingress 생성 | `false` |
 | `ui.rbac.create` | K8s API 접근용 ClusterRole 및 ClusterRoleBinding 생성 (AerospikeCluster, Template, HPA 관리 권한 포함) | `true` |
@@ -410,7 +410,7 @@ api는 클러스터 연결 메타데이터를 데이터베이스에 저장하며
 
 - **`sqlite`** (기본값) — api 컨테이너에 내장된 SQLite 파일을 PVC에 영속 저장합니다. 추가 인프라가 필요 없습니다. SQLite는 단일 라이터(single-writer)이므로 `ui.replicaCount`는 `1`이어야 합니다(그렇지 않으면 차트가 설치를 실패시킵니다).
 - **`postgresql`** — PostgreSQL 데이터베이스로, 두 가지 하위 모드가 있습니다:
-  - **차트 관리형** (`ui.database.postgresql.deploy=true`) — 차트가 단일 레플리카 PostgreSQL StatefulSet(데이터는 PVC)을 프로비저닝하고 api를 자동 연결합니다. 간편하지만 고가용성은 아닙니다.
+  - **차트 관리형** (`ui.database.postgresql.deploy=true`) — 차트가 단일 레플리카 PostgreSQL Deployment(데이터는 PVC)을 프로비저닝하고 api를 자동 연결합니다. 간편하지만 고가용성은 아닙니다.
   - **외부** (`deploy=false`, 기본값) — 직접 운영하는 PostgreSQL 인스턴스(RDS, Cloud SQL, AlloyDB, 클러스터 내 오퍼레이터 등)에 연결합니다. HA·다중 레플리카에 적합합니다.
 
 ### 차트 관리형 PostgreSQL
@@ -424,10 +424,22 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kuber
   --set ui.database.postgresql.deploy=true
 ```
 
-이렇게 하면 `<릴리스명>-...-ui-postgres` StatefulSet(공식 `postgres` 이미지, 데이터는 8Gi PVC), Service, 자동 생성된 비밀번호를 담은 Secret이 렌더링됩니다. api의 `DATABASE_URL`은 자동으로 연결됩니다. `ui.database.postgresql.image` / `.auth` / `.persistence` / `.resources`로 데이터베이스를 조정할 수 있습니다.
+이렇게 하면 `<릴리스명>-...-ui-postgres` Deployment(공식 `postgres` 이미지, 데이터는 8Gi PVC), Service, 자동 생성된 비밀번호를 담은 Secret이 렌더링됩니다. api의 `DATABASE_URL`은 자동으로 연결됩니다. `ui.database.postgresql.image` / `.auth` / `.persistence` / `.resources`로 데이터베이스를 조정할 수 있습니다.
 
 :::warning
-차트 관리형 StatefulSet은 **단일 레플리카**입니다 — 간편하지만 고가용성은 아닙니다. 프로덕션 HA에는 아래의 외부 PostgreSQL을 사용하세요.
+차트 관리형 Deployment는 **단일 레플리카**입니다(`ReadWriteOnce` 볼륨에 `Recreate` 업데이트 전략) — 간편하지만 고가용성은 아닙니다. 프로덕션 HA에는 아래의 외부 PostgreSQL을 사용하세요.
+:::
+
+:::warning GitOps — 비밀번호를 안정적으로 유지하기
+`deploy=true`이고 `auth.password`가 비어 있으면, 차트는 무작위 `POSTGRES_PASSWORD`를
+생성하고 클러스터의 기존 Secret을 다시 읽어 이를 유지합니다. 이 동작은 서버사이드
+`helm install` / `helm upgrade`에서만 작동합니다. **클라이언트사이드 `helm
+template`**(ArgoCD, Flux, kustomize `helmCharts`)은 클러스터를 읽지 못하므로
+매 렌더마다 비밀번호를 재생성하여 실행 중인 데이터베이스를 망가뜨립니다.
+GitOps에서는 `ui.database.postgresql.auth.password`를 명시하거나,
+`ui.database.postgresql.existingSecret`을 직접 관리하는 Secret(sealed-secret /
+vault)에 지정하세요. 그 Secret에는 `POSTGRES_PASSWORD`와 `DATABASE_URL`이 모두
+들어 있어야 하며, 이 경우 차트는 자체 Secret을 렌더링하지 않습니다.
 :::
 
 ### 외부 PostgreSQL
@@ -442,7 +454,7 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kuber
 ```
 
 :::tip
-자격 증명을 values에 노출하지 않으려면 `ui.database.postgresql.existingSecret`에 기존 Kubernetes Secret 이름을 지정합니다. Secret에는 `DATABASE_URL` 키가 포함되어야 합니다.
+자격 증명을 values에 노출하지 않으려면 `ui.database.postgresql.existingSecret`에 기존 Kubernetes Secret 이름을 지정합니다. 외부 데이터베이스에서는 Secret에 `DATABASE_URL` 키가, `deploy=true`에서는 `POSTGRES_PASSWORD`와 `DATABASE_URL` 키가 모두 포함되어야 합니다.
 :::
 
 :::warning

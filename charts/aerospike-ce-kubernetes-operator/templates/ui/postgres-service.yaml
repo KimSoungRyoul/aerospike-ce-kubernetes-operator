@@ -1,7 +1,7 @@
 {{- /*
-ClusterIP Service for the chart-managed PostgreSQL StatefulSet
-(ui.database.postgresql.deploy=true). Doubles as the StatefulSet's
-serviceName. The api reaches PostgreSQL at "<name>:5432" via this stable VIP.
+ClusterIP Service for the chart-managed PostgreSQL Deployment
+(ui.database.postgresql.deploy=true). The api reaches PostgreSQL at
+"<name>:5432" via this stable VIP.
 
 Not rendered for an external PostgreSQL (deploy=false).
 */}}
