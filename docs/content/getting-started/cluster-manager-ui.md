@@ -533,7 +533,7 @@ database. The backend is selected with `ui.database.type`:
   install otherwise).
 - **`postgresql`** — a PostgreSQL database, in one of two sub-modes:
   - **chart-managed** (`ui.database.postgresql.deploy=true`) — the chart
-    provisions a single-replica PostgreSQL StatefulSet (data on a PVC) and
+    provisions a single-replica PostgreSQL Deployment (data on a PVC) and
     wires the api to it automatically. Turnkey, but not highly available.
   - **external** (`deploy=false`, default) — connects to a PostgreSQL
     instance you operate (RDS, Cloud SQL, AlloyDB, an in-cluster operator, …).
@@ -550,14 +550,27 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kuber
   --set ui.database.postgresql.deploy=true
 ```
 
-This renders a `<release>-...-ui-postgres` StatefulSet (official `postgres`
+This renders a `<release>-...-ui-postgres` Deployment (official `postgres`
 image, data on an 8Gi PVC), a Service, and a Secret holding an auto-generated
 password. The api's `DATABASE_URL` is wired automatically. Tune the database
 via `ui.database.postgresql.image` / `.auth` / `.persistence` / `.resources`.
 
 :::warning
-The chart-managed StatefulSet is **single-replica** — convenient, not highly
-available. For production HA, use an external PostgreSQL instead (below).
+The chart-managed Deployment is **single-replica** (`Recreate` update strategy
+on a `ReadWriteOnce` volume) — convenient, not highly available. For production
+HA, use an external PostgreSQL instead (below).
+:::
+
+:::warning GitOps — keep the password stable
+With `deploy=true` and an empty `auth.password`, the chart generates a random
+`POSTGRES_PASSWORD` and preserves it by re-reading the live Secret. That only
+works for a server-side `helm install` / `helm upgrade`. A **client-side `helm
+template`** (ArgoCD, Flux, kustomize `helmCharts`) cannot read the cluster, so
+it regenerates the password on every render and breaks the running database.
+For GitOps, either set `ui.database.postgresql.auth.password` explicitly, or
+point `ui.database.postgresql.existingSecret` at a Secret you manage
+(sealed-secret / vault) carrying both `POSTGRES_PASSWORD` and a `DATABASE_URL`.
+The chart then renders no Secret of its own.
 :::
 
 ### External PostgreSQL
@@ -573,7 +586,9 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kuber
 
 :::tip
 To keep credentials out of values, set `ui.database.postgresql.existingSecret`
-to an existing Kubernetes Secret name. The Secret must contain a `DATABASE_URL` key.
+to an existing Kubernetes Secret name. For an external database the Secret must
+contain a `DATABASE_URL` key; with `deploy=true` it must contain both
+`POSTGRES_PASSWORD` and `DATABASE_URL`.
 :::
 
 :::warning
@@ -613,9 +628,9 @@ restore → upgrade runbook.
 | `ui.database.type` | Database backend: `sqlite` (embedded, default) or `postgresql` | `sqlite` |
 | `ui.database.sqlite.persistence.enabled` | Persist the SQLite database file on a PVC | `true` |
 | `ui.database.sqlite.persistence.size` | SQLite PVC storage size | `1Gi` |
-| `ui.database.postgresql.deploy` | Provision a chart-managed PostgreSQL StatefulSet (when `type=postgresql`) | `false` |
+| `ui.database.postgresql.deploy` | Provision a chart-managed PostgreSQL Deployment (when `type=postgresql`) | `false` |
 | `ui.database.postgresql.databaseUrl` | External PostgreSQL connection URL (when `type=postgresql`, `deploy=false`) | `""` |
-| `ui.database.postgresql.existingSecret` | Existing Secret with a `DATABASE_URL` key (alternative to `databaseUrl`) | `""` |
+| `ui.database.postgresql.existingSecret` | Existing credentials Secret. `deploy=false`: needs `DATABASE_URL`. `deploy=true`: needs `POSTGRES_PASSWORD` + `DATABASE_URL` | `""` |
 | `ui.env.corsOrigins` | Backend CORS origins (empty string = disable CORS; frontend proxies via Next.js rewrites) | `""` |
 | `ui.env.logLevel` | Log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) | `"INFO"` |
 | `ui.env.logFormat` | Log format: `"text"` (human-readable), `"json"` (structured logging) | `"text"` |

@@ -100,13 +100,13 @@ Ensure acko-crds is installed separately before creating AerospikeCluster resour
 
 NOTE: The embedded PostgreSQL *sidecar* has been REMOVED. The api now runs on
 SQLite (embedded file on a PVC, the default), an EXTERNAL PostgreSQL that you
-operate, or a chart-managed PostgreSQL StatefulSet
+operate, or a chart-managed PostgreSQL Deployment
 (ui.database.postgresql.deploy=true).
   Migration of values:
     ui.postgresql.enabled: true   -> ui.database.type: postgresql, then either
                                      ui.database.postgresql.databaseUrl (external)
                                      or ui.database.postgresql.deploy=true
-                                     (chart-managed PostgreSQL StatefulSet)
+                                     (chart-managed PostgreSQL Deployment)
     ui.postgresql.enabled: false  -> ui.database.type: sqlite   (default)
     ui.persistence.*              -> ui.database.sqlite.persistence.*
     ui.env.databaseUrl            -> ui.database.postgresql.databaseUrl
@@ -341,9 +341,19 @@ View UI logs:
 {{- if .Values.ui.database.postgresql.deploy }}
 
 Database backend: PostgreSQL (chart-managed).
-The chart deployed a single-replica PostgreSQL StatefulSet "{{ include "aerospike-ce-kubernetes-operator.ui.postgres.fullname" . }}"
+The chart deployed a single-replica PostgreSQL Deployment "{{ include "aerospike-ce-kubernetes-operator.ui.postgres.fullname" . }}"
 (data on a {{ .Values.ui.database.postgresql.persistence.size }} PVC). Convenient, but NOT highly
 available — use an external database (deploy=false) for production HA.
+{{- if not .Values.ui.database.postgresql.existingSecret }}
+{{- if not .Values.ui.database.postgresql.auth.password }}
+
+  GitOps note: the POSTGRES_PASSWORD in Secret "{{ include "aerospike-ce-kubernetes-operator.ui.postgres.fullname" . }}"
+  was auto-generated. A client-side `helm template` (ArgoCD / Flux / kustomize)
+  regenerates it on every render — set ui.database.postgresql.auth.password
+  explicitly, or point ui.database.postgresql.existingSecret at a pre-baked
+  Secret, to keep it stable.
+{{- end }}
+{{- end }}
 {{- else }}
 
 Database backend: PostgreSQL (external).

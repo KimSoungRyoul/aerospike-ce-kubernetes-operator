@@ -1,17 +1,25 @@
 {{- /*
-Chart-managed PostgreSQL StatefulSet (ui.database.postgresql.deploy=true).
+Chart-managed PostgreSQL Deployment (ui.database.postgresql.deploy=true).
 
 A single-replica PostgreSQL running the official postgres image with its data
-directory (PGDATA) on a per-pod PersistentVolumeClaim. The api consumes
-DATABASE_URL from the "<ui.fullname>-postgres" Secret (postgres-secret.yaml).
+directory (PGDATA) on a PersistentVolumeClaim (postgres-pvc.yaml). The api
+consumes DATABASE_URL from the database Secret — the chart-built
+"<ui.fullname>-postgres" Secret (postgres-secret.yaml) or, when
+ui.database.postgresql.existingSecret is set, that operator-supplied Secret.
 
 This is a convenience backend — single-replica, NOT highly available. For
 production HA use an external managed PostgreSQL (deploy=false).
+
+A Deployment (not a StatefulSet): the database is single-replica, so the
+ordinal identity / per-replica volume that a StatefulSet provides buys
+nothing. The strategy is Recreate — the data PVC is ReadWriteOnce, so the old
+pod must release the volume before the new one can mount it; a rolling update
+would deadlock on the volume.
 */}}
 {{- if and (eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true") (eq .Values.ui.database.type "postgresql") .Values.ui.database.postgresql.deploy }}
 {{- $pg := .Values.ui.database.postgresql -}}
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
   name: {{ include "aerospike-ce-kubernetes-operator.ui.postgres.fullname" . }}
   namespace: {{ .Release.Namespace }}
@@ -19,7 +27,9 @@ metadata:
     {{- include "aerospike-ce-kubernetes-operator.ui.postgres.labels" . | nindent 4 }}
 spec:
   replicas: 1
-  serviceName: {{ include "aerospike-ce-kubernetes-operator.ui.postgres.fullname" . }}
+  {{- /* ReadWriteOnce data PVC — never run two postgres pods at once. */}}
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "aerospike-ce-kubernetes-operator.ui.postgres.selectorLabels" . | nindent 6 }}
@@ -61,7 +71,7 @@ spec:
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "aerospike-ce-kubernetes-operator.ui.postgres.fullname" . }}
+                  name: {{ include "aerospike-ce-kubernetes-operator.ui.database.secretName" . }}
                   key: POSTGRES_PASSWORD
             {{- /* PGDATA is a sub-directory of the mounted volume so the
                    volume root (which may carry a lost+found) is never the
@@ -104,25 +114,12 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- if not $pg.persistence.enabled }}
       volumes:
         - name: data
+          {{- if $pg.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "aerospike-ce-kubernetes-operator.ui.postgres.pvcName" . }}
+          {{- else }}
           emptyDir: {}
-      {{- end }}
-  {{- if $pg.persistence.enabled }}
-  volumeClaimTemplates:
-    - metadata:
-        name: data
-        labels:
-          {{- include "aerospike-ce-kubernetes-operator.ui.postgres.labels" . | nindent 10 }}
-      spec:
-        accessModes:
-          - {{ $pg.persistence.accessMode }}
-        {{- if not (kindIs "invalid" $pg.persistence.storageClassName) }}
-        storageClassName: {{ $pg.persistence.storageClassName | quote }}
-        {{- end }}
-        resources:
-          requests:
-            storage: {{ $pg.persistence.size }}
-  {{- end }}
+          {{- end }}
 {{- end }}

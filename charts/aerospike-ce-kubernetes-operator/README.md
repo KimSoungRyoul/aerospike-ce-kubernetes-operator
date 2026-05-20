@@ -234,13 +234,14 @@ sidecar configuration.
 
 #### Database backend
 
-The api persists cluster connection metadata in a database. Two backends are
-supported via `ui.database.type`:
+The api persists cluster connection metadata in a database. The backend is
+selected by `ui.database.type`:
 
-| `ui.database.type` | Where the data lives | Use when |
-|--------------------|----------------------|----------|
+| Backend | Where the data lives | Use when |
+|---------|----------------------|----------|
 | `sqlite` (default) | Embedded SQLite file inside the api container, on a PVC (`ui.database.sqlite.persistence`) | Single-instance installs. Zero extra infrastructure. SQLite is single-writer, so `ui.replicaCount` must stay `1`. |
-| `postgresql`       | An **external** PostgreSQL instance you operate (RDS / Cloud SQL / AlloyDB / an in-cluster PostgreSQL operator) | HA / multi-replica. The chart never deploys PostgreSQL itself. |
+| `postgresql`, external (`deploy=false`) | An **external** PostgreSQL instance you operate (RDS / Cloud SQL / AlloyDB / an in-cluster PostgreSQL operator) | HA / multi-replica. The chart provisions no database. |
+| `postgresql`, chart-managed (`deploy=true`) | A single-replica PostgreSQL **Deployment** the chart provisions (Service + data PVC + Secret) | A turnkey PostgreSQL with no external dependency. Convenient, **not** highly available. |
 
 SQLite (default) — nothing to configure:
 
@@ -259,6 +260,37 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/acko \
   --set ui.database.type=postgresql \
   --set ui.database.postgresql.databaseUrl='postgresql://user:pass@db-host:5432/aerospike_manager'
 ```
+
+Chart-managed PostgreSQL — let the chart run a single-replica PostgreSQL
+`Deployment` and wire the api to it:
+
+```bash
+helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/acko \
+  --version 0.4.0 --namespace aerospike-operator --create-namespace \
+  --set ui.database.type=postgresql \
+  --set ui.database.postgresql.deploy=true
+```
+
+The data PVC carries `helm.sh/resource-policy: keep`, so it survives `helm
+uninstall` — delete it by hand to discard the database. This backend is
+single-replica (`Recreate` update strategy on a `ReadWriteOnce` volume); run an
+external PostgreSQL for HA.
+
+> **GitOps (ArgoCD / Flux / kustomize `helmCharts`) — keep the password stable.**
+> With `deploy=true` and an empty `auth.password`, the chart generates a random
+> `POSTGRES_PASSWORD` and preserves it by re-reading the live Secret. That
+> `lookup` only works for a server-side `helm install` / `helm upgrade` — a
+> **client-side `helm template`** (what GitOps tools run) cannot read the
+> cluster, so it regenerates the password on **every** render and breaks the
+> running database. Pick one of:
+>
+> - **`ui.database.postgresql.auth.password`** — set an explicit password
+>   (`[A-Za-z0-9._~-]` characters only). Simple, but the password sits in values.
+> - **`ui.database.postgresql.existingSecret`** — point at a Secret you manage
+>   (sealed-secret / vault) carrying both `POSTGRES_PASSWORD` and a `DATABASE_URL`
+>   (`postgresql://<user>:<pass>@<release>-…-ui-postgres:5432/<db>`). The chart
+>   then renders no Secret of its own. This keeps credentials out of Git and is
+>   the recommended GitOps path.
 
 #### Migrating off the embedded PostgreSQL sidecar
 
@@ -299,6 +331,41 @@ PostgreSQL→SQLite path — to land on SQLite instead, re-add connections from 
 UI.
 
 **Value mapping:** `ui.postgresql.enabled: true` → `ui.database.type: postgresql` + `ui.database.postgresql.databaseUrl`; `ui.postgresql.enabled: false` → `ui.database.type: sqlite`; `ui.persistence.*` → `ui.database.sqlite.persistence.*`; `ui.env.databaseUrl` → `ui.database.postgresql.databaseUrl`. Stale `ui.postgresql.*` / `ui.persistence.*` keys fail the install with a migration message.
+
+#### Upgrading the chart-managed PostgreSQL (StatefulSet → Deployment)
+
+Chart **v1.6.0** ran the chart-managed PostgreSQL (`deploy=true`) as a
+`StatefulSet` whose data lived on a `volumeClaimTemplate` PVC named
+`data-<release>-…-ui-postgres-0`. Newer chart versions run it as a
+`Deployment` with a standalone PVC named `<release>-…-ui-postgres-data`.
+
+A plain `helm upgrade` would delete the StatefulSet (its PVC is **retained**
+but orphaned) and start the Deployment on a **new, empty** PVC — the database
+is silently lost. To protect against that, the chart **blocks the upgrade**
+when it detects the leftover StatefulSet, until you set
+`ui.database.postgresql.acknowledgeStatefulSetMigration=true`.
+
+**Migration runbook (preserve your data):**
+
+```bash
+# 1. Back up the database from the running StatefulSet pod
+kubectl exec -n <ns> <release>-aerospike-ce-kubernetes-operator-ui-postgres-0 \
+  -- pg_dump -U aerospike -d aerospike_manager --no-owner --no-privileges \
+  > acm-pg-backup.sql
+
+# 2. Upgrade — the chart replaces the StatefulSet with a Deployment + new PVC
+helm upgrade <release> oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  -n <ns> --reuse-values \
+  --set ui.database.postgresql.acknowledgeStatefulSetMigration=true
+
+# 3. Restore into the new Deployment's database
+kubectl exec -i -n <ns> deploy/<release>-aerospike-ce-kubernetes-operator-ui-postgres \
+  -- psql -U aerospike -d aerospike_manager -v ON_ERROR_STOP=1 < acm-pg-backup.sql
+```
+
+The old `data-<release>-…-ui-postgres-0` PVC is left untouched — delete it by
+hand once the restore is verified. On a fresh install there is no StatefulSet,
+so the gate never fires.
 
 #### Customizing the UI deployment
 
