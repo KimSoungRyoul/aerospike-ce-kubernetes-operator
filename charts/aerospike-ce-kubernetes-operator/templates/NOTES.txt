@@ -98,6 +98,22 @@ Ensure acko-crds is installed separately before creating AerospikeCluster resour
   helm install acko-crds oci://ghcr.io/aerospike-ce-ecosystem/charts/acko-crds --version {{ .Chart.Version }}
 {{- end }}
 
+NOTE: The embedded PostgreSQL sidecar has been REMOVED. The api now runs on
+SQLite (embedded file on a PVC, the default) or an EXTERNAL PostgreSQL that
+you operate — the chart no longer ships a `postgres` container.
+  Migration of values:
+    ui.postgresql.enabled: true   -> ui.database.type: postgresql
+                                     + ui.database.postgresql.databaseUrl
+                                       (point at an external PostgreSQL)
+    ui.postgresql.enabled: false  -> ui.database.type: sqlite   (default)
+    ui.persistence.*              -> ui.database.sqlite.persistence.*
+    ui.env.databaseUrl            -> ui.database.postgresql.databaseUrl
+  There is NO in-place data migration from the old embedded PostgreSQL PVC.
+  If you need to keep that data, `pg_dump` it before upgrading and restore
+  into your external database (or export/re-add connections from the UI).
+  Stale `ui.postgresql.*` / `ui.persistence.*` keys now fail the install
+  with an explanatory message.
+
 NOTE: 0.4.0 removes the redundant `ui.enabled` master switch. The
 per-component `ui.api.enabled` / `ui.web.enabled` toggles are now the
 only UI on/off controls.
@@ -310,10 +326,26 @@ Check UI pod status:
 View UI logs:
   kubectl logs -l app.kubernetes.io/name=aerospike-cluster-manager,app.kubernetes.io/instance={{ .Release.Name }} -n {{ .Release.Namespace }} -f
 
-{{- if and .Values.ui.persistence.enabled .Values.ui.postgresql.enabled }}
+{{- if eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true" }}
+{{- if eq .Values.ui.database.type "postgresql" }}
 
-Persistent storage is enabled ({{ .Values.ui.persistence.size }}).
-PostgreSQL data will persist across pod restarts.
+Database backend: PostgreSQL (external).
+The chart does NOT deploy PostgreSQL — the api connects to the database via
+{{ if .Values.ui.database.postgresql.existingSecret }}DATABASE_URL in Secret "{{ .Values.ui.database.postgresql.existingSecret }}"{{ else }}ui.database.postgresql.databaseUrl{{ end }}.
+{{- else }}
+
+Database backend: SQLite (embedded).
+{{- if .Values.ui.database.sqlite.persistence.enabled }}
+The SQLite database is persisted on a {{ .Values.ui.database.sqlite.persistence.size }} PVC
+and survives pod restarts. SQLite is single-writer — keep ui.replicaCount=1
+(use ui.database.type=postgresql with an external DB for HA / autoscaling).
+{{- else }}
+
+WARNING: ui.database.sqlite.persistence.enabled=false — the SQLite database
+lives on an emptyDir and ALL stored connections are lost on pod restart.
+Enable persistence for anything beyond a throwaway demo.
+{{- end }}
+{{- end }}
 {{- end }}
 {{- end }}
 

@@ -332,10 +332,10 @@ podLabels: {}
 #                                            |
 #                                     [AerospikeCluster Pods]
 #
-# The UI requires a PostgreSQL database for storing session and configuration data.
-# By default, an embedded PostgreSQL sidecar is deployed. For production, consider
-# using an external PostgreSQL instance (set ui.postgresql.enabled=false and
-# provide ui.env.databaseUrl).
+# The UI api persists connection metadata in a database. The default backend is
+# an embedded SQLite file on a PVC; for HA / multi-replica, point it at an
+# external PostgreSQL instance (set ui.database.type=postgresql and provide
+# ui.database.postgresql.databaseUrl). The chart never deploys PostgreSQL itself.
 # =============================================================================
 ui:
   # -- Aerospike Cluster Manager web UI deployment toggles.
@@ -769,64 +769,58 @@ ui:
     tls: []
 
   # =============================================================================
-  # PostgreSQL (Embedded Sidecar)
+  # Database
   # =============================================================================
-  # The UI api requires a PostgreSQL database for storing cluster connection
-  # metadata and session data. By default, a PostgreSQL container runs as a
-  # sidecar in the same pod. For production deployments, disable this sidecar
-  # and point ui.env.databaseUrl to a managed PostgreSQL instance (e.g., RDS,
-  # Cloud SQL, AlloyDB).
-  # NOTE: The embedded sidecar is single-instance only and incompatible with HPA.
+  # The UI api persists cluster connection metadata, workspaces, and notes.
+  # Two backends are supported:
+  #
+  #   sqlite (default) — an embedded SQLite file inside the api container,
+  #     persisted on a PersistentVolumeClaim. Zero extra infrastructure.
+  #     SQLite is single-writer: keep ui.replicaCount=1 (the chart fails the
+  #     install otherwise). Best for single-instance / small deployments.
+  #
+  #   postgresql — an EXTERNAL PostgreSQL instance that you operate (managed
+  #     services such as RDS / Cloud SQL / AlloyDB, an in-cluster PostgreSQL
+  #     operator, etc.). Required for HA / multi-replica. This chart never
+  #     deploys PostgreSQL itself — there is no embedded sidecar.
   # =============================================================================
-  postgresql:
-    # -- Deploy an embedded PostgreSQL sidecar container.
-    # Disable this and set env.databaseUrl to use an external PostgreSQL instance.
-    enabled: true
-    # -- PostgreSQL container image
-    image:
-      repository: postgres
-      tag: "17-alpine"
-      pullPolicy: IfNotPresent
-    # -- Database name
-    database: aerospike_manager
-    # -- Database user
-    username: aerospike
-    # -- Database password (used for embedded sidecar only).
-    # When empty (default), the chart auto-generates a 24-character random
-    # password on first install via Helm's `lookup` + `randAlphaNum`. The
-    # generated value is preserved across `helm upgrade` by re-reading the
-    # existing Secret, so the password remains stable for the life of the
-    # release. To override, set this to your own value or supply a complete
-    # Secret via `ui.postgresql.existingSecret`. The previous default of
-    # "aerospike" was a well-known credential and is no longer shipped.
-    password: ""
-    # -- Use an existing Secret instead of creating one.
-    # The Secret must contain POSTGRES_PASSWORD and DATABASE_URL keys.
-    existingSecret: ""
-    # -- Resource requests and limits for the PostgreSQL sidecar
-    resources:
-      requests:
-        cpu: 50m
-        memory: 128Mi
-      limits:
-        cpu: 250m
-        memory: 256Mi
+  database:
+    # -- Database backend: "sqlite" (embedded, default) or "postgresql" (external).
+    type: sqlite
 
-  # =============================================================================
-  # Persistence (PostgreSQL data)
-  # =============================================================================
-  persistence:
-    # -- Enable persistent storage for the embedded PostgreSQL database
-    enabled: true
-    # -- Storage class name for the PostgreSQL PVC.
-    # null  = use cluster default StorageClass
-    # ""    = disable dynamic provisioning (use pre-provisioned PV)
-    # "name" = use the specified StorageClass (e.g., "rbd-ssd-user", "gp3")
-    storageClassName: null
-    # -- Access mode
-    accessMode: ReadWriteOnce
-    # -- Volume size
-    size: 1Gi
+    # -- SQLite backend settings. Used only when database.type=sqlite.
+    sqlite:
+      persistence:
+        # -- Persist the SQLite database file on a PersistentVolumeClaim.
+        # When false an emptyDir is used and every stored connection is lost
+        # on pod restart — acceptable only for throwaway demos.
+        enabled: true
+        # -- Storage class name for the SQLite PVC.
+        # null  = use cluster default StorageClass
+        # ""    = disable dynamic provisioning (use pre-provisioned PV)
+        # "name" = use the specified StorageClass (e.g., "rbd-ssd-user", "gp3")
+        storageClassName: null
+        # -- Access mode. SQLite is single-writer; keep ReadWriteOnce.
+        accessMode: ReadWriteOnce
+        # -- Volume size
+        size: 1Gi
+
+    # -- PostgreSQL backend settings. Used only when database.type=postgresql.
+    # The chart connects to an external database; it does not provision one.
+    postgresql:
+      # -- Full connection URL of the external PostgreSQL instance.
+      # Example: "postgresql://user:pass@db-host:5432/aerospike_manager"
+      # Leave empty and set existingSecret to keep credentials out of values.
+      databaseUrl: ""
+      # -- Use an existing Secret instead of databaseUrl.
+      # The Secret must contain a DATABASE_URL key.
+      existingSecret: ""
+      # -- Connection pool minimum size (DB_POOL_MIN_SIZE)
+      poolMinSize: 2
+      # -- Connection pool maximum size (DB_POOL_MAX_SIZE)
+      poolMaxSize: 10
+      # -- SQL command execution timeout in seconds (DB_COMMAND_TIMEOUT)
+      commandTimeout: 30
 
   # =============================================================================
   # K8s Cluster Management
@@ -873,16 +867,6 @@ ui:
     logLevel: "INFO"
     # -- Log format: "text" for human-readable output, "json" for structured logging
     logFormat: "text"
-    # -- External PostgreSQL connection URL.
-    # Only used when postgresql.enabled is false.
-    # Example: "postgresql://user:pass@db-host:5432/aerospike_manager"
-    databaseUrl: ""
-    # -- DB connection pool size
-    dbPoolSize: 5
-    # -- Max overflow connections beyond pool size
-    dbPoolOverflow: 10
-    # -- Pool checkout timeout in seconds
-    dbPoolTimeout: 30
     # -- Kubernetes API request timeout in seconds
     k8sApiTimeout: 30
 

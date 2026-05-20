@@ -233,6 +233,44 @@ in the cluster-manager repo for the full reference, including the
 migration table from the pre-0.X.0 `LOG_HANDLERS` / `LOGGING_CONFIG_FILE`
 in-process extension hooks.
 
+#### Database backend
+
+The api persists cluster connection metadata in a database. Two backends are
+supported via `ui.database.type`:
+
+| `ui.database.type` | Where the data lives | Use when |
+|--------------------|----------------------|----------|
+| `sqlite` (default) | Embedded SQLite file inside the api container, on a PVC (`ui.database.sqlite.persistence`) | Single-instance installs. Zero extra infrastructure. SQLite is single-writer, so `ui.replicaCount` must stay `1`. |
+| `postgresql`       | An **external** PostgreSQL instance you operate (RDS / Cloud SQL / AlloyDB / an in-cluster PostgreSQL operator) | HA / multi-replica. The chart never deploys PostgreSQL itself. |
+
+SQLite (default) — nothing to configure:
+
+```bash
+helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/acko \
+  --version 0.4.0 --namespace aerospike-operator --create-namespace \
+  --set ui.database.sqlite.persistence.size=2Gi
+```
+
+External PostgreSQL — supply the connection URL (or an existing Secret with a
+`DATABASE_URL` key via `ui.database.postgresql.existingSecret`):
+
+```bash
+helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/acko \
+  --version 0.4.0 --namespace aerospike-operator --create-namespace \
+  --set ui.database.type=postgresql \
+  --set ui.database.postgresql.databaseUrl='postgresql://user:pass@db-host:5432/aerospike_manager'
+```
+
+> **Migration (embedded sidecar removed):** earlier chart versions ran a
+> `postgres` container as a sidecar in the api pod. That sidecar is gone.
+> Map `ui.postgresql.enabled: true` → `ui.database.type: postgresql` +
+> `ui.database.postgresql.databaseUrl` (pointing at an external database),
+> `ui.postgresql.enabled: false` → `ui.database.type: sqlite`, and
+> `ui.persistence.*` → `ui.database.sqlite.persistence.*`. There is no
+> in-place data migration from the old embedded PostgreSQL PVC — `pg_dump`
+> it before upgrading if you need to keep that data. Stale `ui.postgresql.*`
+> / `ui.persistence.*` keys now fail the install with a migration message.
+
 #### Customizing the UI deployment
 
 You can customize the UI with service annotations, resource defaults, and extra environment variables:

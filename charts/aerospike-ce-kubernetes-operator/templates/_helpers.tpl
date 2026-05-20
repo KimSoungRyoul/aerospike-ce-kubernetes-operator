@@ -384,6 +384,38 @@ preconditions are not met, so the helper is safe to call unconditionally.
 {{- end }}
 
 {{/*
+Database backend validation.
+The embedded PostgreSQL sidecar was removed: the api now runs on an embedded
+SQLite file (default) or connects to an EXTERNAL PostgreSQL. Fail fast on
+stale sidecar-era value keys and on invalid backend combinations.
+*/}}
+{{- define "aerospike-ce-kubernetes-operator.validate.databaseConfig" -}}
+{{- if hasKey .Values.ui "postgresql" -}}
+{{- fail "ui.postgresql.* has been removed: the embedded PostgreSQL sidecar is no longer shipped. Set ui.database.type=sqlite (embedded, default) or ui.database.type=postgresql with ui.database.postgresql.databaseUrl / existingSecret pointing at an EXTERNAL database. See the chart README 'Database' section for the migration table." -}}
+{{- end -}}
+{{- if hasKey .Values.ui "persistence" -}}
+{{- fail "ui.persistence.* has been renamed: SQLite persistence now lives under ui.database.sqlite.persistence.*" -}}
+{{- end -}}
+{{- if hasKey .Values.ui.env "databaseUrl" -}}
+{{- fail "ui.env.databaseUrl has moved to ui.database.postgresql.databaseUrl (and requires ui.database.type=postgresql)." -}}
+{{- end -}}
+{{- if eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true" -}}
+{{- $type := .Values.ui.database.type -}}
+{{- if not (has $type (list "sqlite" "postgresql")) -}}
+{{- fail (printf "ui.database.type must be \"sqlite\" or \"postgresql\", got %q." $type) -}}
+{{- end -}}
+{{- if eq $type "postgresql" -}}
+{{- if and (not .Values.ui.database.postgresql.databaseUrl) (not .Values.ui.database.postgresql.existingSecret) -}}
+{{- fail "ui.database.type=postgresql requires either ui.database.postgresql.databaseUrl or ui.database.postgresql.existingSecret — the chart connects to an external PostgreSQL and never provisions one." -}}
+{{- end -}}
+{{- end -}}
+{{- if and (eq $type "sqlite") (gt (int .Values.ui.replicaCount) 1) -}}
+{{- fail "ui.database.type=sqlite is single-writer and is incompatible with ui.replicaCount > 1. Switch to ui.database.type=postgresql with an external database for multi-replica / HA deployments." -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Aggregate validation entry-point. Templates can `include` this helper once
 (typically from NOTES.txt or a dedicated _validations partial) to enforce
 all gates uniformly.
@@ -395,4 +427,5 @@ all gates uniformly.
 {{- include "aerospike-ce-kubernetes-operator.validate.webOidcClientId" . -}}
 {{- include "aerospike-ce-kubernetes-operator.validate.caSecretName" . -}}
 {{- include "aerospike-ce-kubernetes-operator.validate.webhookTlsSource" . -}}
+{{- include "aerospike-ce-kubernetes-operator.validate.databaseConfig" . -}}
 {{- end }}

@@ -18,15 +18,22 @@ data:
   API_URL: {{ if .Values.ui.web.env.apiUrl }}{{ .Values.ui.web.env.apiUrl | quote }}{{ else }}{{ printf "http://%s:%d" (include "aerospike-ce-kubernetes-operator.ui.api.fullname" .) (int .Values.ui.api.service.port) | quote }}{{ end }}
   WEB_PORT: {{ .Values.ui.web.service.port | quote }}
   API_PORT: {{ .Values.ui.api.service.targetPort | quote }}
-  DB_POOL_SIZE: {{ .Values.ui.env.dbPoolSize | quote }}
-  DB_POOL_OVERFLOW: {{ .Values.ui.env.dbPoolOverflow | quote }}
-  DB_POOL_TIMEOUT: {{ .Values.ui.env.dbPoolTimeout | quote }}
   K8S_API_TIMEOUT: {{ .Values.ui.env.k8sApiTimeout | quote }}
   K8S_VERIFY_SSL: {{ .Values.ui.k8s.verifySsl | quote }}
   {{- with .Values.ui.k8s.caFile }}
   K8S_CA_FILE: {{ . | quote }}
   {{- end }}
-  ENABLE_POSTGRES: {{ .Values.ui.postgresql.enabled | quote }}
+  # Database backend. SQLite (embedded file on a PVC) is the default;
+  # PostgreSQL is external-only — DATABASE_URL is supplied via the api Secret.
+  {{- if eq .Values.ui.database.type "postgresql" }}
+  ENABLE_POSTGRES: "true"
+  DB_POOL_MIN_SIZE: {{ .Values.ui.database.postgresql.poolMinSize | quote }}
+  DB_POOL_MAX_SIZE: {{ .Values.ui.database.postgresql.poolMaxSize | quote }}
+  DB_COMMAND_TIMEOUT: {{ .Values.ui.database.postgresql.commandTimeout | quote }}
+  {{- else }}
+  ENABLE_POSTGRES: "false"
+  SQLITE_PATH: /app/data/connections.db
+  {{- end }}
   DEFAULT_AEROSPIKE_IMAGE: {{ .Values.aerospikeImages.aerospike | quote }}
   DEFAULT_EXPORTER_IMAGE: {{ .Values.aerospikeImages.exporter | quote }}
 {{- end }}
