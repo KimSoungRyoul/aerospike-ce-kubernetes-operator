@@ -32,6 +32,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
+# Least-privilege: linting only reads the checked-out code.
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: Run on Ubuntu

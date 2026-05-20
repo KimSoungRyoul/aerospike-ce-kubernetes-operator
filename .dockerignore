@@ -1,7 +1,7 @@
 # More info: https://docs.docker.com/engine/reference/builder/#dockerignore-file
 # Ignore build artifacts and non-essential files
 bin/
-cover.out
+cover*.out
 dist/
 *.md
 !go.mod

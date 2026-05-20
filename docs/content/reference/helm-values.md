@@ -212,7 +212,7 @@ When `ui.rbac.create=true`, the generated ClusterRole includes the following per
 | `ui.postgresql.image.pullPolicy` | string | `IfNotPresent` | Image pull policy. |
 | `ui.postgresql.database` | string | `aerospike_manager` | Database name. |
 | `ui.postgresql.username` | string | `aerospike` | Database user. |
-| `ui.postgresql.password` | string | `aerospike` | Database password (embedded sidecar only). |
+| `ui.postgresql.password` | string | `""` | Database password (embedded sidecar only). When empty, the chart auto-generates a random 24-character password on first install and preserves it across upgrades. |
 | `ui.postgresql.existingSecret` | string | `""` | Existing Secret name containing `POSTGRES_PASSWORD` and `DATABASE_URL` keys. |
 | `ui.postgresql.resources.requests.cpu` | string | `50m` | CPU request. |
 | `ui.postgresql.resources.requests.memory` | string | `128Mi` | Memory request. |
