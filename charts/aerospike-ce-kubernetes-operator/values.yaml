@@ -833,6 +833,14 @@ ui:
       # and leave deploy=false.
       deploy: false
 
+      # -- Upgrade-safety gate for deploy=true. The chart-managed PostgreSQL
+      # shipped as a StatefulSet through chart v1.6.0; it now runs as a
+      # Deployment whose data PVC has a different name. When the chart detects
+      # the leftover StatefulSet it BLOCKS the upgrade until this is true — set
+      # it only AFTER backing the data up (see the chart README "Database"
+      # migration section). No effect on fresh installs.
+      acknowledgeStatefulSetMigration: false
+
       # -- Full connection URL of the external PostgreSQL instance.
       # Used only when deploy=false. Example:
       #   "postgresql://user:pass@db-host:5432/aerospike_manager"
@@ -847,6 +855,9 @@ ui:
       #     (ArgoCD / Flux / kustomize). The DATABASE_URL must point at the
       #     chart's in-cluster PostgreSQL Service and use the auth.username /
       #     auth.database below; auth.password must stay empty.
+      # NOTE: an externally-managed Secret is not tracked by the chart's
+      # pod-restart checksum — after rotating it, run `kubectl rollout restart`
+      # on the postgres and api Deployments to pick up the new credentials.
       existingSecret: ""
 
       # -- Connection pool minimum size (DB_POOL_MIN_SIZE)

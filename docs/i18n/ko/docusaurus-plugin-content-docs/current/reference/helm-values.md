@@ -228,6 +228,7 @@ api는 클러스터 연결 메타데이터를 데이터베이스에 저장합니
 | 키 | 타입 | 기본값 | 설명 |
 |-----|------|---------|-------------|
 | `ui.database.postgresql.deploy` | bool | `false` | `true`이면 차트가 단일 레플리카 PostgreSQL Deployment + Service + 데이터 PVC + Secret을 프로비저닝하고 api의 `DATABASE_URL`을 자동 연결. `databaseUrl`은 거부되며, 자체 자격 증명 Secret을 쓰려면 `existingSecret`을 설정. `false`이면 외부 인스턴스에 연결. |
+| `ui.database.postgresql.acknowledgeStatefulSetMigration` | bool | `false` | `deploy=true` 업그레이드 안전 게이트. 차트 v1.6.0은 chart-managed PostgreSQL을 StatefulSet으로 실행했으나 이제 데이터 PVC 이름이 다른 Deployment로 실행됨. 남아 있는 StatefulSet을 감지하면 이 값이 `true`가 될 때까지 업그레이드를 차단(먼저 데이터베이스를 백업 — 아래 마이그레이션 안내 참조). 신규 설치에는 영향 없음. |
 | `ui.database.postgresql.image.repository` | string | `postgres` | 차트 관리형 PostgreSQL 이미지 리포지토리. |
 | `ui.database.postgresql.image.tag` | string | `"17"` | PostgreSQL 이미지 태그. |
 | `ui.database.postgresql.image.pullPolicy` | string | `IfNotPresent` | PostgreSQL 이미지 풀 정책. |

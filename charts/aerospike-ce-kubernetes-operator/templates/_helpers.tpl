@@ -468,6 +468,19 @@ stale sidecar-era value keys and on invalid backend combinations.
 {{- fail (printf "Upgrade blocked: Secret %q carries a POSTGRES_PASSWORD key, so this release previously ran the embedded PostgreSQL sidecar (removed in this chart version). Upgrading does NOT migrate that data -- with ui.database.type=sqlite the old database is stranded on the PVC, with type=postgresql the PVC is deleted. Back it up first (pg_dump the embedded database), restore it into your chosen backend, then re-run with ui.database.acknowledgeEmbeddedPostgresRemoval=true. See the chart README 'Database' migration section." $dbSecretName) -}}
 {{- end -}}
 {{- end -}}
+{{- /* Upgrade safety: the chart-managed PostgreSQL shipped as a StatefulSet
+       through chart v1.6.0; it now runs as a Deployment whose data PVC has a
+       different name. A `helm upgrade` would strand the StatefulSet's volume
+       and start the Deployment on a fresh, EMPTY database. Detect the leftover
+       StatefulSet and refuse the upgrade until the operator acknowledges it
+       (after backing the data up). `lookup` is empty on fresh installs and on
+       `helm template`, so this fires only on a real in-cluster upgrade. */ -}}
+{{- if and .Values.ui.database.postgresql.deploy (not .Values.ui.database.postgresql.acknowledgeStatefulSetMigration) -}}
+{{- $pgName := include "aerospike-ce-kubernetes-operator.ui.postgres.fullname" . -}}
+{{- if lookup "apps/v1" "StatefulSet" .Release.Namespace $pgName -}}
+{{- fail (printf "Upgrade blocked: StatefulSet %q is the chart-managed PostgreSQL from chart v1.6.0 or earlier. This chart version runs it as a Deployment whose data PVC is named %q, while the StatefulSet's volume is %q -- upgrading would start an EMPTY database and strand that old volume. Back the data up (pg_dump), then set ui.database.postgresql.acknowledgeStatefulSetMigration=true to proceed and restore afterwards. See the chart README 'Database' migration section." $pgName (include "aerospike-ce-kubernetes-operator.ui.postgres.pvcName" .) (printf "data-%s-0" $pgName)) -}}
+{{- end -}}
+{{- end -}}
 {{- /* The remaining checks only matter when the api Deployment is rendered. */ -}}
 {{- if eq (include "aerospike-ce-kubernetes-operator.ui.api.enabled" .) "true" -}}
 {{- if eq $type "postgresql" -}}

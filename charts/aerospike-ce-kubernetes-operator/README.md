@@ -332,6 +332,41 @@ UI.
 
 **Value mapping:** `ui.postgresql.enabled: true` → `ui.database.type: postgresql` + `ui.database.postgresql.databaseUrl`; `ui.postgresql.enabled: false` → `ui.database.type: sqlite`; `ui.persistence.*` → `ui.database.sqlite.persistence.*`; `ui.env.databaseUrl` → `ui.database.postgresql.databaseUrl`. Stale `ui.postgresql.*` / `ui.persistence.*` keys fail the install with a migration message.
 
+#### Upgrading the chart-managed PostgreSQL (StatefulSet → Deployment)
+
+Chart **v1.6.0** ran the chart-managed PostgreSQL (`deploy=true`) as a
+`StatefulSet` whose data lived on a `volumeClaimTemplate` PVC named
+`data-<release>-…-ui-postgres-0`. Newer chart versions run it as a
+`Deployment` with a standalone PVC named `<release>-…-ui-postgres-data`.
+
+A plain `helm upgrade` would delete the StatefulSet (its PVC is **retained**
+but orphaned) and start the Deployment on a **new, empty** PVC — the database
+is silently lost. To protect against that, the chart **blocks the upgrade**
+when it detects the leftover StatefulSet, until you set
+`ui.database.postgresql.acknowledgeStatefulSetMigration=true`.
+
+**Migration runbook (preserve your data):**
+
+```bash
+# 1. Back up the database from the running StatefulSet pod
+kubectl exec -n <ns> <release>-aerospike-ce-kubernetes-operator-ui-postgres-0 \
+  -- pg_dump -U aerospike -d aerospike_manager --no-owner --no-privileges \
+  > acm-pg-backup.sql
+
+# 2. Upgrade — the chart replaces the StatefulSet with a Deployment + new PVC
+helm upgrade <release> oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  -n <ns> --reuse-values \
+  --set ui.database.postgresql.acknowledgeStatefulSetMigration=true
+
+# 3. Restore into the new Deployment's database
+kubectl exec -i -n <ns> deploy/<release>-aerospike-ce-kubernetes-operator-ui-postgres \
+  -- psql -U aerospike -d aerospike_manager -v ON_ERROR_STOP=1 < acm-pg-backup.sql
+```
+
+The old `data-<release>-…-ui-postgres-0` PVC is left untouched — delete it by
+hand once the restore is verified. On a fresh install there is no StatefulSet,
+so the gate never fires.
+
 #### Customizing the UI deployment
 
 You can customize the UI with service annotations, resource defaults, and extra environment variables:

@@ -240,6 +240,7 @@ The keys below provision a **chart-managed** PostgreSQL and apply only when `ui.
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `ui.database.postgresql.deploy` | bool | `false` | When `true`, the chart provisions a single-replica PostgreSQL Deployment + Service + data PVC + Secret and wires the api's `DATABASE_URL` to it automatically. `databaseUrl` is rejected; set `existingSecret` to supply your own credentials Secret. When `false`, connect to an external instance. |
+| `ui.database.postgresql.acknowledgeStatefulSetMigration` | bool | `false` | Upgrade-safety gate for `deploy=true`. Chart v1.6.0 ran the chart-managed PostgreSQL as a StatefulSet; it is now a Deployment with a differently-named data PVC. The chart blocks the upgrade when it detects the leftover StatefulSet until this is `true` (back the database up first — see the migration note below). No effect on fresh installs. |
 | `ui.database.postgresql.image.repository` | string | `postgres` | Chart-managed PostgreSQL image repository. |
 | `ui.database.postgresql.image.tag` | string | `"17"` | PostgreSQL image tag. |
 | `ui.database.postgresql.image.pullPolicy` | string | `IfNotPresent` | PostgreSQL image pull policy. |
