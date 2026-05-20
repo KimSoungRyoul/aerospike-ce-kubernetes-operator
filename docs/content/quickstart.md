@@ -123,10 +123,10 @@ aerospike-basic   1          1/1      Completed   60s   True
 ## Step 5: Access the Cluster Manager UI
 
 ```bash
-kubectl -n aerospike-operator port-forward svc/aerospike-ce-kubernetes-operator-ui 3000:3000
+kubectl -n aerospike-operator port-forward svc/aerospike-ce-kubernetes-operator-ui-web 3100:3100
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser. The UI provides a visual dashboard for managing clusters, browsing records, and running AQL queries.
+Open [http://localhost:3100](http://localhost:3100) in your browser. The UI provides a visual dashboard for managing clusters, browsing records, and running AQL queries.
 
 :::tip
 Keep this terminal open — port-forward runs in the foreground. Open a new terminal for the next step.

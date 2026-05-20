@@ -123,10 +123,10 @@ aerospike-basic   1          1/1      Completed   60s   True
 ## Step 5: 클러스터 매니저 UI 접속
 
 ```bash
-kubectl -n aerospike-operator port-forward svc/aerospike-ce-kubernetes-operator-ui 3000:3000
+kubectl -n aerospike-operator port-forward svc/aerospike-ce-kubernetes-operator-ui-web 3100:3100
 ```
 
-브라우저에서 [http://localhost:3000](http://localhost:3000)을 엽니다. UI에서 클러스터 관리, 레코드 탐색, AQL 쿼리 실행 등을 할 수 있습니다.
+브라우저에서 [http://localhost:3100](http://localhost:3100)을 엽니다. UI에서 클러스터 관리, 레코드 탐색, AQL 쿼리 실행 등을 할 수 있습니다.
 
 :::tip
 이 터미널은 열어두세요 — port-forward는 포그라운드에서 실행됩니다. 다음 단계를 위해 새 터미널을 여세요.

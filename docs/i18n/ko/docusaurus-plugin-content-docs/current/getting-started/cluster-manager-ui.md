@@ -40,16 +40,18 @@ kubectl -n aerospike-operator get pods -l app.kubernetes.io/component=ui
 
 ### 포트 포워딩 (개발용)
 
+웹 프론트엔드는 3100 포트로 서비스됩니다.
+
 ```bash
-kubectl -n aerospike-operator port-forward svc/acko-aerospike-ce-kubernetes-operator-ui 3000:3000
+kubectl -n aerospike-operator port-forward svc/acko-aerospike-ce-kubernetes-operator-ui-web 3100:3100
 ```
 
-브라우저에서 [http://localhost:3000](http://localhost:3000)을 엽니다.
+브라우저에서 [http://localhost:3100](http://localhost:3100)을 엽니다.
 
 :::tip
-서비스 이름은 `<릴리스명>-aerospike-ce-kubernetes-operator-ui` 패턴을 따릅니다. 다른 릴리스 이름을 사용한 경우 그에 맞게 조정하세요.
+웹 서비스 이름은 `<릴리스명>-aerospike-ce-kubernetes-operator-ui-web` 패턴을 따릅니다. 다른 릴리스 이름을 사용한 경우 그에 맞게 조정하세요.
 ```bash
-kubectl -n aerospike-operator port-forward svc/<릴리스명>-aerospike-ce-kubernetes-operator-ui 3000:3000
+kubectl -n aerospike-operator port-forward svc/<릴리스명>-aerospike-ce-kubernetes-operator-ui-web 3100:3100
 ```
 :::
 
@@ -75,12 +77,13 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kuber
 |----------|------|--------|
 | `ui.api.enabled` | Cluster Manager API (FastAPI) 컴포넌트 배포. `ui.web.enabled=false`와 함께 false로 설정하면 UI를 완전히 끔 (operator-only). | `true` |
 | `ui.web.enabled` | Cluster Manager web (Next.js) 컴포넌트 배포. `ui.api.enabled=false`와 함께 false로 설정하면 UI를 완전히 끔 (operator-only). | `true` |
-| `ui.replicaCount` | UI 레플리카 수 | `1` |
-| `ui.image.repository` | UI 컨테이너 이미지 | `ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager` |
-| `ui.image.tag` | 이미지 태그 (비어 있으면 Chart appVersion 사용) | `""` |
-| `ui.service.type` | 서비스 타입 (`ClusterIP`, `NodePort`, `LoadBalancer`) | `ClusterIP` |
-| `ui.service.frontendPort` | 프론트엔드 (Next.js) 포트 | `3000` |
-| `ui.service.backendPort` | 백엔드 (FastAPI) 포트 | `8000` |
+| `ui.replicaCount` | 각 UI Deployment(api / web)의 레플리카 수 | `1` |
+| `ui.imageTag` | api/web 두 컴포넌트의 기본 이미지 태그 | `"0.24.0"` |
+| `ui.api.image.repository` | API(FastAPI) 컨테이너 이미지 | `ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-api` |
+| `ui.web.image.repository` | Web(Next.js) 컨테이너 이미지 | `ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-web` |
+| `ui.api.service.type` / `ui.web.service.type` | 컴포넌트별 서비스 타입 | `ClusterIP` |
+| `ui.api.service.port` | API 서비스 포트 (컨테이너 8000으로 전달) | `80` |
+| `ui.web.service.port` | Web 서비스 포트 (브라우저 접근 / Ingress 대상) | `3100` |
 | `ui.database.type` | 데이터베이스 백엔드: `sqlite`(내장, 기본값) 또는 `postgresql` | `sqlite` |
 | `ui.database.sqlite.persistence.enabled` | SQLite 데이터베이스 파일을 PVC에 영속 저장 | `true` |
 | `ui.database.sqlite.persistence.size` | SQLite PVC 스토리지 크기 | `1Gi` |
@@ -93,12 +96,10 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kuber
 | `ui.rbac.create` | K8s API 접근용 ClusterRole 및 ClusterRoleBinding 생성 (AerospikeCluster, Template, HPA 관리 권한 포함) | `true` |
 | `ui.serviceAccount.create` | UI Pod용 ServiceAccount 생성 | `true` |
 | `ui.networkPolicy.enabled` | UI Pod 네트워크 트래픽 제한 | `false` |
-| `ui.image.pullPolicy` | 이미지 풀 정책 | `IfNotPresent` |
-| `ui.service.annotations` | 서비스 어노테이션 (클라우드 LB 설정 등) | `{}` |
-| `ui.resources.requests.cpu` | UI 컨테이너 CPU 요청 | `100m` |
-| `ui.resources.requests.memory` | UI 컨테이너 메모리 요청 | `256Mi` |
-| `ui.resources.limits.cpu` | UI 컨테이너 CPU 제한 | `200m` |
-| `ui.resources.limits.memory` | UI 컨테이너 메모리 제한 | `512Mi` |
+| `ui.api.image.pullPolicy` / `ui.web.image.pullPolicy` | 이미지 풀 정책 | `IfNotPresent` |
+| `ui.web.service.annotations` | Web 서비스 어노테이션 (클라우드 LB 설정 등) | `{}` |
+| `ui.api.resources` | API 컨테이너 CPU/메모리 requests → limits | `100m`/`256Mi` → `200m`/`512Mi` |
+| `ui.web.resources` | Web 컨테이너 CPU/메모리 requests → limits | `50m`/`128Mi` → `150m`/`384Mi` |
 | `ui.extraEnv` | UI 컨테이너에 추가할 환경 변수 목록 | `[]` |
 
 외부 OpenTelemetry Collector로 로그를 라우팅하는 설정(`fileMirror` + OTLP-forwarder 사이드카)은 아래의 [로깅](#로깅) 섹션을 참고하세요.
