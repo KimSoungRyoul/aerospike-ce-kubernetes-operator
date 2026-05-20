@@ -522,6 +522,48 @@ After modifying a template, existing clusters that reference it are not automati
 
 ---
 
+## Database backend
+
+The api persists cluster connection metadata, workspaces, and notes in a
+database. The backend is selected with `ui.database.type`:
+
+- **`sqlite`** (default) — an embedded SQLite file inside the api container,
+  persisted on a PersistentVolumeClaim. No extra infrastructure. SQLite is
+  single-writer, so `ui.replicaCount` must stay `1` (the chart fails the
+  install otherwise).
+- **`postgresql`** — connects to an **external** PostgreSQL instance you
+  operate (RDS, Cloud SQL, AlloyDB, an in-cluster PostgreSQL operator, …).
+  Required for HA / multi-replica. The chart never deploys PostgreSQL itself.
+
+To use an external PostgreSQL, supply the connection URL:
+
+```bash
+helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  --namespace aerospike-operator --create-namespace \
+  --set ui.database.type=postgresql \
+  --set ui.database.postgresql.databaseUrl="postgresql://user:pass@db-host:5432/aerospike_manager"
+```
+
+:::tip
+To keep credentials out of values, set `ui.database.postgresql.existingSecret`
+to an existing Kubernetes Secret name. The Secret must contain a `DATABASE_URL` key.
+:::
+
+:::warning
+The embedded PostgreSQL sidecar has been **removed**. Stale `ui.postgresql.*` /
+`ui.persistence.*` keys fail the install with a migration message. Map
+`ui.postgresql.enabled: true` → `ui.database.type: postgresql` +
+`ui.database.postgresql.databaseUrl`, `ui.postgresql.enabled: false` →
+`ui.database.type: sqlite`, and `ui.persistence.*` →
+`ui.database.sqlite.persistence.*`. There is no automatic data migration —
+any upgrade from an embedded-sidecar release is blocked until
+`ui.database.acknowledgeEmbeddedPostgresRemoval=true`. See the chart README
+section "Migrating off the embedded PostgreSQL sidecar" for the `pg_dump` →
+restore → upgrade runbook.
+:::
+
+---
+
 ## Configuration Options
 
 | Parameter | Description | Default |
