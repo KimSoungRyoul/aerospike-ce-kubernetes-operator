@@ -104,7 +104,7 @@ make run-local
 Once complete, access the UI:
 
 ```bash
-kubectl port-forward -n aerospike-operator svc/aerospike-ce-kubernetes-operator-ui 3000:3000
+kubectl port-forward -n aerospike-operator svc/aerospike-ce-kubernetes-operator-ui-web 3100:3100
 ```
 
 Other useful local development commands:
@@ -368,7 +368,7 @@ kubectl -n aerospike wait --for=condition=Ready pod/aerospike-basic-0-0 --timeou
 kubectl -n aerospike exec -it aerospike-basic-0-0 -- asinfo -v status
 
 # Access the UI
-kubectl -n aerospike-operator port-forward svc/aerospike-ce-kubernetes-operator-ui 3000:3000
+kubectl -n aerospike-operator port-forward svc/aerospike-ce-kubernetes-operator-ui-web 3100:3100
 ```
 
 </TabItem>
@@ -448,7 +448,7 @@ kubectl -n aerospike exec -it aerospike-basic-0-0 -- asinfo -v build
 # 7. Access
 # =============================================================================
 # UI
-kubectl -n aerospike-operator port-forward svc/aerospike-ce-kubernetes-operator-ui 3000:3000 &
+kubectl -n aerospike-operator port-forward svc/aerospike-ce-kubernetes-operator-ui-web 3100:3100 &
 
 # Grafana
 GRAFANA_PASSWORD=$(kubectl -n monitoring get secret grafana \

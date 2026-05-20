@@ -32,13 +32,13 @@ Verify the UI pod:
 kubectl -n aerospike-operator get pods -l app.kubernetes.io/component=ui
 ```
 
-Access via port-forwarding:
+Access via port-forwarding (the web frontend listens on port 3100):
 
 ```bash
-kubectl -n aerospike-operator port-forward svc/acko-aerospike-ce-kubernetes-operator-ui 3000:3000
+kubectl -n aerospike-operator port-forward svc/acko-aerospike-ce-kubernetes-operator-ui-web 3100:3100
 ```
 
-Open `http://localhost:3000` in your browser.
+Open `http://localhost:3100` in your browser.
 
 ---
 
@@ -570,20 +570,19 @@ restore → upgrade runbook.
 |-----------|-------------|---------|
 | `ui.api.enabled` | Deploy the Cluster Manager API (FastAPI). Combine with `ui.web.enabled=false` for both-off (operator-only). | `true` |
 | `ui.web.enabled` | Deploy the Cluster Manager web (Next.js). Combine with `ui.api.enabled=false` for both-off (operator-only). | `true` |
-| `ui.replicaCount` | UI replica count | `1` |
-| `ui.image.repository` | UI container image | `ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager` |
-| `ui.image.tag` | Image tag | `latest` |
-| `ui.service.type` | Service type | `ClusterIP` |
-| `ui.service.frontendPort` | Frontend (Next.js) port | `3000` |
-| `ui.service.backendPort` | Backend (FastAPI) port | `8000` |
-| `ui.service.annotations` | Service annotations (cloud LB configuration, etc.) | `{}` |
+| `ui.replicaCount` | Replica count for each UI Deployment (api / web) | `1` |
+| `ui.imageTag` | Default image tag for both UI components (api + web) | `"0.24.0"` |
+| `ui.api.image.repository` | API (FastAPI) container image | `ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-api` |
+| `ui.web.image.repository` | Web (Next.js) container image | `ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-web` |
+| `ui.api.service.type` / `ui.web.service.type` | Service type for each component | `ClusterIP` |
+| `ui.api.service.port` | API Service port (forwards to container port 8000) | `80` |
+| `ui.web.service.port` | Web Service port (browser access / Ingress target) | `3100` |
+| `ui.web.service.annotations` | Web Service annotations (cloud LB configuration, etc.) | `{}` |
 | `ui.ingress.enabled` | Create Ingress | `false` |
 | `ui.k8s.enabled` | K8s cluster management feature | `true` |
 | `ui.rbac.create` | Auto-create ClusterRole/Binding (includes permissions for AerospikeCluster, Template, and HPA management) | `true` |
-| `ui.resources.requests.cpu` | UI container CPU request | `100m` |
-| `ui.resources.requests.memory` | UI container memory request | `256Mi` |
-| `ui.resources.limits.cpu` | UI container CPU limit | `200m` |
-| `ui.resources.limits.memory` | UI container memory limit | `512Mi` |
+| `ui.api.resources` | API container CPU/memory requests → limits | `100m`/`256Mi` → `200m`/`512Mi` |
+| `ui.web.resources` | Web container CPU/memory requests → limits | `50m`/`128Mi` → `150m`/`384Mi` |
 | `ui.database.type` | Database backend: `sqlite` (embedded, default) or `postgresql` (external) | `sqlite` |
 | `ui.database.sqlite.persistence.enabled` | Persist the SQLite database file on a PVC | `true` |
 | `ui.database.sqlite.persistence.size` | SQLite PVC storage size | `1Gi` |

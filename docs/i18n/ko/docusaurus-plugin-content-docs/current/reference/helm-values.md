@@ -37,9 +37,9 @@ title: Helm Values 레퍼런스
 | 키 | 타입 | 기본값 | 설명 |
 |-----|------|---------|-------------|
 | `resources.limits.cpu` | string | `500m` | 오퍼레이터 파드 CPU 제한. |
-| `resources.limits.memory` | string | `256Mi` | 오퍼레이터 파드 메모리 제한. |
+| `resources.limits.memory` | string | `512Mi` | 오퍼레이터 파드 메모리 제한. |
 | `resources.requests.cpu` | string | `100m` | 오퍼레이터 파드 CPU 요청. |
-| `resources.requests.memory` | string | `128Mi` | 오퍼레이터 파드 메모리 요청. |
+| `resources.requests.memory` | string | `256Mi` | 오퍼레이터 파드 메모리 요청. |
 
 ## 웹훅
 
@@ -103,9 +103,9 @@ title: Helm Values 레퍼런스
 
 | 키 | 타입 | 기본값 | 설명 |
 |-----|------|---------|-------------|
-| `podDisruptionBudget.enabled` | bool | `false` | 오퍼레이터 디플로이먼트용 PodDisruptionBudget 생성. |
-| `podDisruptionBudget.minAvailable` | int | `1` | 최소 가용 파드 수. `maxUnavailable`과 상호 배타적. |
-| `podDisruptionBudget.maxUnavailable` | int | — | 최대 비가용 파드 수. `minAvailable`과 상호 배타적. |
+| `podDisruptionBudget.enabled` | bool | `true` | 오퍼레이터 디플로이먼트용 PodDisruptionBudget 생성. |
+| `podDisruptionBudget.minAvailable` | int | `""` | 최소 가용 파드 수. `maxUnavailable`과 상호 배타적. `replicaCount`가 1보다 클 때만 설정. |
+| `podDisruptionBudget.maxUnavailable` | int | `1` | 최대 비가용 파드 수. `minAvailable`과 상호 배타적. |
 
 ## Horizontal Pod Autoscaler
 
@@ -136,7 +136,7 @@ title: Helm Values 레퍼런스
 
 ## UI - Aerospike Cluster Manager
 
-Aerospike Cluster Manager는 오퍼레이터와 함께 배포되는 풀스택 웹 대시보드입니다. Aerospike 클러스터를 모니터링하고 관리하기 위한 시각적 인터페이스를 제공합니다.
+Aerospike Cluster Manager는 오퍼레이터와 함께 두 개의 독립적인 Deployment — `api`(FastAPI 백엔드)와 `web`(Next.js 프론트엔드) — 로 배포되는 풀스택 웹 대시보드입니다. Aerospike 클러스터를 모니터링하고 관리하기 위한 시각적 인터페이스를 제공합니다.
 
 ### 일반
 
@@ -144,11 +144,15 @@ Aerospike Cluster Manager는 오퍼레이터와 함께 배포되는 풀스택 �
 |-----|------|---------|-------------|
 | `ui.api.enabled` | bool | `true` | Cluster Manager API (FastAPI) 컴포넌트 배포. `ui.web.enabled=false`와 함께 false로 설정하면 UI를 완전히 끔. |
 | `ui.web.enabled` | bool | `true` | Cluster Manager web (Next.js) 컴포넌트 배포. `ui.api.enabled=false`와 함께 false로 설정하면 UI를 완전히 끔. |
-| `ui.replicaCount` | int | `1` | UI 레플리카 수. |
-| `ui.image.repository` | string | `ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager` | UI 컨테이너 이미지 리포지토리. |
-| `ui.image.tag` | string | `"latest"` | UI 컨테이너 이미지 태그. UI는 오퍼레이터와 독립적으로 버전 관리. |
-| `ui.image.pullPolicy` | string | `IfNotPresent` | 이미지 풀 정책. |
-| `ui.imagePullSecrets` | list | `[]` | 프라이빗 레지스트리용 이미지 풀 시크릿. |
+| `ui.replicaCount` | int | `1` | 각 UI Deployment(api / web)의 레플리카 수. |
+| `ui.imageTag` | string | `"0.24.0"` | api/web 두 컴포넌트의 기본 이미지 태그. `aerospike-cluster-manager`는 오퍼레이터와 독립적으로 버전 관리되므로 차트가 검증된 릴리스를 여기에 핀. `""`로 설정 시 `.Chart.AppVersion` 사용. |
+| `ui.api.image.repository` | string | `ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-api` | API(FastAPI) 컨테이너 이미지 리포지토리. |
+| `ui.api.image.tag` | string | `""` | API 이미지 태그. 비어 있으면 `ui.imageTag` 사용. |
+| `ui.api.image.pullPolicy` | string | `IfNotPresent` | API 이미지 풀 정책. |
+| `ui.web.image.repository` | string | `ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-web` | Web(Next.js) 컨테이너 이미지 리포지토리. |
+| `ui.web.image.tag` | string | `""` | Web 이미지 태그. 비어 있으면 `ui.imageTag` 사용. |
+| `ui.web.image.pullPolicy` | string | `IfNotPresent` | Web 이미지 풀 정책. |
+| `ui.imagePullSecrets` | list | `[]` | 프라이빗 레지스트리용 이미지 풀 시크릿 (모든 UI Deployment에 적용). |
 
 ### 서비스 어카운트 & RBAC
 
@@ -178,12 +182,18 @@ Aerospike Cluster Manager는 오퍼레이터와 함께 배포되는 풀스택 �
 
 ### 서비스
 
+UI 컴포넌트별로 각각의 서비스가 생성됩니다.
+
 | 키 | 타입 | 기본값 | 설명 |
 |-----|------|---------|-------------|
-| `ui.service.type` | string | `ClusterIP` | 서비스 타입: `ClusterIP`, `NodePort`, 또는 `LoadBalancer`. |
-| `ui.service.frontendPort` | int | `3000` | 프론트엔드 포트 (Next.js 웹 UI). |
-| `ui.service.backendPort` | int | `8000` | 백엔드 포트 (FastAPI REST API). |
-| `ui.service.annotations` | object | `{}` | UI 서비스 어노테이션. |
+| `ui.api.service.type` | string | `ClusterIP` | API 서비스 타입: `ClusterIP`, `NodePort`, 또는 `LoadBalancer`. |
+| `ui.api.service.port` | int | `80` | API 서비스 포트. 트래픽은 컨테이너 포트 8000으로 전달됨. |
+| `ui.api.service.targetPort` | int | `8000` | API 컨테이너 포트 (non-root 실행이므로 비특권 포트). |
+| `ui.api.service.annotations` | object | `{}` | API 서비스 어노테이션. |
+| `ui.web.service.type` | string | `ClusterIP` | Web 서비스 타입: `ClusterIP`, `NodePort`, 또는 `LoadBalancer`. |
+| `ui.web.service.port` | int | `3100` | Web 서비스 포트. 브라우저 접근 시 port-forward(또는 Ingress 라우팅) 대상 포트. |
+| `ui.web.service.annotations` | object | `{}` | Web 서비스 어노테이션. |
+| `ui.web.env.apiUrl` | string | `""` | 외부 API URL. 설정 시 web 파드의 `proxy.js`가 in-cluster API 서비스 대신 이 주소로 `/api/*`를 전달. `ui.api.enabled=false`일 때 필수. |
 
 ### Ingress
 
@@ -236,12 +246,18 @@ UI 컨테이너에는 **preStop 라이프사이클 훅** (`sleep 5`)이 포함�
 
 ### UI 리소스
 
+api와 web Deployment는 각각 독립적인 리소스 설정을 가집니다.
+
 | 키 | 타입 | 기본값 | 설명 |
 |-----|------|---------|-------------|
-| `ui.resources.requests.cpu` | string | `100m` | CPU 요청. |
-| `ui.resources.requests.memory` | string | `256Mi` | 메모리 요청. |
-| `ui.resources.limits.cpu` | string | `200m` | CPU 제한. |
-| `ui.resources.limits.memory` | string | `512Mi` | 메모리 제한. |
+| `ui.api.resources.requests.cpu` | string | `100m` | API CPU 요청. |
+| `ui.api.resources.requests.memory` | string | `256Mi` | API 메모리 요청. |
+| `ui.api.resources.limits.cpu` | string | `200m` | API CPU 제한. |
+| `ui.api.resources.limits.memory` | string | `512Mi` | API 메모리 제한. |
+| `ui.web.resources.requests.cpu` | string | `50m` | Web CPU 요청. |
+| `ui.web.resources.requests.memory` | string | `128Mi` | Web 메모리 요청. |
+| `ui.web.resources.limits.cpu` | string | `150m` | Web CPU 제한. |
+| `ui.web.resources.limits.memory` | string | `384Mi` | Web 메모리 제한. |
 
 ### 보안 컨텍스트
 
@@ -257,31 +273,41 @@ UI 컨테이너에는 **preStop 라이프사이클 훅** (`sleep 5`)이 포함�
 
 ### 프로브
 
+api Deployment는 liveness / readiness / startup 프로브를, web Deployment는 liveness / readiness 프로브를 가집니다.
+
 | 키 | 타입 | 기본값 | 설명 |
 |-----|------|---------|-------------|
-| `ui.livenessProbe.httpGet.path` | string | `/api/health` | Liveness 프로브 경로. |
-| `ui.livenessProbe.httpGet.port` | string | `backend` | Liveness 프로브 포트. |
-| `ui.livenessProbe.initialDelaySeconds` | int | `15` | 초기 대기 시간. |
-| `ui.livenessProbe.periodSeconds` | int | `20` | 점검 주기. |
-| `ui.livenessProbe.timeoutSeconds` | int | `5` | 타임아웃. |
-| `ui.readinessProbe.httpGet.path` | string | `/api/health` | Readiness 프로브 경로. |
-| `ui.readinessProbe.httpGet.port` | string | `backend` | Readiness 프로브 포트. |
-| `ui.readinessProbe.initialDelaySeconds` | int | `5` | 초기 대기 시간. |
-| `ui.readinessProbe.periodSeconds` | int | `10` | 점검 주기. |
-| `ui.readinessProbe.timeoutSeconds` | int | `5` | 타임아웃. |
-| `ui.startupProbe.httpGet.path` | string | `/api/health` | Startup 프로브 경로. |
-| `ui.startupProbe.httpGet.port` | string | `backend` | Startup 프로브 포트. |
-| `ui.startupProbe.periodSeconds` | int | `5` | 점검 주기. |
-| `ui.startupProbe.timeoutSeconds` | int | `3` | 타임아웃. |
-| `ui.startupProbe.failureThreshold` | int | `30` | 포기 전 최대 실패 횟수 (150초 시작 허용). |
+| `ui.api.livenessProbe.httpGet.path` | string | `/api/health` | API liveness 프로브 경로. |
+| `ui.api.livenessProbe.httpGet.port` | string | `api` | API liveness 프로브 포트. |
+| `ui.api.livenessProbe.initialDelaySeconds` | int | `15` | 초기 대기 시간. |
+| `ui.api.livenessProbe.periodSeconds` | int | `20` | 점검 주기. |
+| `ui.api.livenessProbe.timeoutSeconds` | int | `5` | 타임아웃. |
+| `ui.api.readinessProbe.httpGet.path` | string | `/api/health` | API readiness 프로브 경로. |
+| `ui.api.readinessProbe.httpGet.port` | string | `api` | API readiness 프로브 포트. |
+| `ui.api.readinessProbe.initialDelaySeconds` | int | `5` | 초기 대기 시간. |
+| `ui.api.readinessProbe.periodSeconds` | int | `10` | 점검 주기. |
+| `ui.api.readinessProbe.timeoutSeconds` | int | `5` | 타임아웃. |
+| `ui.api.startupProbe.httpGet.path` | string | `/api/health` | API startup 프로브 경로. |
+| `ui.api.startupProbe.httpGet.port` | string | `api` | API startup 프로브 포트. |
+| `ui.api.startupProbe.periodSeconds` | int | `5` | 점검 주기. |
+| `ui.api.startupProbe.timeoutSeconds` | int | `3` | 타임아웃. |
+| `ui.api.startupProbe.failureThreshold` | int | `30` | 포기 전 최대 실패 횟수 (150초 시작 허용). |
+| `ui.web.livenessProbe.httpGet.path` | string | `/` | Web liveness 프로브 경로. |
+| `ui.web.livenessProbe.httpGet.port` | string | `web` | Web liveness 프로브 포트. |
+| `ui.web.livenessProbe.initialDelaySeconds` | int | `15` | 초기 대기 시간. |
+| `ui.web.livenessProbe.periodSeconds` | int | `20` | 점검 주기. |
+| `ui.web.livenessProbe.timeoutSeconds` | int | `5` | 타임아웃. |
+| `ui.web.readinessProbe.httpGet.path` | string | `/` | Web readiness 프로브 경로. |
+| `ui.web.readinessProbe.httpGet.port` | string | `web` | Web readiness 프로브 포트. |
+| `ui.web.readinessProbe.initialDelaySeconds` | int | `5` | 초기 대기 시간. |
+| `ui.web.readinessProbe.periodSeconds` | int | `10` | 점검 주기. |
+| `ui.web.readinessProbe.timeoutSeconds` | int | `5` | 타임아웃. |
 
 ### 환경 변수
 
 | 키 | 타입 | 기본값 | 설명 |
 |-----|------|---------|-------------|
-| `ui.env.frontendPort` | string | (`ui.service.frontendPort`에서 파생) | ConfigMap에 `FRONTEND_PORT`로 주입되는 프론트엔드 포트. 서비스 포트 설정에서 자동 파생. |
-| `ui.env.backendPort` | string | (`ui.service.backendPort`에서 파생) | ConfigMap에 `BACKEND_PORT`로 주입되는 백엔드 포트. 서비스 포트 설정에서 자동 파생. |
-| `ui.env.corsOrigins` | string | `""` | 백엔드 CORS 오리진. 비어있으면 CORS 없음 (프론트엔드가 Next.js rewrites로 프록시). |
+| `ui.env.corsOrigins` | string | `""` | 백엔드 CORS 오리진. 비어있으면 CORS 없음 (web 파드가 `/api/*`를 프록시). |
 | `ui.env.logLevel` | string | `"INFO"` | 로그 레벨: `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
 | `ui.env.logFormat` | string | `"text"` | 로그 형식: `text`(사람이 읽기 쉬운), `json`(구조화된 로깅). |
 | `ui.env.k8sApiTimeout` | int | `30` | Kubernetes API 요청 타임아웃 (초). |
@@ -358,6 +384,6 @@ UI ServiceMonitor는 `/api/metrics` 경로에서 백엔드 메트릭을 스크�
 
 | 키 | 타입 | 기본값 | 설명 |
 |-----|------|---------|-------------|
-| `defaultTemplates.enabled` | bool | `true` | 사전 구축된 AerospikeClusterTemplate 리소스 생성 (minimal, soft-rack, hard-rack). 템플릿은 클러스터 범위이며 모든 네임스페이스에서 접근 가능. |
+| `defaultTemplates.enabled` | bool | `false` | 사전 구축된 AerospikeClusterTemplate 리소스 생성 (minimal, soft-rack, hard-rack). 템플릿은 AerospikeClusterTemplate CRD가 먼저 등록되어야 하므로 기본값은 `false` — 최초 설치 후 `helm upgrade`로 활성화. 템플릿은 클러스터 범위이며 모든 네임스페이스에서 접근 가능. |
 
 세 가지 기본 템플릿 티어는 `defaultTemplates.templates.minimal`, `defaultTemplates.templates.soft-rack`, `defaultTemplates.templates.hard-rack` 아래에 설정됩니다. 각 티어에 대한 자세한 내용은 [템플릿 관리](../configuration/templates.md)를 참조하세요.
