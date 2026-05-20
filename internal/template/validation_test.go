@@ -69,6 +69,32 @@ func TestValidateTemplateSpec_V_T06_NoWarningWhenImageEmpty(t *testing.T) {
 	}
 }
 
+func TestValidateTemplateSpec_V_T06_RejectsEnterpriseRepository(t *testing.T) {
+	spec := &ackov1alpha1.AerospikeClusterTemplateSpec{
+		Image: "aerospike/aerospike-server-enterprise:8.1.0.0",
+	}
+	errs, _ := ValidateTemplateSpec(spec)
+	if len(errs) == 0 {
+		t.Error("expected error for enterprise-repository image")
+	}
+}
+
+func TestValidateTemplateSpec_V_T06_RejectsEnterpriseEditionTag(t *testing.T) {
+	// A custom registry name with no "enterprise" substring must still be
+	// rejected when the tag carries an Enterprise Edition prefix, matching
+	// the cluster webhook's isEnterpriseTag check.
+	for _, img := range []string{
+		"myregistry.io/aerospike:ee-8.0.0.1_1",
+		"myregistry.io/aerospike:ent-8.0.0",
+	} {
+		spec := &ackov1alpha1.AerospikeClusterTemplateSpec{Image: img}
+		errs, _ := ValidateTemplateSpec(spec)
+		if len(errs) == 0 {
+			t.Errorf("expected error for Enterprise Edition tag %q", img)
+		}
+	}
+}
+
 // --- V-T07: Size range (1–8) ---
 
 func TestValidateTemplateSpec_V_T07_SizeBelowMinIsError(t *testing.T) {

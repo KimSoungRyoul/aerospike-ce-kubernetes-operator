@@ -216,23 +216,52 @@ func lastSegment(path string) string {
 }
 
 func valuesEqual(a, b any) bool {
+	// Numbers must compare across Go types: a config value arrives as int
+	// from a Go literal (webhook defaulter) but as float64 after a JSON
+	// round-trip through the API server, so int 15000 and float64 15000
+	// must be equal — otherwise the diff reports a phantom change and the
+	// reconciler triggers an unnecessary restart.
+	if af, aIsNum := numericValue(a); aIsNum {
+		bf, bIsNum := numericValue(b)
+		return bIsNum && af == bf
+	}
 	switch aTyped := a.(type) {
 	case string:
 		bTyped, ok := b.(string)
 		return ok && aTyped == bTyped
-	case float64:
-		bTyped, ok := b.(float64)
-		return ok && aTyped == bTyped
 	case bool:
 		bTyped, ok := b.(bool)
-		return ok && aTyped == bTyped
-	case int:
-		bTyped, ok := b.(int)
 		return ok && aTyped == bTyped
 	case nil:
 		return b == nil
 	default:
 		return reflect.DeepEqual(a, b)
+	}
+}
+
+// numericValue converts any Go numeric type to float64 so values can be
+// compared regardless of the concrete type they were decoded as. The second
+// return is false when v is not a number.
+func numericValue(v any) (float64, bool) {
+	switch n := v.(type) {
+	case int:
+		return float64(n), true
+	case int32:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case uint:
+		return float64(n), true
+	case uint32:
+		return float64(n), true
+	case uint64:
+		return float64(n), true
+	case float32:
+		return float64(n), true
+	case float64:
+		return n, true
+	default:
+		return 0, false
 	}
 }
 

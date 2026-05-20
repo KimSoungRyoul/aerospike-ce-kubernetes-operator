@@ -30,6 +30,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
+# Least-privilege: tests only read the checked-out code.
+permissions:
+  contents: read
+
 jobs:
   unit-test:
     name: Unit Tests

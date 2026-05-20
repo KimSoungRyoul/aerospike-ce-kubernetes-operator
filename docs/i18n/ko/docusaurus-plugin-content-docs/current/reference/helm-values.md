@@ -205,7 +205,7 @@ Aerospike Cluster Manager는 오퍼레이터와 함께 배포되는 풀스택 �
 | `ui.postgresql.image.pullPolicy` | string | `IfNotPresent` | 이미지 풀 정책. |
 | `ui.postgresql.database` | string | `aerospike_manager` | 데이터베이스 이름. |
 | `ui.postgresql.username` | string | `aerospike` | 데이터베이스 사용자. |
-| `ui.postgresql.password` | string | `aerospike` | 데이터베이스 비밀번호 (내장 사이드카 전용). |
+| `ui.postgresql.password` | string | `""` | 데이터베이스 비밀번호 (내장 사이드카 전용). 비어 있으면 첫 설치 시 24자 무작위 비밀번호를 자동 생성하며 업그레이드 시에도 유지됩니다. |
 | `ui.postgresql.existingSecret` | string | `""` | `POSTGRES_PASSWORD`와 `DATABASE_URL` 키를 포함하는 기존 Secret 이름. |
 | `ui.postgresql.resources.requests.cpu` | string | `50m` | CPU 요청. |
 | `ui.postgresql.resources.requests.memory` | string | `128Mi` | 메모리 요청. |
