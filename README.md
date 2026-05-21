@@ -36,7 +36,7 @@ Deploy, scale, and perform rolling updates of Aerospike CE clusters via a custom
 | **Namespace** | Dual meaning: Aerospike data partition OR K8s namespace |
 | **AerospikeCluster** | The CRD Kind for a cluster CR (`kubectl get asc`) |
 
-→ Full glossary: [docs/content/guide/glossary.md](docs/content/guide/glossary.md)
+→ Full glossary: [docs/content/reference/glossary.md](docs/content/reference/glossary.md)
 
 ## Quick Start
 
@@ -352,7 +352,7 @@ claude plugin install aerospike-ce-ecosystem
 
 ## TODO
 
-- [ ] Register OCI repository on [Artifact Hub](https://artifacthub.io/) — Add repository with Kind: **OCI**, URL: `oci://ghcr.io/aerospike-ce-ecosystem/aerospike-operator`
+- [ ] Register OCI repository on [Artifact Hub](https://artifacthub.io/) — Add repository with Kind: **OCI**, URL: `oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator`
 
 ## License
 
