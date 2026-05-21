@@ -10,6 +10,10 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
@@ -37,6 +41,23 @@ import (
 	aerotmpl "github.com/ksr/aerospike-ce-kubernetes-operator/internal/template"
 	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/utils"
 )
+
+// tracer is the OpenTelemetry tracer for the controller. It is bound to the
+// global (delegating) tracer provider, so its spans become real once
+// telemetry.Setup installs the SDK provider and stay NoOp — at near-zero
+// cost — when telemetry is disabled.
+var tracer = otel.Tracer("github.com/ksr/aerospike-ce-kubernetes-operator/internal/controller")
+
+// endSpan records err on span when it is non-nil, then ends the span. It is
+// designed for `defer endSpan(span, &retErr)` with a named error return so the
+// span status reflects the terminal outcome of the function it wraps.
+func endSpan(span trace.Span, err *error) {
+	if *err != nil {
+		span.RecordError(*err)
+		span.SetStatus(codes.Error, (*err).Error())
+	}
+	span.End()
+}
 
 const (
 	defaultReconcileRetryInterval = 5 * time.Second
@@ -104,10 +125,18 @@ type AerospikeClusterReconciler struct {
 // +kubebuilder:rbac:groups=cilium.io,resources=ciliumnetworkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch;delete
 
-func (r *AerospikeClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *AerospikeClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, retErr error) {
 	// Apply reconcile timeout to prevent infinite execution.
 	ctx, cancel := context.WithTimeout(ctx, reconcileTimeout)
 	defer cancel()
+
+	// Root span for the reconcile loop. NoOp at near-zero cost when telemetry
+	// is disabled; the deferred closure records the loop's terminal error.
+	ctx, span := tracer.Start(ctx, "Reconcile", trace.WithAttributes(
+		attribute.String("acko.cluster.namespace", req.Namespace),
+		attribute.String("acko.cluster.name", req.Name),
+	))
+	defer endSpan(span, &retErr)
 
 	log := logf.FromContext(ctx)
 	reconcileStart := time.Now()
@@ -501,7 +530,10 @@ func (r *AerospikeClusterReconciler) reconcileCluster(
 	ctx context.Context,
 	namespacedName types.NamespacedName,
 	cluster *ackov1alpha1.AerospikeCluster,
-) (ctrl.Result, error) {
+) (result ctrl.Result, retErr error) {
+	ctx, span := tracer.Start(ctx, "reconcileCluster")
+	defer endSpan(span, &retErr)
+
 	log := logf.FromContext(ctx)
 	log.V(1).Info("Starting cluster reconciliation")
 	racks := r.getRacks(cluster)
@@ -666,7 +698,12 @@ func (r *AerospikeClusterReconciler) reconcileRacks(
 	cluster *ackov1alpha1.AerospikeCluster,
 	racks []ackov1alpha1.Rack,
 	rackInfos []rackInfo,
-) (bool, error) {
+) (deferred bool, retErr error) {
+	ctx, span := tracer.Start(ctx, "reconcileRacks", trace.WithAttributes(
+		attribute.Int("acko.rack.count", len(racks)),
+	))
+	defer endSpan(span, &retErr)
+
 	log := logf.FromContext(ctx)
 	log.V(1).Info("Reconciling racks", "count", len(racks))
 
