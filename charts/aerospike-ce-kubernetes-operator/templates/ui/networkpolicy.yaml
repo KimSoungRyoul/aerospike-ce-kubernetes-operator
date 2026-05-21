@@ -59,6 +59,17 @@ spec:
           protocol: TCP
         - port: {{ .Values.ui.aerospikePorts.heartbeat }}
           protocol: TCP
+    {{- if .Values.ui.api.otel.enabled }}
+    # OpenTelemetry collector — OTLP export. Without this egress rule the
+    # collector is unreachable when ui.networkPolicy.enabled is set. Both OTLP
+    # ports are allowed (4317 gRPC, 4318 HTTP) so the rule holds regardless of
+    # ui.api.otel.protocol.
+    - ports:
+        - port: 4317
+          protocol: TCP
+        - port: 4318
+          protocol: TCP
+    {{- end }}
     {{- if eq .Values.ui.database.type "postgresql" }}
     # PostgreSQL (external instance or chart-managed pod)
     - ports:

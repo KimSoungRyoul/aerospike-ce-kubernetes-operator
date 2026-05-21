@@ -200,7 +200,7 @@ spec:
             - name: AEROSPIKE_PY_TRACING
               value: {{ .Values.ui.api.otel.aerospikePyTracing | quote }}
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: {{ required "ui.api.otel.endpoint is required when ui.api.otel.enabled is true" .Values.ui.api.otel.endpoint | quote }}
+              value: {{ include "aerospike-ce-kubernetes-operator.otel.normalizeEndpoint" (required "ui.api.otel.endpoint is required when ui.api.otel.enabled is true" .Values.ui.api.otel.endpoint) | quote }}
             - name: OTEL_EXPORTER_OTLP_PROTOCOL
               value: {{ .Values.ui.api.otel.protocol | quote }}
             - name: OTEL_TRACES_SAMPLER

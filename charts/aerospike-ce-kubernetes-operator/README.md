@@ -102,14 +102,21 @@ observability:
   otel:
     enabled: true
     endpoint: otel-collector.observability.svc.cluster.local:4317  # OTLP/gRPC
+    serviceName: ""                                                # override service.name
     headers: ""                                                    # collector auth
     resourceAttributes: "deployment.environment=prod,team=platform"
     sampler: parentbased_traceidratio
     samplerArg: "1.0"
+    collectorPort: 4317                                            # NetworkPolicy egress port
 ```
 
 `endpoint` is required when `enabled: true` (rendering fails fast otherwise).
-All settings map to the OTel SDK standard environment variables. See
+All settings map to the OTel SDK standard environment variables.
+
+When `networkPolicy.enabled` or `cilium.enabled` is set, enabling OTel
+automatically opens an egress rule to the collector on `collectorPort`
+(default `4317`) — the locked-down operator egress would otherwise drop all
+exported telemetry. See
 [Monitoring — OpenTelemetry export](https://aerospike-ce-ecosystem.github.io/aerospike-ce-kubernetes-operator/operations/monitoring)
 for the full reference.
 

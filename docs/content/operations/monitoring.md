@@ -376,6 +376,8 @@ observability:
     enabled: true
     # OTLP/gRPC collector endpoint (required when enabled).
     endpoint: otel-collector.observability.svc.cluster.local:4317
+    # Optional: override the service.name resource attribute.
+    serviceName: ""
     # Optional collector auth headers.
     headers: "api-key=xxxxxxxx"
     # Optional extra resource attributes.
@@ -383,11 +385,25 @@ observability:
     # OTel SDK standard trace sampler.
     sampler: parentbased_traceidratio
     samplerArg: "1.0"
+    # Collector TCP port — opens the NetworkPolicy egress rule (see below).
+    collectorPort: 4317
 ```
 
 The operator exports over **OTLP/gRPC only** — point `endpoint` at the
 collector's gRPC receiver (port `4317`). Chart rendering fails fast if
-`enabled: true` is set without an `endpoint`.
+`enabled: true` is set without an `endpoint`. A scheme-less `host:port` is
+normalized to insecure `http://` (plaintext gRPC); pass an explicit
+`https://` URL for a TLS-terminated collector.
+
+### NetworkPolicy
+
+When `networkPolicy.enabled` or `cilium.enabled` is set, the operator's egress
+is locked down to DNS and the Kubernetes API server. Enabling OTel
+**automatically adds an egress rule** for the collector on
+`observability.otel.collectorPort` (default `4317`) — without it the collector
+would be unreachable and exported telemetry silently dropped. Set
+`collectorPort` to match your collector if it does not use the conventional
+OTLP/gRPC port.
 
 ### Configuration
 
@@ -399,14 +415,13 @@ the Helm values are thin wrappers over them.
 |------------|----------------------|---------|
 | `observability.otel.enabled` | `OTEL_SDK_DISABLED` | Master switch (`enabled: false` → `OTEL_SDK_DISABLED=true`). |
 | `observability.otel.endpoint` | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP/gRPC collector endpoint. |
+| `observability.otel.serviceName` | `OTEL_SERVICE_NAME` | Override `service.name`. Empty keeps the default `aerospike-ce-kubernetes-operator`. |
 | `observability.otel.headers` | `OTEL_EXPORTER_OTLP_HEADERS` | Collector auth headers. |
 | `observability.otel.resourceAttributes` | `OTEL_RESOURCE_ATTRIBUTES` | Extra resource attributes. |
 | `observability.otel.sampler` | `OTEL_TRACES_SAMPLER` | Trace sampler. |
 | `observability.otel.samplerArg` | `OTEL_TRACES_SAMPLER_ARG` | Sampler argument. |
+| `observability.otel.collectorPort` | *(NetworkPolicy)* | Collector TCP port allowed by the egress rule — see [NetworkPolicy](#networkpolicy). |
 | `observability.otel.extraEnv` | *(raw)* | Any other `OTEL_*` SDK variable not surfaced above. |
-
-The service name reported to the collector is `aerospike-ce-kubernetes-operator`
-(override with `OTEL_SERVICE_NAME` via `extraEnv`).
 
 :::note
 Pointing the operator and the [Cluster Manager API](../getting-started/cluster-manager-ui.md)

@@ -57,9 +57,13 @@ spec:
             - name: OTEL_SDK_DISABLED
               value: "false"
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: {{ .Values.observability.otel.endpoint | quote }}
+              value: {{ include "aerospike-ce-kubernetes-operator.otel.normalizeEndpoint" .Values.observability.otel.endpoint | quote }}
             - name: OTEL_EXPORTER_OTLP_PROTOCOL
               value: "grpc"
+            {{- with .Values.observability.otel.serviceName }}
+            - name: OTEL_SERVICE_NAME
+              value: {{ . | quote }}
+            {{- end }}
             {{- with .Values.observability.otel.headers }}
             - name: OTEL_EXPORTER_OTLP_HEADERS
               value: {{ . | quote }}
