@@ -200,6 +200,7 @@ UI 컴포넌트별로 각각의 서비스가 생성됩니다.
 | 키 | 타입 | 기본값 | 설명 |
 |-----|------|---------|-------------|
 | `ui.ingress.enabled` | bool | `false` | 외부 접근용 Ingress 활성화. |
+| `ui.ingress.target` | string | `web` | Ingress가 라우팅할 UI 서비스: `web` 또는 `api`. |
 | `ui.ingress.className` | string | `""` | Ingress 클래스 이름. |
 | `ui.ingress.annotations` | object | `{}` | Ingress 어노테이션. |
 | `ui.ingress.hosts` | list | values.yaml 참조 | Ingress 호스트 규칙. |
@@ -266,6 +267,8 @@ UI 컨테이너에는 **preStop 라이프사이클 훅** (`sleep 5`)이 포함�
 | 키 | 타입 | 기본값 | 설명 |
 |-----|------|---------|-------------|
 | `ui.k8s.enabled` | bool | `true` | Kubernetes 클러스터 관리 기능 활성화 (클러스터 생성). |
+| `ui.k8s.verifySsl` | bool | `true` | Kubernetes API 서버 연결 시 TLS 인증서 검증. 자체 서명 또는 비표준 CA 인증서를 쓰는 클러스터에서는 `false`로 설정 가능. |
+| `ui.k8s.caFile` | string | `""` | `ui.api.extraVolumes` / `ui.api.extraVolumeMounts`로 마운트한 Kubernetes API 커스텀 CA 번들의 api 컨테이너 내부 경로. |
 
 ### UI 리소스
 
@@ -395,7 +398,9 @@ UI ServiceMonitor는 `/api/metrics` 경로에서 백엔드 메트릭을 스크�
 
 | 키 | 타입 | 기본값 | 설명 |
 |-----|------|---------|-------------|
-| `ui.extraEnv` | list | `[]` | UI 컨테이너의 추가 환경 변수. `valueFrom` 참조를 포함한 표준 Kubernetes 환경 변수 문법 지원. |
+| `ui.extraEnv` | list | `[]` | 두 UI 컨테이너(api와 web)에 모두 주입되는 추가 환경 변수. `valueFrom` 참조를 포함한 표준 Kubernetes 환경 변수 문법 지원. |
+| `ui.api.extraEnv` | list | `[]` | api 컨테이너에만 주입되는 추가 환경 변수. |
+| `ui.api.extraEnvFrom` | list | `[]` | api 환경 변수를 일괄 주입하기 위한 `envFrom` 항목(`configMapRef` / `secretRef`). |
 
 ### UI Helm 테스트
 

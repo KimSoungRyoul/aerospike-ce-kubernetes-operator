@@ -74,7 +74,7 @@ GitOps 환경에서는 오퍼레이터 라이프사이클과 독립적으로 관
 
 ```bash
 helm install aerospike-ce-kubernetes-operator-crds oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator-crds \
-  --version 0.1.0
+  --version 1.3.1
 ```
 
 CRD는 `helm.sh/resource-policy: keep` 어노테이션이 있어 `helm uninstall` 시에도 **삭제되지 않아** 클러스터 데이터를 보호합니다.
@@ -83,7 +83,7 @@ CRD는 `helm.sh/resource-policy: keep` 어노테이션이 있어 `helm uninstall
 
 ```bash
 helm install aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
-  --version 0.1.0 \
+  --version 1.3.1 \
   --set crds.install=false \
   -n aerospike-operator --create-namespace
 ```
@@ -102,7 +102,7 @@ spec:
   source:
     repoURL: ghcr.io/aerospike-ce-ecosystem/charts
     chart: aerospike-ce-kubernetes-operator-crds
-    targetRevision: "0.1.0"
+    targetRevision: "1.3.1"
   syncPolicy:
     automated:
       prune: false
@@ -117,7 +117,7 @@ spec:
   source:
     repoURL: ghcr.io/aerospike-ce-ecosystem/charts
     chart: aerospike-ce-kubernetes-operator
-    targetRevision: "0.1.0"
+    targetRevision: "1.3.1"
     helm:
       values: |
         crds:
@@ -154,7 +154,7 @@ spec:
   chart:
     spec:
       chart: aerospike-ce-kubernetes-operator-crds
-      version: "0.1.0"
+      version: "1.3.1"
       sourceRef:
         kind: HelmRepository
         name: aerospike-ce-kubernetes-operator
@@ -175,7 +175,7 @@ spec:
   chart:
     spec:
       chart: aerospike-ce-kubernetes-operator
-      version: "0.1.0"
+      version: "1.3.1"
       sourceRef:
         kind: HelmRepository
         name: aerospike-ce-kubernetes-operator

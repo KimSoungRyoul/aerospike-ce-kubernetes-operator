@@ -25,7 +25,7 @@ kubectl -n cert-manager get pods
 
 > **Alternative**: If you don't want cert-manager, disable it and provide a TLS secret manually:
 > ```bash
-> helm install acko ./charts/acko \
+> helm install acko ./charts/aerospike-ce-kubernetes-operator \
 >   --set certManager.enabled=false \
 >   --set webhookTlsSecret=my-webhook-tls
 > ```
@@ -50,24 +50,24 @@ helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
 CRDs and the operator are installed together. `crds.install=true` is the default.
 
 ```bash
-helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/acko \
-  --version 0.1.0 \
+helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  --version 1.3.1 \
   --namespace aerospike-operator --create-namespace
 ```
 
 ### Method 2: Separate CRD chart (GitOps / ArgoCD / Flux)
 
-Install `acko-crds` once, then the operator separately. This is the recommended
+Install `aerospike-ce-kubernetes-operator-crds` once, then the operator separately. This is the recommended
 approach for GitOps workflows to control CRD lifecycle independently.
 
 ```bash
 # Step 1: Install CRDs (once per cluster)
-helm install acko-crds oci://ghcr.io/aerospike-ce-ecosystem/charts/acko-crds \
-  --version 0.1.0
+helm install acko-crds oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator-crds \
+  --version 1.3.1
 
 # Step 2: Install operator (skip CRD installation)
-helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/acko \
-  --version 0.1.0 \
+helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  --version 1.3.1 \
   --set crds.install=false \
   --namespace aerospike-operator --create-namespace
 ```
@@ -75,15 +75,15 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/acko \
 ### From Local Chart
 
 ```bash
-helm install acko ./charts/acko \
+helm install acko ./charts/aerospike-ce-kubernetes-operator \
   --namespace aerospike-operator --create-namespace
 ```
 
 ### With monitoring enabled
 
 ```bash
-helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/acko \
-  --version 0.1.0 \
+helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  --version 1.3.1 \
   --namespace aerospike-operator --create-namespace \
   --set serviceMonitor.enabled=true \
   --set prometheusRule.enabled=true \
@@ -123,8 +123,8 @@ for the full reference.
 ### With Cilium network policy
 
 ```bash
-helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/acko \
-  --version 0.1.0 \
+helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  --version 1.3.1 \
   --namespace aerospike-operator --create-namespace \
   --set cilium.enabled=true
 ```
@@ -135,8 +135,8 @@ The Cluster Manager UI (api + web) is deployed by default. A plain
 `helm install` of the chart already brings both Deployments up:
 
 ```bash
-helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/acko \
-  --version 0.4.0 \
+helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  --version 1.3.1 \
   --namespace aerospike-operator --create-namespace
 ```
 
@@ -144,16 +144,16 @@ To skip the UI entirely (operator-only install), set both toggles
 to `false`:
 
 ```bash
-helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/acko \
-  --version 0.4.0 \
+helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  --version 1.3.1 \
   --namespace aerospike-operator --create-namespace \
   --set ui.api.enabled=false --set ui.web.enabled=false
 ```
 
 Access the UI:
 ```bash
-kubectl port-forward svc/<release-name>-acko-ui 3000:3000 -n aerospike-operator
-# Open http://localhost:3000
+kubectl port-forward svc/<release-name>-aerospike-ce-kubernetes-operator-ui-web 3100:3100 -n aerospike-operator
+# Open http://localhost:3100
 ```
 
 #### Independent api / web toggles (chart 0.3.0+)
@@ -285,8 +285,8 @@ selected by `ui.database.type`:
 SQLite (default) — nothing to configure:
 
 ```bash
-helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/acko \
-  --version 0.4.0 --namespace aerospike-operator --create-namespace \
+helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  --version 1.3.1 --namespace aerospike-operator --create-namespace \
   --set ui.database.sqlite.persistence.size=2Gi
 ```
 
@@ -294,8 +294,8 @@ External PostgreSQL — supply the connection URL (or an existing Secret with a
 `DATABASE_URL` key via `ui.database.postgresql.existingSecret`):
 
 ```bash
-helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/acko \
-  --version 0.4.0 --namespace aerospike-operator --create-namespace \
+helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  --version 1.3.1 --namespace aerospike-operator --create-namespace \
   --set ui.database.type=postgresql \
   --set ui.database.postgresql.databaseUrl='postgresql://user:pass@db-host:5432/aerospike_manager'
 ```
@@ -304,8 +304,8 @@ Chart-managed PostgreSQL — let the chart run a single-replica PostgreSQL
 `Deployment` and wire the api to it:
 
 ```bash
-helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/acko \
-  --version 0.4.0 --namespace aerospike-operator --create-namespace \
+helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  --version 1.3.1 --namespace aerospike-operator --create-namespace \
   --set ui.database.type=postgresql \
   --set ui.database.postgresql.deploy=true
 ```
@@ -408,21 +408,25 @@ so the gate never fires.
 
 #### Customizing the UI deployment
 
-You can customize the UI with service annotations, resource defaults, and extra environment variables:
+You can customize the UI with per-component image, service, resource, and environment values:
 
 ```bash
-helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/acko \
-  --version 0.4.0 \
+helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  --version 1.3.1 \
   --namespace aerospike-operator --create-namespace \
-  --set ui.service.type=LoadBalancer \
-  --set ui.service.annotations."service\.beta\.kubernetes\.io/aws-load-balancer-type"=nlb \
-  --set ui.resources.requests.cpu=200m \
-  --set ui.resources.requests.memory=512Mi \
-  --set ui.resources.limits.cpu=500m \
-  --set ui.resources.limits.memory=1Gi
+  --set ui.imageTag=0.24.0 \
+  --set ui.api.image.repository=ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-api \
+  --set ui.web.image.repository=ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-web \
+  --set ui.web.service.type=LoadBalancer \
+  --set ui.web.service.annotations."service\.beta\.kubernetes\.io/aws-load-balancer-type"=nlb \
+  --set ui.api.resources.requests.cpu=200m \
+  --set ui.api.resources.requests.memory=512Mi \
+  --set ui.api.resources.limits.cpu=500m \
+  --set ui.api.resources.limits.memory=1Gi
 ```
 
-Extra environment variables can be passed via `ui.extraEnv`:
+Shared extra environment variables can be passed to both UI containers via
+`ui.extraEnv`; API-only environment can be passed via `ui.api.extraEnv`:
 
 ```yaml
 ui:
@@ -434,13 +438,17 @@ ui:
         secretKeyRef:
           name: my-secret
           key: value
+  api:
+    extraEnv:
+      - name: API_ONLY_SETTING
+        value: enabled
 ```
 
 ### Full example
 
 ```bash
-helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/acko \
-  --version 0.4.0 \
+helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  --version 1.3.1 \
   --namespace aerospike-operator --create-namespace \
   --set serviceMonitor.enabled=true \
   --set prometheusRule.enabled=true \
@@ -462,8 +470,8 @@ metadata:
 spec:
   source:
     repoURL: ghcr.io/aerospike-ce-ecosystem/charts
-    chart: acko-crds
-    targetRevision: "0.1.0"
+    chart: aerospike-ce-kubernetes-operator-crds
+    targetRevision: "1.3.1"
   syncPolicy:
     automated:
       prune: false   # Never auto-delete CRDs
@@ -477,8 +485,8 @@ metadata:
 spec:
   source:
     repoURL: ghcr.io/aerospike-ce-ecosystem/charts
-    chart: acko
-    targetRevision: "0.1.0"
+    chart: aerospike-ce-kubernetes-operator
+    targetRevision: "1.3.1"
     helm:
       values: |
         crds:
@@ -514,8 +522,8 @@ metadata:
 spec:
   chart:
     spec:
-      chart: acko-crds
-      version: "0.1.0"
+      chart: aerospike-ce-kubernetes-operator-crds
+      version: "1.3.1"
       sourceRef:
         kind: HelmRepository
         name: acko
@@ -535,8 +543,8 @@ spec:
   targetNamespace: aerospike-operator
   chart:
     spec:
-      chart: acko
-      version: "0.1.0"
+      chart: aerospike-ce-kubernetes-operator
+      version: "1.3.1"
       sourceRef:
         kind: HelmRepository
         name: acko

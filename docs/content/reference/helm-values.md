@@ -207,6 +207,7 @@ Each UI component has its own Service.
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `ui.ingress.enabled` | bool | `false` | Enable ingress for external access. |
+| `ui.ingress.target` | string | `web` | UI Service the Ingress routes to: `web` or `api`. |
 | `ui.ingress.className` | string | `""` | Ingress class name. |
 | `ui.ingress.annotations` | object | `{}` | Ingress annotations. |
 | `ui.ingress.hosts` | list | See values.yaml | Ingress host rules. |
@@ -299,6 +300,7 @@ The UI container includes a **preStop lifecycle hook** (`sleep 5`) to allow in-f
 |-----|------|---------|-------------|
 | `ui.k8s.enabled` | bool | `true` | Enable Kubernetes cluster management features (Create Cluster). |
 | `ui.k8s.verifySsl` | bool | `true` | Verify TLS certificates when connecting to the Kubernetes API server. Set to `false` for clusters with self-signed or non-standard CA certificates. |
+| `ui.k8s.caFile` | string | `""` | Path inside the api container to a custom Kubernetes API CA bundle mounted with `ui.api.extraVolumes` / `ui.api.extraVolumeMounts`. |
 
 ### UI Resources
 
@@ -436,7 +438,9 @@ The UI ServiceMonitor scrapes the backend metrics endpoint at `/api/metrics`. Th
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `ui.extraEnv` | list | `[]` | Extra environment variables for the UI container. Supports standard Kubernetes env var syntax including `valueFrom` references. |
+| `ui.extraEnv` | list | `[]` | Extra environment variables injected into both UI containers (api and web). Supports standard Kubernetes env var syntax including `valueFrom` references. |
+| `ui.api.extraEnv` | list | `[]` | Extra environment variables for the api container only. |
+| `ui.api.extraEnvFrom` | list | `[]` | `envFrom` entries (`configMapRef` / `secretRef`) for bulk api environment injection. |
 
 ### UI Helm Tests
 
