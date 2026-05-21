@@ -240,8 +240,13 @@ observability:
     # -- OTLP/gRPC collector endpoint, e.g.
     # "otel-collector.observability.svc.cluster.local:4317". The operator
     # exports over OTLP/gRPC only. Required when enabled=true (rendering
-    # fails otherwise).
+    # fails otherwise). A scheme-less host:port is normalized to insecure
+    # http:// (plaintext gRPC) — the OTel SDK rejects an endpoint with no
+    # scheme. Use an explicit https:// URL for a TLS-terminated collector.
     endpoint: ""
+    # -- Override the service.name resource attribute. Empty keeps the
+    # operator's built-in default ("aerospike-ce-kubernetes-operator").
+    serviceName: ""
     # -- OTLP headers for collector auth, e.g. "api-key=xxxxxxxx".
     headers: ""
     # -- Comma-separated extra resource attributes, e.g.
@@ -253,6 +258,12 @@ observability:
     sampler: parentbased_traceidratio
     # -- Sampler argument (sampling ratio for the traceidratio variants).
     samplerArg: "1.0"
+    # -- TCP port the OTLP collector listens on. Used only to open an egress
+    # rule to the collector in the operator's NetworkPolicy / CiliumNetworkPolicy
+    # when networkPolicy.enabled or cilium.enabled is set — without it the
+    # collector is unreachable and exported telemetry is silently dropped. The
+    # operator exports over OTLP/gRPC, whose conventional port is 4317.
+    collectorPort: 4317
     # -- Extra raw environment variables appended to the operator container,
     # for any OTel SDK standard variable not surfaced above.
     # Example: [{ name: OTEL_BSP_SCHEDULE_DELAY, value: "5000" }]

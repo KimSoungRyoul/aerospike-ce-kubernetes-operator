@@ -51,5 +51,15 @@ spec:
           protocol: TCP
         - port: 6443
           protocol: TCP
+    {{- if .Values.observability.otel.enabled }}
+    # OpenTelemetry collector — OTLP export of traces/metrics/logs.
+    # Without this egress rule the collector is unreachable when
+    # networkPolicy.enabled is set and exported telemetry is silently dropped.
+    # Port-scoped (no `to:` peer) to match the kube-apiserver rule above;
+    # standard NetworkPolicy cannot select the collector by Service DNS name.
+    - ports:
+        - port: {{ .Values.observability.otel.collectorPort }}
+          protocol: TCP
+    {{- end }}
 {{- end }}
 {{- end }}

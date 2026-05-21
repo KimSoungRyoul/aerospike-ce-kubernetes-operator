@@ -56,5 +56,20 @@ spec:
     # Allow communication with kube-apiserver
     - toEntities:
         - kube-apiserver
+    {{- if .Values.observability.otel.enabled }}
+    # Allow OTLP export to the OpenTelemetry collector (traces/metrics/logs).
+    # Without this the collector is unreachable when cilium.enabled is set and
+    # exported telemetry is silently dropped. Scoped to the collector port for
+    # any destination (in-cluster or external) — mirroring the port-scoped
+    # rule in the standard NetworkPolicy, since the collector endpoint is
+    # user-configured and cannot be matched by a fixed label selector here.
+    - toEntities:
+        - cluster
+        - world
+      toPorts:
+        - ports:
+            - port: {{ .Values.observability.otel.collectorPort | quote }}
+              protocol: TCP
+    {{- end }}
 {{- end }}
 {{- end }}

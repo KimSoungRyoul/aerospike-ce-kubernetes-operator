@@ -541,3 +541,25 @@ all gates uniformly.
 {{- include "aerospike-ce-kubernetes-operator.validate.webhookTlsSource" . -}}
 {{- include "aerospike-ce-kubernetes-operator.validate.databaseConfig" . -}}
 {{- end }}
+
+{{/*
+Normalize an OTLP exporter endpoint so it carries a URL scheme.
+
+The OpenTelemetry SDK requires OTEL_EXPORTER_OTLP_ENDPOINT to carry a URL
+scheme: a bare "host:port" is parsed as scheme://opaque, leaving the
+exporter with an empty address ("missing address") and silently dropping
+all telemetry. A scheme-less value is normalized to insecure http://
+(plaintext) — the common case for an in-cluster collector. Pass an explicit
+https:// endpoint for a TLS-terminated collector. Used for both the operator
+and the cluster-manager API.
+
+Usage: include "aerospike-ce-kubernetes-operator.otel.normalizeEndpoint" <endpoint-string>
+*/}}
+{{- define "aerospike-ce-kubernetes-operator.otel.normalizeEndpoint" -}}
+{{- $ep := . -}}
+{{- if regexMatch "^[A-Za-z][A-Za-z0-9+.-]*://" $ep -}}
+{{- $ep -}}
+{{- else -}}
+{{- printf "http://%s" $ep -}}
+{{- end -}}
+{{- end }}
