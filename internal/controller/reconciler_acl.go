@@ -231,7 +231,7 @@ func (r *AerospikeClusterReconciler) reconcileUsers(
 		// be set True even though the password was never rotated. Returning the
 		// error propagates it up through reconcileACL so ACLSynced is set False
 		// with a meaningful reason. Transient errors are retried by the
-		// retryOnTransientWithClient wrapper around reconcileUsers.
+		// retryOnTransientWithReconnect wrapper around reconcileUsers.
 		if err := aeroClient.ChangePassword(adminPolicy, userSpec.Name, password); err != nil {
 			return fmt.Errorf("changing password for user %s: %w", userSpec.Name, err)
 		}

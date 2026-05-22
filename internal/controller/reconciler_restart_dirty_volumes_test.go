@@ -13,6 +13,14 @@ import (
 	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
 )
 
+// Shared fixtures for the code-quality follow-up regression tests. The values
+// are deliberately distinct from production literals so goconst's
+// match-constant check does not flag unrelated code (e.g. "default").
+const (
+	ctrlTestNamespace = "acko-test"
+	ctrlTestDirtyVol  = "data-vol"
+)
+
 // TestMarkDirtyVolumes_PreservesConcurrentPodStatus is the regression test for
 // the markDirtyVolumes fix. markDirtyVolumes must use a MergeFrom status patch,
 // not a full Status().Update — a full replace clobbers Status.Pods fields that
@@ -31,10 +39,10 @@ func TestMarkDirtyVolumes_PreservesConcurrentPodStatus(t *testing.T) {
 
 	const (
 		clusterName = "demo"
-		namespace   = "default"
 		targetPod   = "demo-0" // markDirtyVolumes writes DirtyVolumes here
 		otherPod    = "demo-1" // a concurrent reconciler writes DynamicConfigStatus here
 	)
+	namespace := ctrlTestNamespace
 
 	cluster := &ackov1alpha1.AerospikeCluster{}
 	cluster.Name = clusterName
@@ -92,7 +100,7 @@ func TestMarkDirtyVolumes_PreservesConcurrentPodStatus(t *testing.T) {
 		Recorder: record.NewFakeRecorder(8),
 	}
 
-	if err := reconciler.markDirtyVolumes(context.Background(), cluster, targetPod, []string{"data"}); err != nil {
+	if err := reconciler.markDirtyVolumes(context.Background(), cluster, targetPod, []string{ctrlTestDirtyVol}); err != nil {
 		t.Fatalf("markDirtyVolumes() error = %v", err)
 	}
 
@@ -102,8 +110,8 @@ func TestMarkDirtyVolumes_PreservesConcurrentPodStatus(t *testing.T) {
 	}
 
 	// markDirtyVolumes must have written DirtyVolumes on the target pod.
-	if dv := got.Status.Pods[targetPod].DirtyVolumes; len(dv) != 1 || dv[0] != "data" {
-		t.Errorf("targetPod DirtyVolumes = %v, want [data]", dv)
+	if dv := got.Status.Pods[targetPod].DirtyVolumes; len(dv) != 1 || dv[0] != ctrlTestDirtyVol {
+		t.Errorf("targetPod DirtyVolumes = %v, want [%s]", dv, ctrlTestDirtyVol)
 	}
 
 	// The concurrent writer's DynamicConfigStatus on otherPod must survive.

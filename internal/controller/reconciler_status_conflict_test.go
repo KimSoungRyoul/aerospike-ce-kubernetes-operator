@@ -21,7 +21,7 @@ import (
 func statusConflictPod(clusterName, name string, ready bool) *corev1.Pod {
 	pod := &corev1.Pod{}
 	pod.Name = name
-	pod.Namespace = "default"
+	pod.Namespace = ctrlTestNamespace
 	pod.Labels = utils.SelectorLabelsForCluster(clusterName)
 	pod.Status.Phase = corev1.PodRunning
 	pod.Status.PodIP = "10.0.0.1"
@@ -49,9 +49,9 @@ func TestUpdateStatusAndPhase_ConflictRetryRecomputesPodStatus(t *testing.T) {
 
 	const (
 		clusterName = "demo"
-		namespace   = "default"
 		podName     = "demo-0"
 	)
+	namespace := ctrlTestNamespace
 
 	cluster := &ackov1alpha1.AerospikeCluster{}
 	cluster.Name = clusterName
