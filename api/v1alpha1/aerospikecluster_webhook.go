@@ -1472,9 +1472,23 @@ func (v *AerospikeClusterValidator) validateMonitoring(m *AerospikeMonitoringSpe
 	return errors, warnings
 }
 
+// operatorFixedNetworkPorts maps each network subsection to the single port the
+// operator supports. The Aerospike container's containerPort declarations, the
+// liveness/readiness probes (asinfo -p <port>), the headless/per-pod Services,
+// and the generated NetworkPolicy/CiliumNetworkPolicy all hard-code these
+// values. A CR that sets a different port is silently broken — the probes query
+// the wrong port so pods never become Ready — so admission must reject it
+// instead of letting the cluster fail opaquely at runtime.
+var operatorFixedNetworkPorts = map[string]int{
+	"service":   int(DefaultServicePort),
+	"heartbeat": int(DefaultHeartbeatPort),
+	"fabric":    int(DefaultFabricPort),
+}
+
 // validateNetworkPortUniqueness checks that service, heartbeat, and fabric
-// ports are valid TCP integers, distinct, and do not collide with another
-// Aerospike subsection's reserved port (e.g. service.port=3003 vs info).
+// ports are valid TCP integers, distinct, do not collide with another
+// Aerospike subsection's reserved port (e.g. service.port=3003 vs info), and
+// match the fixed ports the operator hard-codes everywhere else.
 func (v *AerospikeClusterValidator) validateNetworkPortUniqueness(cluster *AerospikeCluster) []string {
 	netCfg, ok := cluster.Spec.AerospikeConfig.Value["network"].(map[string]any)
 	if !ok {
@@ -1554,6 +1568,22 @@ func (v *AerospikeClusterValidator) validateNetworkPortUniqueness(cluster *Aeros
 			}
 		}
 	}
+
+	// Reject ports that differ from the fixed values the operator hard-codes
+	// into container ports, probes, Services and NetworkPolicies. A custom port
+	// is accepted by the API server but produces a cluster whose probes target
+	// the wrong port, so pods never reach Ready. Fail fast at admission with an
+	// actionable message instead.
+	for _, p := range ports {
+		if fixed, known := operatorFixedNetworkPorts[p.name]; known && p.port != fixed {
+			errors = append(errors, fmt.Sprintf(
+				"aerospikeConfig.network.%s.port=%d is not supported; the operator requires the fixed port %d "+
+					"(container ports, health probes, Services and NetworkPolicies all assume it). "+
+					"Remove the port override or set it to %d.",
+				p.name, p.port, fixed, fixed))
+		}
+	}
+
 	return errors
 }
 
