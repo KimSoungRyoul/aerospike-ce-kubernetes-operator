@@ -1468,11 +1468,25 @@ func (v *AerospikeClusterValidator) validateMonitoring(m *AerospikeMonitoringSpe
 				errors = append(errors, fmt.Sprintf("monitoring.prometheusRule.customRules[%d]: invalid JSON: %v", i, err))
 				continue
 			}
-			if _, ok := ruleGroup["name"]; !ok {
+			if name, ok := ruleGroup["name"]; !ok {
 				errors = append(errors, fmt.Sprintf("monitoring.prometheusRule.customRules[%d]: missing required field 'name'", i))
+			} else if nameStr, ok := name.(string); !ok {
+				errors = append(errors, fmt.Sprintf("monitoring.prometheusRule.customRules[%d]: field 'name' must be a string, got %T", i, name))
+			} else if nameStr == "" {
+				errors = append(errors, fmt.Sprintf("monitoring.prometheusRule.customRules[%d]: field 'name' must not be empty", i))
 			}
-			if _, ok := ruleGroup["rules"]; !ok {
+			rules, ok := ruleGroup["rules"]
+			if !ok {
 				errors = append(errors, fmt.Sprintf("monitoring.prometheusRule.customRules[%d]: missing required field 'rules'", i))
+				continue
+			}
+			rulesArr, ok := rules.([]any)
+			if !ok {
+				errors = append(errors, fmt.Sprintf("monitoring.prometheusRule.customRules[%d]: field 'rules' must be a JSON array, got %T", i, rules))
+				continue
+			}
+			if len(rulesArr) == 0 {
+				errors = append(errors, fmt.Sprintf("monitoring.prometheusRule.customRules[%d]: field 'rules' must contain at least one rule", i))
 			}
 		}
 	}

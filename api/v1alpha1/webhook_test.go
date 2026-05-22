@@ -2182,6 +2182,93 @@ func TestValidate_CustomRules_MissingBothFields(t *testing.T) {
 	}
 }
 
+func TestValidate_CustomRulesRulesMustBeArray(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			Monitoring: &AerospikeMonitoringSpec{
+				Enabled:       true,
+				ExporterImage: "exporter:v1",
+				Port:          9145,
+				PrometheusRule: &PrometheusRuleSpec{
+					Enabled: true,
+					CustomRules: []apiextensionsv1.JSON{
+						{Raw: []byte(`{"name":"custom.rules","rules":{}}`)},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error for custom rule with object-typed 'rules'")
+	}
+	if !strings.Contains(err.Error(), "'rules' must be a JSON array") {
+		t.Errorf("error should mention type mismatch for 'rules', got: %v", err)
+	}
+}
+
+func TestValidate_CustomRulesRulesEmptyArray(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			Monitoring: &AerospikeMonitoringSpec{
+				Enabled:       true,
+				ExporterImage: "exporter:v1",
+				Port:          9145,
+				PrometheusRule: &PrometheusRuleSpec{
+					Enabled: true,
+					CustomRules: []apiextensionsv1.JSON{
+						{Raw: []byte(`{"name":"custom.rules","rules":[]}`)},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error for custom rule with empty 'rules' array")
+	}
+	if !strings.Contains(err.Error(), "must contain at least one rule") {
+		t.Errorf("error should mention empty rules array, got: %v", err)
+	}
+}
+
+func TestValidate_CustomRulesNameMustBeString(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			Monitoring: &AerospikeMonitoringSpec{
+				Enabled:       true,
+				ExporterImage: "exporter:v1",
+				Port:          9145,
+				PrometheusRule: &PrometheusRuleSpec{
+					Enabled: true,
+					CustomRules: []apiextensionsv1.JSON{
+						{Raw: []byte(`{"name":123,"rules":[{"alert":"TestAlert","expr":"up==0"}]}`)},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error for custom rule with non-string 'name'")
+	}
+	if !strings.Contains(err.Error(), "'name' must be a string") {
+		t.Errorf("error should mention type mismatch for 'name', got: %v", err)
+	}
+}
+
 // --- MetricLabels validation tests ---
 
 func TestValidate_MetricLabels_ValidLabels(t *testing.T) {
