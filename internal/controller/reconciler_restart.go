@@ -135,6 +135,13 @@ func (r *AerospikeClusterReconciler) reconcileRollingRestart(
 	// touching any pod. Passing nil configs makes restartPodBatch's
 	// oldConfig != nil && newConfig != nil guard skip the dynamic path and go
 	// straight to per-pod cold restart.
+	//
+	// In a mixed batch (some pods config-changed, some pod-spec-only-changed)
+	// configChanged is true, so pod-spec-only pods also take the 2PC path and
+	// get a spurious no-op config re-apply. This is harmless and eventually
+	// consistent: their PodSpecHashAnnotation stays stale, so they are
+	// re-selected on a later reconcile; once the config-changed pods drain,
+	// configChanged becomes false and they cold-restart normally. No stall.
 	batchOldConfig, batchNewConfig := oldConfig, newConfig
 	if !configChanged {
 		batchOldConfig, batchNewConfig = nil, nil
