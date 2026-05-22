@@ -498,8 +498,8 @@ func (v *AerospikeClusterValidator) validate(cluster *AerospikeCluster) (admissi
 		// that never carries data. The size check is skipped when size is
 		// supplied later by a template (size == 0 && templateRef != nil).
 		numRacks := len(cluster.Spec.RackConfig.Racks)
-		if numRacks > 0 && !(cluster.Spec.Size == 0 && cluster.Spec.TemplateRef != nil) &&
-			numRacks > int(cluster.Spec.Size) {
+		sizeKnownNow := cluster.Spec.Size != 0 || cluster.Spec.TemplateRef == nil
+		if numRacks > 0 && sizeKnownNow && numRacks > int(cluster.Spec.Size) {
 			allErrors = append(allErrors, fmt.Sprintf(
 				"rackConfig defines %d racks but spec.size is %d; each rack must get at least 1 pod, so the rack count must not exceed spec.size",
 				numRacks, cluster.Spec.Size))
