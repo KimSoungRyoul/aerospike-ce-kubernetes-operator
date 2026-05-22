@@ -244,3 +244,64 @@ func TestGetMaxIgnorablePods_NilMaxIgnorablePods(t *testing.T) {
 		t.Errorf("getMaxIgnorablePods with nil MaxIgnorablePods = %d, want 0", got)
 	}
 }
+
+// TestGetMaxIgnorablePods_ExplicitZeroInt verifies that an explicit integer 0
+// resolves to 0 ("ignore no unhealthy pods"). resolveIntOrPercent clamps to a
+// minimum of 1, so without special handling an explicit 0 would silently become
+// 1 and let the rolling restart skip one unhealthy pod the user told it not to.
+func TestGetMaxIgnorablePods_ExplicitZeroInt(t *testing.T) {
+	r := &AerospikeClusterReconciler{}
+	maxIgnorable := intstr.FromInt32(0)
+	cluster := &ackov1alpha1.AerospikeCluster{
+		Spec: ackov1alpha1.AerospikeClusterSpec{
+			RackConfig: &ackov1alpha1.RackConfig{
+				MaxIgnorablePods: &maxIgnorable,
+			},
+		},
+	}
+
+	got := r.getMaxIgnorablePods(cluster, 5)
+	if got != 0 {
+		t.Errorf("getMaxIgnorablePods with explicit int 0 = %d, want 0", got)
+	}
+}
+
+// TestGetMaxIgnorablePods_ExplicitZeroPercent verifies that an explicit "0%"
+// resolves to 0 rather than being clamped up to 1.
+func TestGetMaxIgnorablePods_ExplicitZeroPercent(t *testing.T) {
+	r := &AerospikeClusterReconciler{}
+	maxIgnorable := intstr.FromString("0%")
+	cluster := &ackov1alpha1.AerospikeCluster{
+		Spec: ackov1alpha1.AerospikeClusterSpec{
+			RackConfig: &ackov1alpha1.RackConfig{
+				MaxIgnorablePods: &maxIgnorable,
+			},
+		},
+	}
+
+	got := r.getMaxIgnorablePods(cluster, 10)
+	if got != 0 {
+		t.Errorf("getMaxIgnorablePods with explicit \"0%%\" = %d, want 0", got)
+	}
+}
+
+// TestGetMaxIgnorablePods_PercentRoundsDownToZero verifies that a non-zero
+// percentage that rounds down to zero (e.g. "10%" of a 3-pod cluster) is NOT
+// treated as an explicit zero: resolveIntOrPercent's minimum-of-1 clamp still
+// applies so the user's intent ("ignore a small fraction") yields at least 1.
+func TestGetMaxIgnorablePods_PercentRoundsDownToZero(t *testing.T) {
+	r := &AerospikeClusterReconciler{}
+	maxIgnorable := intstr.FromString("10%")
+	cluster := &ackov1alpha1.AerospikeCluster{
+		Spec: ackov1alpha1.AerospikeClusterSpec{
+			RackConfig: &ackov1alpha1.RackConfig{
+				MaxIgnorablePods: &maxIgnorable,
+			},
+		},
+	}
+
+	got := r.getMaxIgnorablePods(cluster, 3)
+	if got != 1 {
+		t.Errorf("getMaxIgnorablePods with \"10%%\" of 3 pods = %d, want 1", got)
+	}
+}

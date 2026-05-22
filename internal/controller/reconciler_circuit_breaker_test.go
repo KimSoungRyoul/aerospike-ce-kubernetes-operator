@@ -75,19 +75,19 @@ func TestCalculateBackoff(t *testing.T) {
 			want:      256 * time.Second,
 		},
 		{
-			name:      "9 failures: capped at 2^8 = 256s (exponent capped at 8)",
+			name:      "9 failures: 2^9 = 512s capped at maxBackoffSeconds (300s)",
 			failCount: 9,
-			want:      256 * time.Second,
+			want:      time.Duration(maxBackoffSeconds) * time.Second,
 		},
 		{
-			name:      "10 failures: capped at 2^8 = 256s",
+			name:      "10 failures: capped at maxBackoffSeconds (300s)",
 			failCount: 10,
-			want:      256 * time.Second,
+			want:      time.Duration(maxBackoffSeconds) * time.Second,
 		},
 		{
-			name:      "100 failures: capped at 2^8 = 256s",
+			name:      "100 failures: capped at maxBackoffSeconds (300s)",
 			failCount: 100,
-			want:      256 * time.Second,
+			want:      time.Duration(maxBackoffSeconds) * time.Second,
 		},
 	}
 
@@ -122,6 +122,23 @@ func TestCalculateBackoff_NeverExceedsMax(t *testing.T) {
 		if got > maxDuration {
 			t.Errorf("calculateBackoff(%d) = %v exceeds maxBackoffSeconds (%v)", i, got, maxDuration)
 		}
+	}
+}
+
+// TestCalculateBackoff_ReachesDocumentedMax verifies the documented 5-minute
+// (maxBackoffSeconds) cap is actually reached at a high failure count. A prior
+// implementation capped the exponent at 8 (2^8 = 256s), which kept the result
+// permanently below 300s and made the cap dead code.
+func TestCalculateBackoff_ReachesDocumentedMax(t *testing.T) {
+	maxDuration := time.Duration(maxBackoffSeconds) * time.Second
+	got := calculateBackoff(maxFailedReconciles)
+	if got != maxDuration {
+		t.Errorf("calculateBackoff(%d) = %v, want documented max %v",
+			maxFailedReconciles, got, maxDuration)
+	}
+	// Sustained failures must stay pinned at the documented maximum.
+	if got := calculateBackoff(1000); got != maxDuration {
+		t.Errorf("calculateBackoff(1000) = %v, want %v", got, maxDuration)
 	}
 }
 
