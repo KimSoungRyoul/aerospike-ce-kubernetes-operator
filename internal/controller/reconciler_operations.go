@@ -60,11 +60,19 @@ func (r *AerospikeClusterReconciler) reconcileOperations(
 	// used by the rolling restart path.
 	batchSize := r.getRollingUpdateBatchSize(cluster, int32(len(pods)))
 
-	// Track completed pods from previous status
+	// Track completed and previously-failed pods from prior status.
+	// A pod that has already been attempted (success OR failure) must not be
+	// retried on every reconcile: a failed warm/cold restart would otherwise be
+	// re-run every 5s forever with no backoff, and FailedPods would grow
+	// unbounded with duplicates.
 	completedSet := make(map[string]bool)
+	failedSet := make(map[string]bool)
 	if cluster.Status.OperationStatus != nil && cluster.Status.OperationStatus.ID == op.ID {
 		for _, p := range cluster.Status.OperationStatus.CompletedPods {
 			completedSet[p] = true
+		}
+		for _, p := range cluster.Status.OperationStatus.FailedPods {
+			failedSet[p] = true
 		}
 		opStatus.CompletedPods = cluster.Status.OperationStatus.CompletedPods
 		opStatus.FailedPods = cluster.Status.OperationStatus.FailedPods
@@ -73,7 +81,8 @@ func (r *AerospikeClusterReconciler) reconcileOperations(
 	processed := int32(0)
 
 	for _, pod := range pods {
-		if completedSet[pod.Name] {
+		// Skip pods already resolved (succeeded or failed) in a prior reconcile.
+		if completedSet[pod.Name] || failedSet[pod.Name] {
 			continue
 		}
 
@@ -98,7 +107,11 @@ func (r *AerospikeClusterReconciler) reconcileOperations(
 
 		if opErr != nil {
 			log.Error(opErr, "Operation failed on pod", "pod", pod.Name, "kind", op.Kind)
-			opStatus.FailedPods = append(opStatus.FailedPods, pod.Name)
+			// Dedupe: only record a failed pod once across reconciles.
+			if !failedSet[pod.Name] {
+				opStatus.FailedPods = append(opStatus.FailedPods, pod.Name)
+				failedSet[pod.Name] = true
+			}
 		} else {
 			opStatus.CompletedPods = append(opStatus.CompletedPods, pod.Name)
 			completedSet[pod.Name] = true
@@ -107,11 +120,10 @@ func (r *AerospikeClusterReconciler) reconcileOperations(
 	}
 
 	// Determine completion by directly inspecting how many target pods are still
-	// outstanding. The previous implementation flipped a bool to false on the
-	// first incomplete pod and never restored it, leaving the phase stuck on
-	// InProgress forever once any pod fell out of completedSet — a permanent
-	// regression for any operation that needed more than one reconcile loop.
-	allDone := finalizeOperationPhase(opStatus, pods, completedSet)
+	// outstanding. A pod counts as resolved once attempted — success OR failure —
+	// so an operation with a permanently failing pod still reaches the terminal
+	// Error phase instead of requeueing every 5s forever.
+	allDone := finalizeOperationPhase(opStatus, pods, completedSet, failedSet)
 
 	// Update operation status using Patch to avoid overwriting concurrent status changes.
 	latest, err := r.refetchCluster(ctx, types.NamespacedName{Name: cluster.Name, Namespace: cluster.Namespace})
@@ -147,10 +159,16 @@ func (r *AerospikeClusterReconciler) getOperationTargetPods(
 	return filterPodsByNames(allPods.Items, podList), nil
 }
 
-// finalizeOperationPhase inspects the target pod list against the completed set
-// and, when no pods remain outstanding, sets opStatus.Phase to Completed (or
-// Error if any pods failed). It returns true when the operation has reached a
-// terminal state, false when more reconciles are needed.
+// finalizeOperationPhase inspects the target pod list against the set of
+// resolved pods (completed OR failed) and, when no pods remain outstanding,
+// sets opStatus.Phase to Completed (or Error if any pods failed). It returns
+// true when the operation has reached a terminal state, false when more
+// reconciles are needed.
+//
+// A failed pod counts as resolved: otherwise a pod whose warm/cold restart
+// permanently fails would keep remainingPods > 0 forever, the operation would
+// never reach the terminal Error phase, and the cluster would requeue every 5s
+// indefinitely while re-restarting the failed pod with no backoff.
 //
 // Splitting this out lets us unit-test the completion logic without exercising
 // the full reconciler — the historical bug (allDone bool flipped to false and
@@ -160,10 +178,11 @@ func finalizeOperationPhase(
 	opStatus *ackov1alpha1.OperationStatus,
 	pods []*corev1.Pod,
 	completedSet map[string]bool,
+	failedSet map[string]bool,
 ) bool {
 	remainingPods := 0
 	for _, pod := range pods {
-		if !completedSet[pod.Name] {
+		if !completedSet[pod.Name] && !failedSet[pod.Name] {
 			remainingPods++
 		}
 	}
