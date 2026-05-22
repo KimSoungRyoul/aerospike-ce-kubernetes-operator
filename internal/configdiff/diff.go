@@ -174,7 +174,7 @@ func diffNamespaces(result *DiffResult, oldNS, newNS []any) {
 func classifyChange(result *DiffResult, path string, oldVal, newVal any, namespace string) {
 	change := Change{
 		Path:      path,
-		Key:       lastSegment(path),
+		Key:       keyWithinContext(path),
 		Context:   firstSegment(path),
 		OldValue:  oldVal,
 		NewValue:  newVal,
@@ -206,9 +206,28 @@ func firstSegment(path string) string {
 	return path
 }
 
-func lastSegment(path string) string {
-	for i := len(path) - 1; i >= 0; i-- {
-		if path[i] == '.' {
+// keyWithinContext returns the asinfo set-config parameter key for a config
+// path: the path with its leading context segment (firstSegment) stripped.
+//
+// The asinfo "set-config" command only accepts the top-level contexts
+// service / network / namespace / security / xdr. Sub-stanzas like heartbeat
+// and fabric are NOT contexts — their parameters are addressed by a dotted key
+// within the network context. For example "network.heartbeat.interval" must be
+// applied as:
+//
+//	set-config:context=network;heartbeat.interval=<value>
+//
+// so the key is "heartbeat.interval", not just "interval". Taking only the
+// last path segment produced "interval", yielding the invalid command
+// "set-config:context=network;interval=<value>" which Aerospike rejects — every
+// dynamic heartbeat/fabric/security-sub change then silently fell back to a
+// disruptive cold restart even though it was registered as dynamic.
+//
+// For a two-segment path such as "service.proto-fd-max" this returns
+// "proto-fd-max" (the same value the previous last-segment logic produced).
+func keyWithinContext(path string) string {
+	for i, c := range path {
+		if c == '.' {
 			return path[i+1:]
 		}
 	}

@@ -66,6 +66,57 @@ func TestBuildSetConfigCommand_NetworkContext(t *testing.T) {
 	}
 }
 
+// TestDiffToSetConfigCommand_HeartbeatDynamic is the end-to-end regression
+// test for the dynamic heartbeat/fabric Key bug. It runs the real diff engine
+// over a heartbeat-interval change and feeds the resulting Change straight into
+// buildSetConfigCommand — the exact path the 2PC dynamic-update loop takes.
+//
+// Before the fix, configdiff emitted Key="interval" (bare last segment), so the
+// command was the invalid "set-config:context=network;interval=250" which
+// Aerospike rejects; the dynamic update then always failed and the pod was
+// cold-restarted even though network.heartbeat.interval is registered dynamic.
+func TestDiffToSetConfigCommand_HeartbeatDynamic(t *testing.T) {
+	oldCfg := map[string]any{
+		"network": map[string]any{
+			"heartbeat": map[string]any{"interval": 150},
+			"fabric":    map[string]any{"send-threads": 4},
+		},
+	}
+	newCfg := map[string]any{
+		"network": map[string]any{
+			"heartbeat": map[string]any{"interval": 250},
+			"fabric":    map[string]any{"send-threads": 8},
+		},
+	}
+
+	diff := configdiff.Diff(oldCfg, newCfg)
+	if diff.HasStaticChanges() {
+		t.Fatalf("heartbeat/fabric changes must be dynamic, got static: %+v", diff.Static)
+	}
+	if len(diff.Dynamic) != 2 {
+		t.Fatalf("expected 2 dynamic changes, got %d (%+v)", len(diff.Dynamic), diff.Dynamic)
+	}
+
+	wantCmd := map[string]string{
+		"network.heartbeat.interval":  "set-config:context=network;heartbeat.interval=250",
+		"network.fabric.send-threads": "set-config:context=network;fabric.send-threads=8",
+	}
+	for _, change := range diff.Dynamic {
+		cmd, err := buildSetConfigCommand(change)
+		if err != nil {
+			t.Fatalf("buildSetConfigCommand(%q) error = %v", change.Path, err)
+		}
+		want, ok := wantCmd[change.Path]
+		if !ok {
+			t.Errorf("unexpected change path %q", change.Path)
+			continue
+		}
+		if cmd != want {
+			t.Errorf("change %q: command = %q, want %q", change.Path, cmd, want)
+		}
+	}
+}
+
 func TestBuildSetConfigCommand_StringValue(t *testing.T) {
 	change := configdiff.Change{
 		Path:     "service.ticker-interval",

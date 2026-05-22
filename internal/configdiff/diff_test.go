@@ -394,17 +394,72 @@ func TestFirstSegment(t *testing.T) {
 	}
 }
 
-func TestLastSegment(t *testing.T) {
+func TestKeyWithinContext(t *testing.T) {
 	tests := []struct {
 		path, expected string
 	}{
+		// Two-segment paths: the context is stripped, leaving the bare key.
 		{"service.proto-fd-max", "proto-fd-max"},
-		{"network.heartbeat.interval", "interval"},
+		{"namespace.default-ttl", "default-ttl"},
+		// Three-segment paths: only the leading context (network/security) is
+		// stripped — the sub-stanza prefix (heartbeat./fabric./log.) is RETAINED
+		// because it is part of the asinfo set-config parameter key, not a
+		// context of its own.
+		{"network.heartbeat.interval", "heartbeat.interval"},
+		{"network.heartbeat.timeout", "heartbeat.timeout"},
+		{"network.fabric.send-threads", "fabric.send-threads"},
+		{"security.log.report-authentication", "log.report-authentication"},
+		// Single-segment path: nothing to strip.
 		{"single", "single"},
 	}
 	for _, tc := range tests {
-		if got := lastSegment(tc.path); got != tc.expected {
-			t.Errorf("lastSegment(%q) = %q, want %q", tc.path, got, tc.expected)
+		if got := keyWithinContext(tc.path); got != tc.expected {
+			t.Errorf("keyWithinContext(%q) = %q, want %q", tc.path, got, tc.expected)
+		}
+	}
+}
+
+// TestClassifyChange_NestedNetworkKey is the regression test for the dynamic
+// heartbeat/fabric Key bug: Diff() must emit a Change whose Key carries the
+// sub-stanza prefix (e.g. "heartbeat.interval"), so buildSetConfigCommand
+// produces the valid "set-config:context=network;heartbeat.interval=<value>".
+// Before the fix the Key was the bare last segment ("interval"), the command
+// was rejected by Aerospike, and the change fell back to a cold restart.
+func TestClassifyChange_NestedNetworkKey(t *testing.T) {
+	old := map[string]any{
+		"network": map[string]any{
+			"heartbeat": map[string]any{"interval": 150},
+			"fabric":    map[string]any{"send-threads": 4},
+		},
+	}
+	new := map[string]any{
+		"network": map[string]any{
+			"heartbeat": map[string]any{"interval": 250},
+			"fabric":    map[string]any{"send-threads": 8},
+		},
+	}
+
+	result := Diff(old, new)
+	if len(result.Dynamic) != 2 {
+		t.Fatalf("expected 2 dynamic changes, got %d (%+v)", len(result.Dynamic), result.Dynamic)
+	}
+
+	wantKeys := map[string]string{
+		"network.heartbeat.interval":  "heartbeat.interval",
+		"network.fabric.send-threads": "fabric.send-threads",
+	}
+	for _, c := range result.Dynamic {
+		wantKey, ok := wantKeys[c.Path]
+		if !ok {
+			t.Errorf("unexpected change path %q", c.Path)
+			continue
+		}
+		if c.Context != "network" {
+			t.Errorf("change %q: Context = %q, want %q", c.Path, c.Context, "network")
+		}
+		if c.Key != wantKey {
+			t.Errorf("change %q: Key = %q, want %q (asinfo would otherwise reject the command)",
+				c.Path, c.Key, wantKey)
 		}
 	}
 }
