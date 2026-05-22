@@ -68,7 +68,14 @@ func isMigratingOnAnyNode(client *aero.Client) (bool, error) {
 		if err != nil {
 			return true, fmt.Errorf("statistics command on node %s failed: %w", node.GetName(), err)
 		}
-		remaining := parseMigrateStat(stats, "migrate_partitions_remaining")
+		remaining, ok := parseMigrateStat(stats, "migrate_partitions_remaining")
+		if !ok {
+			// An unparseable migration statistic is treated conservatively as
+			// "migrating" — the same way a statistics-command error is handled
+			// above — so a destructive scale-down or rolling restart never
+			// proceeds on a value we could not verify as zero.
+			return true, fmt.Errorf("could not parse migrate_partitions_remaining on node %s", node.GetName())
+		}
 		if remaining > 0 {
 			return true, nil
 		}
@@ -78,8 +85,10 @@ func isMigratingOnAnyNode(client *aero.Client) (bool, error) {
 
 // parseMigrateStat extracts a numeric migration statistic from the asinfo
 // "statistics" response. The response is semicolon-delimited key=value pairs.
-// Returns 0 if the key is not found or cannot be parsed.
-func parseMigrateStat(stats, key string) int64 {
+// The second return value is false when the key is absent OR when its value
+// cannot be parsed as an integer; callers must not treat a false result as
+// "migration complete".
+func parseMigrateStat(stats, key string) (int64, bool) {
 	for pair := range strings.SplitSeq(stats, ";") {
 		k, v, ok := strings.Cut(pair, "=")
 		if !ok {
@@ -88,12 +97,12 @@ func parseMigrateStat(stats, key string) int64 {
 		if strings.TrimSpace(k) == key {
 			n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
 			if err != nil {
-				return 0
+				return 0, false
 			}
-			return n
+			return n, true
 		}
 	}
-	return 0
+	return 0, false
 }
 
 // migrateStatsPerNode returns the migrate_partitions_remaining count for each node
@@ -118,7 +127,15 @@ func migrateStatsPerNode(log logr.Logger, client *aero.Client) (map[string]int64
 			log.V(1).Info("Skipping node: statistics command failed", "node", node.GetName(), "error", err)
 			continue
 		}
-		remaining := parseMigrateStat(stats, "migrate_partitions_remaining")
+		remaining, ok := parseMigrateStat(stats, "migrate_partitions_remaining")
+		if !ok {
+			// Key absent or value unparseable: record a positive sentinel so
+			// the node is reported as migrating rather than silently dropped
+			// (which downstream would render as "migration complete").
+			log.V(1).Info("Could not parse migrate_partitions_remaining, reporting node as migrating",
+				"node", node.GetName())
+			remaining = 1
+		}
 		host := node.GetHost()
 		if host != nil {
 			result[host.Name] = remaining

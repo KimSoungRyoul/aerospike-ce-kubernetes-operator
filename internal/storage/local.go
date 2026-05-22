@@ -23,6 +23,7 @@ func GetLocalPVCsForPod(
 	ctx context.Context,
 	c client.Client,
 	namespace string,
+	clusterName string,
 	stsName string,
 	ordinal int32,
 	storageSpec *v1alpha1.AerospikeStorageSpec,
@@ -32,7 +33,7 @@ func GetLocalPVCsForPod(
 	}
 
 	// Get all PVCs for this StatefulSet
-	allPVCs, err := GetPVCsForStatefulSet(ctx, c, namespace, stsName)
+	allPVCs, err := GetPVCsForStatefulSet(ctx, c, namespace, clusterName, stsName)
 	if err != nil {
 		return nil, err
 	}
@@ -65,11 +66,12 @@ func DeleteLocalPVCsForPod(
 	ctx context.Context,
 	c client.Client,
 	namespace string,
+	clusterName string,
 	stsName string,
 	ordinal int32,
 	storageSpec *v1alpha1.AerospikeStorageSpec,
 ) error {
-	localPVCs, err := GetLocalPVCsForPod(ctx, c, namespace, stsName, ordinal, storageSpec)
+	localPVCs, err := GetLocalPVCsForPod(ctx, c, namespace, clusterName, stsName, ordinal, storageSpec)
 	if err != nil {
 		return fmt.Errorf("getting local PVCs for pod %s-%d: %w", stsName, ordinal, err)
 	}

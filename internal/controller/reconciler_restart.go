@@ -28,9 +28,11 @@ import (
 // state is skipped from the rolling restart to avoid blocking healthy pods.
 const maxPodUnstableDuration = 10 * time.Minute
 
-// reconcileRollingRestart checks if pods need restart due to config changes.
-// Returns true if a restart was triggered (caller should requeue).
-// Supports batch restart via spec.rollingUpdateBatchSize.
+// reconcileRollingRestart checks if pods need restart due to config changes or
+// pod-spec changes (image, podSpec, podService, networkPolicy). A pod is
+// selected when its config-hash OR its pod-spec-hash differs from the
+// StatefulSet template. Returns true if a restart was triggered (caller should
+// requeue). Supports batch restart via spec.rollingUpdateBatchSize.
 //
 // Precedence: dynamic config update > warm restart (SIGUSR1) > cold restart (pod delete).
 func (r *AerospikeClusterReconciler) reconcileRollingRestart(
@@ -51,10 +53,15 @@ func (r *AerospikeClusterReconciler) reconcileRollingRestart(
 		return false, err
 	}
 
-	// Get desired config hash from the StatefulSet template
+	// Get desired config hash and pod-spec hash from the StatefulSet template.
+	// The pod-spec hash captures image/podSpec/podService/networkPolicy changes
+	// that are not reflected in the config hash; a pod whose pod-spec hash differs
+	// from the template still needs a restart even when its config hash matches.
 	desiredHash := ""
+	desiredPodSpecHash := ""
 	if sts.Spec.Template.Annotations != nil {
 		desiredHash = sts.Spec.Template.Annotations[utils.ConfigHashAnnotation]
+		desiredPodSpecHash = sts.Spec.Template.Annotations[utils.PodSpecHashAnnotation]
 	}
 
 	if desiredHash == "" {
@@ -86,8 +93,119 @@ func (r *AerospikeClusterReconciler) reconcileRollingRestart(
 		return false, fmt.Errorf("listing rack pods for rolling restart: %w", err)
 	}
 
+	podsToRestart, configChanged := r.selectPodsToRestart(
+		ctx, cluster, rackPods, desiredHash, desiredPodSpecHash, maxIgnorablePods)
+
+	if len(podsToRestart) == 0 {
+		cluster.Status.PendingRestartPods = nil
+		return false, nil
+	}
+
+	// Track pods pending restart
+	pendingNames := make([]string, 0, len(podsToRestart))
+	for _, pod := range podsToRestart {
+		pendingNames = append(pendingNames, pod.Name)
+	}
+
+	r.Recorder.Eventf(cluster, corev1.EventTypeNormal, EventRollingRestartStarted,
+		"Rolling restart started for rack %d: %d pods to restart", rack.ID, len(podsToRestart))
+
+	// Create Aerospike client once for all pods (lazy, only if dynamic config is attempted).
+	var aeroClient *aero.Client
+	defer func() {
+		if aeroClient != nil {
+			closeAerospikeClient(aeroClient)
+		}
+	}()
+
+	// Publish the truly-pending pods before any early return so observers see
+	// them even while the batch is blocked on migration or readiness gates.
+	cluster.Status.PendingRestartPods = pendingNames
+
+	// Hold the next batch when migration or readiness gates are blocking.
+	if r.isBatchBlocked(ctx, cluster, rack.ID, rackPods) {
+		return true, nil
+	}
+
+	// Restart up to batchSize pods, continuing on individual pod failures.
+	// Only offer the configs to the dynamic-config 2PC path when an actual
+	// config-hash change triggered the batch. For a pure pod-spec-hash change
+	// the config is unchanged, so configdiff would report no changes and the
+	// 2PC path would short-circuit to a false "all restarted" success without
+	// touching any pod. Passing nil configs makes restartPodBatch's
+	// oldConfig != nil && newConfig != nil guard skip the dynamic path and go
+	// straight to per-pod cold restart.
+	//
+	// In a mixed batch (some pods config-changed, some pod-spec-only-changed)
+	// configChanged is true, so pod-spec-only pods also take the 2PC path and
+	// get a spurious no-op config re-apply. This is harmless and eventually
+	// consistent: their PodSpecHashAnnotation stays stale, so they are
+	// re-selected on a later reconcile; once the config-changed pods drain,
+	// configChanged becomes false and they cold-restart normally. No stall.
+	batchOldConfig, batchNewConfig := oldConfig, newConfig
+	if !configChanged {
+		batchOldConfig, batchNewConfig = nil, nil
+	}
+	restarted, failedPods, batchPods := r.restartPodBatch(ctx, cluster, podsToRestart, sts, desiredHash,
+		batchSize, batchOldConfig, batchNewConfig, &aeroClient)
+
+	// Update PendingRestartPods to only include pods that were NOT successfully restarted.
+	if len(failedPods) > 0 || restarted > 0 {
+		remaining := filterUnrestarted(pendingNames, failedPods, restarted, batchPods)
+		cluster.Status.PendingRestartPods = remaining
+	}
+
+	// If all attempted pods failed, return error to signal a full batch failure.
+	if len(failedPods) > 0 && restarted == 0 {
+		return false, fmt.Errorf("all %d pod restart(s) in batch failed: %v",
+			len(failedPods), strings.Join(failedPods, ", "))
+	}
+
+	if len(failedPods) > 0 {
+		log.Info("Partial batch restart failure, some pods restarted successfully",
+			"restarted", restarted, "failed", len(failedPods), "failedPods", strings.Join(failedPods, ", "))
+	}
+
+	if restarted >= int32(len(podsToRestart)) {
+		r.Recorder.Eventf(cluster, corev1.EventTypeNormal, EventRollingRestartCompleted,
+			"Rolling restart completed for rack %d: all %d pods restarted", rack.ID, restarted)
+	}
+
+	return restarted > 0, nil
+}
+
+// selectPodsToRestart scans the rack's pods and returns those that need a
+// restart, along with configChanged: whether ANY selected pod is being
+// restarted because of a config-hash mismatch.
+//
+// A pod is selected when its config-hash OR its pod-spec-hash differs from the
+// StatefulSet template. The pod-spec-hash comparison is what makes plain
+// spec.image / spec.podService / spec.aerospikeNetworkPolicy changes actually
+// roll pods — without it those changes patch the StatefulSet template but never
+// trigger a restart.
+//
+// configChanged gates the dynamic-config 2PC path in the caller: when the batch
+// is triggered purely by a pod-spec-hash change (config genuinely unchanged),
+// configdiff would report no changes and tryDynamicConfigUpdateBatch would
+// return allOk=true, falsely claiming every pod restarted while nothing
+// happened. The caller passes nil configs in that case so the dynamic path is
+// skipped and pods go straight to per-pod cold restart.
+//
+// Pending/failed pods within the ignorable limit and pods stuck non-ready
+// beyond maxPodUnstableDuration are skipped so they cannot block healthy pods.
+func (r *AerospikeClusterReconciler) selectPodsToRestart(
+	ctx context.Context,
+	cluster *ackov1alpha1.AerospikeCluster,
+	rackPods []corev1.Pod,
+	desiredHash, desiredPodSpecHash string,
+	maxIgnorablePods int32,
+) ([]*corev1.Pod, bool) {
+	log := logf.FromContext(ctx)
+
 	var podsToRestart []*corev1.Pod
 	ignoredCount := int32(0)
+	configChanged := false
+
 	for i := range rackPods {
 		pod := &rackPods[i]
 
@@ -115,71 +233,24 @@ func (r *AerospikeClusterReconciler) reconcileRollingRestart(
 		}
 
 		currentHash := ""
+		currentPodSpecHash := ""
 		if pod.Annotations != nil {
 			currentHash = pod.Annotations[utils.ConfigHashAnnotation]
+			currentPodSpecHash = pod.Annotations[utils.PodSpecHashAnnotation]
 		}
 
-		if currentHash != desiredHash {
+		configMismatch := currentHash != desiredHash
+		podSpecMismatch := desiredPodSpecHash != "" && currentPodSpecHash != desiredPodSpecHash
+
+		if configMismatch || podSpecMismatch {
 			podsToRestart = append(podsToRestart, pod)
 		}
-	}
-
-	if len(podsToRestart) == 0 {
-		cluster.Status.PendingRestartPods = nil
-		return false, nil
-	}
-
-	// Track pods pending restart
-	pendingNames := make([]string, 0, len(podsToRestart))
-	for _, pod := range podsToRestart {
-		pendingNames = append(pendingNames, pod.Name)
-	}
-
-	r.Recorder.Eventf(cluster, corev1.EventTypeNormal, EventRollingRestartStarted,
-		"Rolling restart started for rack %d: %d pods to restart", rack.ID, len(podsToRestart))
-
-	// Create Aerospike client once for all pods (lazy, only if dynamic config is attempted).
-	var aeroClient *aero.Client
-	defer func() {
-		if aeroClient != nil {
-			closeAerospikeClient(aeroClient)
+		if configMismatch {
+			configChanged = true
 		}
-	}()
-
-	// Hold the next batch when migration or readiness gates are blocking.
-	if r.isBatchBlocked(ctx, cluster, rack.ID, rackPods) {
-		return true, nil
 	}
 
-	cluster.Status.PendingRestartPods = pendingNames
-
-	// Restart up to batchSize pods, continuing on individual pod failures.
-	restarted, failedPods, batchPods := r.restartPodBatch(ctx, cluster, podsToRestart, sts, desiredHash,
-		batchSize, oldConfig, newConfig, &aeroClient)
-
-	// Update PendingRestartPods to only include pods that were NOT successfully restarted.
-	if len(failedPods) > 0 || restarted > 0 {
-		remaining := filterUnrestarted(pendingNames, failedPods, restarted, batchPods)
-		cluster.Status.PendingRestartPods = remaining
-	}
-
-	// If all attempted pods failed, return error to signal a full batch failure.
-	if len(failedPods) > 0 && restarted == 0 {
-		return false, fmt.Errorf("all %d pod restart(s) in batch failed: %v",
-			len(failedPods), strings.Join(failedPods, ", "))
-	}
-
-	if len(failedPods) > 0 {
-		log.Info("Partial batch restart failure, some pods restarted successfully",
-			"restarted", restarted, "failed", len(failedPods), "failedPods", strings.Join(failedPods, ", "))
-	}
-
-	if restarted >= int32(len(podsToRestart)) {
-		r.Recorder.Eventf(cluster, corev1.EventTypeNormal, EventRollingRestartCompleted,
-			"Rolling restart completed for rack %d: all %d pods restarted", rack.ID, restarted)
-	}
-
-	return restarted > 0, nil
+	return podsToRestart, configChanged
 }
 
 // podDynamicUpdate tracks a pod that received a successful dynamic config update,
@@ -466,7 +537,7 @@ func (r *AerospikeClusterReconciler) coldRestartPod(
 		if !ok {
 			log.V(1).Info("Failed to parse pod name for PVC cleanup, skipping local PVC deletion", "pod", pod.Name)
 		} else {
-			if err := storage.DeleteLocalPVCsForPod(ctx, r.Client, cluster.Namespace, stsName, ordinal, cluster.Spec.Storage); err != nil {
+			if err := storage.DeleteLocalPVCsForPod(ctx, r.Client, cluster.Namespace, cluster.Name, stsName, ordinal, cluster.Spec.Storage); err != nil {
 				log.Error(err, "Failed to delete local PVCs before restart", "pod", pod.Name)
 				r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventLocalPVCDeleteFailed,
 					"Failed to delete local PVCs for pod %s before restart: %v", pod.Name, err)

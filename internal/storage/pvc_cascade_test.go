@@ -15,17 +15,25 @@ import (
 )
 
 const (
-	testNamespace = "default"
-	testStsName   = "my-cluster-0"
+	testNamespace   = "default"
+	testClusterName = "my-cluster"
+	testStsName     = "my-cluster-0"
 )
 
 func newPVC(name string) *corev1.PersistentVolumeClaim {
+	return newPVCForCluster(name, testClusterName)
+}
+
+// newPVCForCluster builds a PVC carrying the operator's standard labels for the
+// given cluster, so label-scoped queries (app.kubernetes.io/instance) match it.
+func newPVCForCluster(name, clusterName string) *corev1.PersistentVolumeClaim {
 	return &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: testNamespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/name": "aerospike-cluster",
+				"app.kubernetes.io/name":     "aerospike-cluster",
+				"app.kubernetes.io/instance": clusterName,
 			},
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
@@ -105,7 +113,7 @@ func TestDeleteOrphanedCascadeDeletePVCs_DeletesOnlyCascadeOrphans(t *testing.T)
 	)
 
 	ctx := context.Background()
-	deleted, err := DeleteOrphanedCascadeDeletePVCs(ctx, c, testNamespace, testStsName, 1, spec)
+	deleted, err := DeleteOrphanedCascadeDeletePVCs(ctx, c, testNamespace, testClusterName, testStsName, 1, spec)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -158,7 +166,7 @@ func TestDeleteOrphanedCascadeDeletePVCs_NoCascadeVolumes(t *testing.T) {
 	)
 
 	ctx := context.Background()
-	deleted, err := DeleteOrphanedCascadeDeletePVCs(ctx, c, testNamespace, testStsName, 1, spec)
+	deleted, err := DeleteOrphanedCascadeDeletePVCs(ctx, c, testNamespace, testClusterName, testStsName, 1, spec)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -183,7 +191,7 @@ func TestDeleteOrphanedCascadeDeletePVCs_NilStorageSpec(t *testing.T) {
 	)
 
 	ctx := context.Background()
-	deleted, err := DeleteOrphanedCascadeDeletePVCs(ctx, c, testNamespace, testStsName, 0, nil)
+	deleted, err := DeleteOrphanedCascadeDeletePVCs(ctx, c, testNamespace, testClusterName, testStsName, 0, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -203,7 +211,7 @@ func TestDeleteOrphanedCascadeDeletePVCs_AllCascadeAllOrphans(t *testing.T) {
 	)
 
 	ctx := context.Background()
-	deleted, err := DeleteOrphanedCascadeDeletePVCs(ctx, c, testNamespace, testStsName, 0, spec)
+	deleted, err := DeleteOrphanedCascadeDeletePVCs(ctx, c, testNamespace, testClusterName, testStsName, 0, spec)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -230,7 +238,7 @@ func TestDeleteOrphanedCascadeDeletePVCs_NoOrphans(t *testing.T) {
 	)
 
 	ctx := context.Background()
-	deleted, err := DeleteOrphanedCascadeDeletePVCs(ctx, c, testNamespace, testStsName, 2, spec)
+	deleted, err := DeleteOrphanedCascadeDeletePVCs(ctx, c, testNamespace, testClusterName, testStsName, 2, spec)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -265,7 +273,7 @@ func TestDeleteOrphanedCascadeDeletePVCs_PolicyFallback(t *testing.T) {
 	)
 
 	ctx := context.Background()
-	deleted, err := DeleteOrphanedCascadeDeletePVCs(ctx, c, testNamespace, testStsName, 1, spec)
+	deleted, err := DeleteOrphanedCascadeDeletePVCs(ctx, c, testNamespace, testClusterName, testStsName, 1, spec)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -288,7 +296,7 @@ func TestDeleteCascadeDeletePVCs_OnlyCascadeVolumes(t *testing.T) {
 	)
 
 	ctx := context.Background()
-	err := DeleteCascadeDeletePVCs(ctx, c, testNamespace, testStsName, spec)
+	err := DeleteCascadeDeletePVCs(ctx, c, testNamespace, testClusterName, testStsName, spec)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -320,7 +328,7 @@ func TestDeleteCascadeDeletePVCs_NilStorageSpec(t *testing.T) {
 	)
 
 	ctx := context.Background()
-	err := DeleteCascadeDeletePVCs(ctx, c, testNamespace, testStsName, nil)
+	err := DeleteCascadeDeletePVCs(ctx, c, testNamespace, testClusterName, testStsName, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -344,7 +352,7 @@ func TestDeleteCascadeDeletePVCs_AllCascadeFalse(t *testing.T) {
 	)
 
 	ctx := context.Background()
-	err := DeleteCascadeDeletePVCs(ctx, c, testNamespace, testStsName, spec)
+	err := DeleteCascadeDeletePVCs(ctx, c, testNamespace, testClusterName, testStsName, spec)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -14,15 +14,28 @@ import (
 	v1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
 )
 
-// GetPVCsForStatefulSet lists PVCs belonging to the given StatefulSet.
-// It first attempts to filter by the app instance label for efficiency, then
-// falls back to listing all PVCs and name-matching if no labels are present
-// (e.g., for PVCs created before labels were added to VolumeClaimTemplates).
-func GetPVCsForStatefulSet(ctx context.Context, c client.Client, namespace, stsName string) ([]corev1.PersistentVolumeClaim, error) {
+// GetPVCsForStatefulSet lists PVCs belonging to the given StatefulSet of the
+// named cluster.
+//
+// The primary filter matches both app.kubernetes.io/name and
+// app.kubernetes.io/instance (the cluster name). Scoping by instance prevents a
+// PVC from one cluster being attributed to a sibling cluster in the same
+// namespace when one cluster name is a prefix of the other (e.g. "foo" vs
+// "foo-0"), where the "-<stsName>-" substring check alone can collide.
+// Operator-created PVCs carry the instance label because PVC templates get
+// LabelsForCluster applied in reconciler_statefulset.go.
+//
+// If the label-scoped query returns nothing, it falls back to listing all PVCs
+// in the namespace so legacy/pre-label PVCs are still found; in that path the
+// name-substring check is the only ownership signal.
+func GetPVCsForStatefulSet(ctx context.Context, c client.Client, namespace, clusterName, stsName string) ([]corev1.PersistentVolumeClaim, error) {
 	pvcList := &corev1.PersistentVolumeClaimList{}
 	if err := c.List(ctx, pvcList,
 		client.InNamespace(namespace),
-		client.MatchingLabels{"app.kubernetes.io/name": "aerospike-cluster"},
+		client.MatchingLabels{
+			"app.kubernetes.io/name":     "aerospike-cluster",
+			"app.kubernetes.io/instance": clusterName,
+		},
 	); err != nil {
 		return nil, fmt.Errorf("listing PVCs in namespace %s: %w", namespace, err)
 	}
@@ -53,7 +66,7 @@ func GetPVCsForStatefulSet(ctx context.Context, c client.Client, namespace, stsN
 func DeleteOrphanedCascadeDeletePVCs(
 	ctx context.Context,
 	c client.Client,
-	namespace, stsName string,
+	namespace, clusterName, stsName string,
 	desiredReplicas int32,
 	storageSpec *v1alpha1.AerospikeStorageSpec,
 ) (int, error) {
@@ -74,7 +87,7 @@ func DeleteOrphanedCascadeDeletePVCs(
 		return 0, nil
 	}
 
-	pvcs, err := GetPVCsForStatefulSet(ctx, c, namespace, stsName)
+	pvcs, err := GetPVCsForStatefulSet(ctx, c, namespace, clusterName, stsName)
 	if err != nil {
 		return 0, err
 	}
@@ -119,8 +132,8 @@ func DeleteOrphanedCascadeDeletePVCs(
 
 // DeletePVCsForStatefulSet deletes all PVCs associated with the given StatefulSet.
 // Used when the cluster CR is deleted with cascadeDelete.
-func DeletePVCsForStatefulSet(ctx context.Context, c client.Client, namespace, stsName string) error {
-	pvcs, err := GetPVCsForStatefulSet(ctx, c, namespace, stsName)
+func DeletePVCsForStatefulSet(ctx context.Context, c client.Client, namespace, clusterName, stsName string) error {
+	pvcs, err := GetPVCsForStatefulSet(ctx, c, namespace, clusterName, stsName)
 	if err != nil {
 		return err
 	}
@@ -206,7 +219,7 @@ func extractVolumeName(pvcName, stsName string) (string, bool) {
 func DeleteCascadeDeletePVCs(
 	ctx context.Context,
 	c client.Client,
-	namespace, stsName string,
+	namespace, clusterName, stsName string,
 	storageSpec *v1alpha1.AerospikeStorageSpec,
 ) error {
 	if storageSpec == nil {
@@ -226,7 +239,7 @@ func DeleteCascadeDeletePVCs(
 		return nil
 	}
 
-	pvcs, err := GetPVCsForStatefulSet(ctx, c, namespace, stsName)
+	pvcs, err := GetPVCsForStatefulSet(ctx, c, namespace, clusterName, stsName)
 	if err != nil {
 		return err
 	}
