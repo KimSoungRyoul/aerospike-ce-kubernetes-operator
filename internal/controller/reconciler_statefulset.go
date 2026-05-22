@@ -501,6 +501,12 @@ func (r *AerospikeClusterReconciler) detectScaling(
 // leave needsUpdate false, so the StatefulSet template would never be patched
 // and pods would keep stale config. Both are JSON-serializable pointers; a nil
 // value is omitted and hashes stably.
+//
+// The hash is written to the pod template as utils.PodSpecHashAnnotation.
+// reconcileRollingRestart compares it against each pod's annotation and rolls
+// (cold-restarts) any pod whose pod-spec hash is stale, so a change to the
+// hashed fields actually propagates to running pods rather than only updating
+// the StatefulSet template.
 func computePodSpecHash(cluster *ackov1alpha1.AerospikeCluster, rack *ackov1alpha1.Rack) string {
 	input := struct {
 		Image                  string                                `json:"image"`

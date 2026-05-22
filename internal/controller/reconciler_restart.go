@@ -28,9 +28,11 @@ import (
 // state is skipped from the rolling restart to avoid blocking healthy pods.
 const maxPodUnstableDuration = 10 * time.Minute
 
-// reconcileRollingRestart checks if pods need restart due to config changes.
-// Returns true if a restart was triggered (caller should requeue).
-// Supports batch restart via spec.rollingUpdateBatchSize.
+// reconcileRollingRestart checks if pods need restart due to config changes or
+// pod-spec changes (image, podSpec, podService, networkPolicy). A pod is
+// selected when its config-hash OR its pod-spec-hash differs from the
+// StatefulSet template. Returns true if a restart was triggered (caller should
+// requeue). Supports batch restart via spec.rollingUpdateBatchSize.
 //
 // Precedence: dynamic config update > warm restart (SIGUSR1) > cold restart (pod delete).
 func (r *AerospikeClusterReconciler) reconcileRollingRestart(
@@ -51,10 +53,15 @@ func (r *AerospikeClusterReconciler) reconcileRollingRestart(
 		return false, err
 	}
 
-	// Get desired config hash from the StatefulSet template
+	// Get desired config hash and pod-spec hash from the StatefulSet template.
+	// The pod-spec hash captures image/podSpec/podService/networkPolicy changes
+	// that are not reflected in the config hash; a pod whose pod-spec hash differs
+	// from the template still needs a restart even when its config hash matches.
 	desiredHash := ""
+	desiredPodSpecHash := ""
 	if sts.Spec.Template.Annotations != nil {
 		desiredHash = sts.Spec.Template.Annotations[utils.ConfigHashAnnotation]
+		desiredPodSpecHash = sts.Spec.Template.Annotations[utils.PodSpecHashAnnotation]
 	}
 
 	if desiredHash == "" {
@@ -86,43 +93,8 @@ func (r *AerospikeClusterReconciler) reconcileRollingRestart(
 		return false, fmt.Errorf("listing rack pods for rolling restart: %w", err)
 	}
 
-	var podsToRestart []*corev1.Pod
-	ignoredCount := int32(0)
-	for i := range rackPods {
-		pod := &rackPods[i]
-
-		// Skip pending/failed pods if within ignorable limit
-		if pod.Status.Phase == corev1.PodPending || pod.Status.Phase == corev1.PodFailed {
-			if ignoredCount < maxIgnorablePods {
-				ignoredCount++
-				log.V(1).Info("Ignoring pending/failed pod", "pod", pod.Name)
-				continue
-			}
-		}
-
-		// Skip pods that have been in a non-ready state longer than the threshold.
-		// This prevents a stuck pod from blocking healthy pods in the same rack.
-		if ps, ok := cluster.Status.Pods[pod.Name]; ok && ps.UnstableSince != nil {
-			if time.Since(ps.UnstableSince.Time) > maxPodUnstableDuration {
-				log.Info("Pod stuck in non-ready state beyond threshold, skipping restart",
-					"pod", pod.Name, "unstableSince", ps.UnstableSince.Time,
-					"threshold", maxPodUnstableDuration)
-				r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventRestartFailed,
-					"Pod %s stuck in non-ready state since %v (>%v), skipping restart",
-					pod.Name, ps.UnstableSince.Time, maxPodUnstableDuration)
-				continue
-			}
-		}
-
-		currentHash := ""
-		if pod.Annotations != nil {
-			currentHash = pod.Annotations[utils.ConfigHashAnnotation]
-		}
-
-		if currentHash != desiredHash {
-			podsToRestart = append(podsToRestart, pod)
-		}
-	}
+	podsToRestart, configChanged := r.selectPodsToRestart(
+		ctx, cluster, rackPods, desiredHash, desiredPodSpecHash, maxIgnorablePods)
 
 	if len(podsToRestart) == 0 {
 		cluster.Status.PendingRestartPods = nil
@@ -156,8 +128,19 @@ func (r *AerospikeClusterReconciler) reconcileRollingRestart(
 	}
 
 	// Restart up to batchSize pods, continuing on individual pod failures.
+	// Only offer the configs to the dynamic-config 2PC path when an actual
+	// config-hash change triggered the batch. For a pure pod-spec-hash change
+	// the config is unchanged, so configdiff would report no changes and the
+	// 2PC path would short-circuit to a false "all restarted" success without
+	// touching any pod. Passing nil configs makes restartPodBatch's
+	// oldConfig != nil && newConfig != nil guard skip the dynamic path and go
+	// straight to per-pod cold restart.
+	batchOldConfig, batchNewConfig := oldConfig, newConfig
+	if !configChanged {
+		batchOldConfig, batchNewConfig = nil, nil
+	}
 	restarted, failedPods, batchPods := r.restartPodBatch(ctx, cluster, podsToRestart, sts, desiredHash,
-		batchSize, oldConfig, newConfig, &aeroClient)
+		batchSize, batchOldConfig, batchNewConfig, &aeroClient)
 
 	// Update PendingRestartPods to only include pods that were NOT successfully restarted.
 	if len(failedPods) > 0 || restarted > 0 {
@@ -182,6 +165,85 @@ func (r *AerospikeClusterReconciler) reconcileRollingRestart(
 	}
 
 	return restarted > 0, nil
+}
+
+// selectPodsToRestart scans the rack's pods and returns those that need a
+// restart, along with configChanged: whether ANY selected pod is being
+// restarted because of a config-hash mismatch.
+//
+// A pod is selected when its config-hash OR its pod-spec-hash differs from the
+// StatefulSet template. The pod-spec-hash comparison is what makes plain
+// spec.image / spec.podService / spec.aerospikeNetworkPolicy changes actually
+// roll pods — without it those changes patch the StatefulSet template but never
+// trigger a restart.
+//
+// configChanged gates the dynamic-config 2PC path in the caller: when the batch
+// is triggered purely by a pod-spec-hash change (config genuinely unchanged),
+// configdiff would report no changes and tryDynamicConfigUpdateBatch would
+// return allOk=true, falsely claiming every pod restarted while nothing
+// happened. The caller passes nil configs in that case so the dynamic path is
+// skipped and pods go straight to per-pod cold restart.
+//
+// Pending/failed pods within the ignorable limit and pods stuck non-ready
+// beyond maxPodUnstableDuration are skipped so they cannot block healthy pods.
+func (r *AerospikeClusterReconciler) selectPodsToRestart(
+	ctx context.Context,
+	cluster *ackov1alpha1.AerospikeCluster,
+	rackPods []corev1.Pod,
+	desiredHash, desiredPodSpecHash string,
+	maxIgnorablePods int32,
+) ([]*corev1.Pod, bool) {
+	log := logf.FromContext(ctx)
+
+	var podsToRestart []*corev1.Pod
+	ignoredCount := int32(0)
+	configChanged := false
+
+	for i := range rackPods {
+		pod := &rackPods[i]
+
+		// Skip pending/failed pods if within ignorable limit
+		if pod.Status.Phase == corev1.PodPending || pod.Status.Phase == corev1.PodFailed {
+			if ignoredCount < maxIgnorablePods {
+				ignoredCount++
+				log.V(1).Info("Ignoring pending/failed pod", "pod", pod.Name)
+				continue
+			}
+		}
+
+		// Skip pods that have been in a non-ready state longer than the threshold.
+		// This prevents a stuck pod from blocking healthy pods in the same rack.
+		if ps, ok := cluster.Status.Pods[pod.Name]; ok && ps.UnstableSince != nil {
+			if time.Since(ps.UnstableSince.Time) > maxPodUnstableDuration {
+				log.Info("Pod stuck in non-ready state beyond threshold, skipping restart",
+					"pod", pod.Name, "unstableSince", ps.UnstableSince.Time,
+					"threshold", maxPodUnstableDuration)
+				r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventRestartFailed,
+					"Pod %s stuck in non-ready state since %v (>%v), skipping restart",
+					pod.Name, ps.UnstableSince.Time, maxPodUnstableDuration)
+				continue
+			}
+		}
+
+		currentHash := ""
+		currentPodSpecHash := ""
+		if pod.Annotations != nil {
+			currentHash = pod.Annotations[utils.ConfigHashAnnotation]
+			currentPodSpecHash = pod.Annotations[utils.PodSpecHashAnnotation]
+		}
+
+		configMismatch := currentHash != desiredHash
+		podSpecMismatch := desiredPodSpecHash != "" && currentPodSpecHash != desiredPodSpecHash
+
+		if configMismatch || podSpecMismatch {
+			podsToRestart = append(podsToRestart, pod)
+		}
+		if configMismatch {
+			configChanged = true
+		}
+	}
+
+	return podsToRestart, configChanged
 }
 
 // podDynamicUpdate tracks a pod that received a successful dynamic config update,
