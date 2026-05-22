@@ -491,6 +491,19 @@ func (v *AerospikeClusterValidator) validate(cluster *AerospikeCluster) (admissi
 	if cluster.Spec.RackConfig != nil {
 		rackErrors := v.validateRackConfig(cluster.Spec.RackConfig)
 		allErrors = append(allErrors, rackErrors...)
+
+		// Reject more racks than pods. The reconciler distributes spec.size
+		// evenly across racks (getRackSize); when len(racks) > size at least
+		// one rack is assigned 0 replicas, producing a 0-replica StatefulSet
+		// that never carries data. The size check is skipped when size is
+		// supplied later by a template (size == 0 && templateRef != nil).
+		numRacks := len(cluster.Spec.RackConfig.Racks)
+		if numRacks > 0 && !(cluster.Spec.Size == 0 && cluster.Spec.TemplateRef != nil) &&
+			numRacks > int(cluster.Spec.Size) {
+			allErrors = append(allErrors, fmt.Sprintf(
+				"rackConfig defines %d racks but spec.size is %d; each rack must get at least 1 pod, so the rack count must not exceed spec.size",
+				numRacks, cluster.Spec.Size))
+		}
 	}
 
 	// Validate monitoring
@@ -673,6 +686,15 @@ func (v *AerospikeClusterValidator) validateAerospikeConfig(config map[string]an
 					"(e.g. [{name: foo, ...}, {name: bar, ...}]), got map with %d entries; "+
 					"per-namespace validation cannot run on the map form",
 				len(ns)))
+		default:
+			// Any other scalar shape (string, number, bool, ...) — e.g. the
+			// common YAML mistake `namespaces: default`. Previously this fell
+			// through the type switch silently: the webhook accepted the CR,
+			// then configgen failed permanently at reconcile time. Reject it
+			// here so the user gets an actionable admission error.
+			errors = append(errors, fmt.Sprintf(
+				"aerospikeConfig.namespaces must be a list of namespace maps "+
+					"(e.g. [{name: foo, ...}]), got %T", ns))
 		}
 	}
 

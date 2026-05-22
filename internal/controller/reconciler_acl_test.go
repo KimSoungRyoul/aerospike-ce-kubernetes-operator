@@ -324,6 +324,16 @@ func TestIsTransientAeroError_TransientErrors(t *testing.T) {
 		"i/o timeout",
 		"read tcp 10.0.0.1:3000: timeout",
 		"querying roles: connection reset",
+		// Failure modes seen during rolling restarts that the original
+		// substring list missed.
+		"write tcp 10.0.0.1:3000->10.0.0.2:3000: write: broken pipe",
+		"unexpected EOF",
+		"dial tcp 10.0.0.1:3000: connect: network is unreachable",
+		"no available connections to the node",
+		"connection error: node not connected",
+		// Case-insensitive matching: wrapped errors may uppercase the message.
+		"Connection Reset By Peer",
+		"QUERYING USERS: TIMEOUT",
 	}
 	for _, msg := range transientMessages {
 		err := errors.New(msg)

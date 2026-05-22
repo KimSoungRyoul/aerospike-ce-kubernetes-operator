@@ -438,17 +438,36 @@ func privilegeSet(privs []aero.Privilege) map[string]aero.Privilege {
 	return set
 }
 
+// transientAeroErrorSubstrings lists case-insensitive substrings that mark an
+// Aerospike error as transient (worth a single retry). These cover the failure
+// modes seen when a node is briefly unavailable during a rolling restart:
+// connection drops, timeouts, and not-yet-connected states. "i/o timeout" is a
+// subset of "timeout" but kept explicit for readability.
+var transientAeroErrorSubstrings = []string{
+	"connection reset",
+	"connection refused",
+	"timeout",
+	"i/o timeout",
+	"broken pipe",
+	"eof",
+	"network is unreachable",
+	"no available connections",
+	"not connected",
+}
+
 // isTransientAeroError checks if an Aerospike error is transient and worth retrying.
-// This includes connection resets, timeouts, and cluster-not-ready errors.
+// The match is case-insensitive so wrapped/uppercased error strings still match.
 func isTransientAeroError(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := err.Error()
-	return strings.Contains(msg, "connection reset") ||
-		strings.Contains(msg, "timeout") ||
-		strings.Contains(msg, "i/o timeout") ||
-		strings.Contains(msg, "connection refused")
+	msg := strings.ToLower(err.Error())
+	for _, sub := range transientAeroErrorSubstrings {
+		if strings.Contains(msg, sub) {
+			return true
+		}
+	}
+	return false
 }
 
 // newAdminPolicy returns an AdminPolicy with the standard operator timeout.

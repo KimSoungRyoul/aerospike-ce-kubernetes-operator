@@ -1189,24 +1189,52 @@ func TestApplyMigrationStats(t *testing.T) {
 		}
 	})
 
-	t.Run("empty perNode with no pods", func(t *testing.T) {
+	// An empty perNode map means no node reported a usable migration stat.
+	// applyMigrationStats must NOT treat that as "migration complete": doing so
+	// would falsely flip MigrationComplete to True (RemainingPartitions=0) and
+	// could unblock a deferred scale-down / rolling restart before migration
+	// actually finished. The previous MigrationStatus/condition is left intact.
+	t.Run("empty perNode does not overwrite migration status (no false complete)", func(t *testing.T) {
+		existingStatus := &ackov1alpha1.MigrationStatus{
+			InProgress:          true,
+			RemainingPartitions: 42,
+		}
 		cluster := &ackov1alpha1.AerospikeCluster{
 			Status: ackov1alpha1.AerospikeClusterStatus{
-				Pods: map[string]ackov1alpha1.AerospikePodStatus{},
+				Pods:            map[string]ackov1alpha1.AerospikePodStatus{},
+				MigrationStatus: existingStatus,
 			},
 		}
 		perNode := map[string]int64{}
 
 		applyMigrationStats(cluster, perNode)
 
+		// The prior (stale-but-safe) MigrationStatus must be preserved untouched.
 		if cluster.Status.MigrationStatus == nil {
-			t.Fatal("MigrationStatus should not be nil")
+			t.Fatal("MigrationStatus should be preserved, not cleared")
 		}
-		if cluster.Status.MigrationStatus.InProgress {
-			t.Error("InProgress should be false for empty perNode")
+		if !cluster.Status.MigrationStatus.InProgress {
+			t.Error("InProgress should remain true; empty perNode must not flip it to false")
 		}
-		if cluster.Status.MigrationStatus.RemainingPartitions != 0 {
-			t.Errorf("RemainingPartitions = %d, want 0", cluster.Status.MigrationStatus.RemainingPartitions)
+		if cluster.Status.MigrationStatus.RemainingPartitions != 42 {
+			t.Errorf("RemainingPartitions = %d, want 42 (preserved)", cluster.Status.MigrationStatus.RemainingPartitions)
+		}
+	})
+
+	t.Run("empty perNode with nil prior status leaves it nil", func(t *testing.T) {
+		cluster := &ackov1alpha1.AerospikeCluster{
+			Status: ackov1alpha1.AerospikeClusterStatus{
+				Pods: map[string]ackov1alpha1.AerospikePodStatus{},
+			},
+		}
+
+		applyMigrationStats(cluster, map[string]int64{})
+
+		// No data → no claim. MigrationStatus stays nil rather than a
+		// fabricated "0 remaining / complete".
+		if cluster.Status.MigrationStatus != nil {
+			t.Errorf("MigrationStatus = %+v, want nil for empty perNode with no prior data",
+				cluster.Status.MigrationStatus)
 		}
 	})
 }
