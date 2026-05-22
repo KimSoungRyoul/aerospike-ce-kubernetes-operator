@@ -244,3 +244,62 @@ func TestBuildQuiesceCommand(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildAsinfoCommand(t *testing.T) {
+	aclCluster := &ackov1alpha1.AerospikeCluster{
+		Spec: ackov1alpha1.AerospikeClusterSpec{
+			AerospikeAccessControl: &ackov1alpha1.AerospikeAccessControlSpec{
+				Users: []ackov1alpha1.AerospikeUserSpec{
+					{Name: "admin", SecretName: "admin-secret", Roles: []string{"sys-admin", "user-admin"}},
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		name     string
+		verb     string
+		cluster  *ackov1alpha1.AerospikeCluster
+		port     int
+		password string
+		want     []string
+	}{
+		{
+			name:    "recluster — no ACL",
+			verb:    "recluster:",
+			cluster: &ackov1alpha1.AerospikeCluster{},
+			port:    3000,
+			want:    []string{"asinfo", "-v", "recluster:", "-h", "localhost", "-p", "3000"},
+		},
+		{
+			name:     "recluster — ACL enabled includes auth flags",
+			verb:     "recluster:",
+			cluster:  aclCluster,
+			port:     3000,
+			password: "s3cret",
+			want:     []string{"asinfo", "-v", "recluster:", "-h", "localhost", "-p", "3000", "-U", "admin", "-P", "s3cret"},
+		},
+		{
+			name:    "quiesce verb matches buildQuiesceCommand",
+			verb:    "quiesce:",
+			cluster: &ackov1alpha1.AerospikeCluster{},
+			port:    4000,
+			want:    []string{"asinfo", "-v", "quiesce:", "-h", "localhost", "-p", "4000"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := buildAsinfoCommand(tc.verb, tc.cluster, tc.port, tc.password)
+			if len(got) != len(tc.want) {
+				t.Fatalf("buildAsinfoCommand() returned %d args, want %d: got %v, want %v",
+					len(got), len(tc.want), got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Errorf("buildAsinfoCommand()[%d] = %q, want %q", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}

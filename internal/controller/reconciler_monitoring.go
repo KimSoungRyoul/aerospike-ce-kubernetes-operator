@@ -94,6 +94,13 @@ func (r *AerospikeClusterReconciler) reconcileMetricsService(
 			if delErr := r.Delete(ctx, existing); delErr != nil && !errors.IsNotFound(delErr) {
 				return delErr
 			}
+			return nil
+		}
+		// A non-NotFound Get error during cleanup must not be swallowed:
+		// otherwise a transient API failure makes the operator report success
+		// while the metrics Service is never deleted, leaking the resource.
+		if !errors.IsNotFound(err) {
+			return fmt.Errorf("getting metrics service %s for cleanup: %w", svcName, err)
 		}
 		return nil
 	}
@@ -164,8 +171,15 @@ func (r *AerospikeClusterReconciler) reconcileServiceMonitor(
 			if delErr := r.Delete(ctx, existing); delErr != nil && !errors.IsNotFound(delErr) {
 				return delErr
 			}
+			return nil
 		}
-		return nil
+		// NotFound or a missing CRD means there is nothing to clean up. Any
+		// other Get error must be surfaced — swallowing it would let a transient
+		// API failure leak a stale ServiceMonitor while reporting success.
+		if errors.IsNotFound(err) || meta.IsNoMatchError(err) {
+			return nil
+		}
+		return fmt.Errorf("getting ServiceMonitor %s for cleanup: %w", smName, err)
 	}
 
 	// CRD not installed — return the error so the caller can decide
@@ -261,8 +275,15 @@ func (r *AerospikeClusterReconciler) reconcilePrometheusRule(
 			if delErr := r.Delete(ctx, existing); delErr != nil && !errors.IsNotFound(delErr) {
 				return delErr
 			}
+			return nil
 		}
-		return nil
+		// NotFound or a missing CRD means there is nothing to clean up. Any
+		// other Get error must be surfaced — swallowing it would let a transient
+		// API failure leak a stale PrometheusRule while reporting success.
+		if errors.IsNotFound(err) || meta.IsNoMatchError(err) {
+			return nil
+		}
+		return fmt.Errorf("getting PrometheusRule %s for cleanup: %w", prName, err)
 	}
 
 	// CRD not installed — return the error so the caller can decide

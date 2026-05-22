@@ -10,6 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/remotecommand"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -155,9 +156,17 @@ func (r *AerospikeClusterReconciler) getPasswordFromSecret(
 	return string(password), nil
 }
 
-// quiesceNode sends the "quiesce:" command to an Aerospike node via pod exec,
-// so the node gracefully stops accepting new transactions before being removed.
-// The command is executed inside the Aerospike container using asinfo.
+// quiesceNode quiesces an Aerospike node via pod exec so it gracefully stops
+// owning partitions before being removed. It runs TWO asinfo commands in
+// sequence: "quiesce:" marks the node as pending-quiesce, and "recluster:"
+// makes that pending state take effect cluster-wide.
+//
+// Sending "quiesce:" alone is a no-op for the feature's purpose: until a
+// "recluster:" runs, the cluster does not recompute its partition map, so the
+// node keeps owning (master) partitions and clients are NOT failed over before
+// the pod is deleted — exactly the disruption quiesce is meant to prevent.
+// recluster: is idempotent and may be issued on any node.
+//
 // This is a best-effort operation: the caller should proceed with pod deletion
 // even if quiesce fails (e.g., node is already down, asinfo not available).
 func (r *AerospikeClusterReconciler) quiesceNode(
@@ -190,13 +199,36 @@ func (r *AerospikeClusterReconciler) quiesceNode(
 		adminPassword = pw
 	}
 
-	// Build the asinfo command. If ACL is enabled, include auth flags.
-	cmd := buildQuiesceCommand(cluster, port, adminPassword)
-
 	// Apply quiesce-specific timeout to prevent blocking pod deletion indefinitely.
+	// The same budget covers both the quiesce and recluster exec calls.
 	execCtx, cancel := context.WithTimeout(ctx, quiesceTimeout)
 	defer cancel()
 
+	// Step 1: mark the node as pending-quiesce.
+	if err := r.execAsinfoVerb(execCtx, clientset, pod, "quiesce:", buildQuiesceCommand(cluster, port, adminPassword)); err != nil {
+		return err
+	}
+	log.Info("Quiesce command completed", "pod", pod.Name)
+
+	// Step 2: trigger a recluster so the pending-quiesce takes effect and the
+	// node sheds its partitions before the pod is deleted.
+	if err := r.execAsinfoVerb(execCtx, clientset, pod, "recluster:", buildAsinfoCommand("recluster:", cluster, port, adminPassword)); err != nil {
+		return fmt.Errorf("recluster after quiesce failed (quiesce will not take effect): %w", err)
+	}
+	log.Info("Recluster command completed; quiesce is now in effect", "pod", pod.Name)
+
+	return nil
+}
+
+// execAsinfoVerb runs a single asinfo command inside the Aerospike container of
+// pod and verifies the response is "ok". verb is used only for error messages.
+func (r *AerospikeClusterReconciler) execAsinfoVerb(
+	ctx context.Context,
+	clientset kubernetes.Interface,
+	pod *corev1.Pod,
+	verb string,
+	cmd []string,
+) error {
 	req := clientset.CoreV1().RESTClient().
 		Post().
 		Resource("pods").
@@ -212,40 +244,35 @@ func (r *AerospikeClusterReconciler) quiesceNode(
 
 	exec, err := remotecommand.NewSPDYExecutor(r.RestConfig, "POST", req.URL())
 	if err != nil {
-		return fmt.Errorf("creating SPDY executor for quiesce: %w", err)
+		return fmt.Errorf("creating SPDY executor for %s: %w", verb, err)
 	}
 
 	var stdout, stderr bytes.Buffer
-	if err := exec.StreamWithContext(execCtx, remotecommand.StreamOptions{
+	if err := exec.StreamWithContext(ctx, remotecommand.StreamOptions{
 		Stdout: &stdout,
 		Stderr: &stderr,
 	}); err != nil {
-		return fmt.Errorf("executing quiesce command: %w (stderr: %s)", err, stderr.String())
+		return fmt.Errorf("executing %s command: %w (stderr: %s)", verb, err, stderr.String())
 	}
-
-	output := strings.TrimSpace(stdout.String())
-	log.Info("Quiesce command completed", "pod", pod.Name, "output", output)
 
 	// Aerospike returns "ok" on success. Any other response (including empty) indicates a problem.
-	if output != "ok" {
-		return fmt.Errorf("quiesce returned unexpected response: %q", output)
+	if output := strings.TrimSpace(stdout.String()); output != "ok" {
+		return fmt.Errorf("%s returned unexpected response: %q", verb, output)
 	}
-
 	return nil
 }
 
-// buildQuiesceCommand constructs the asinfo command to quiesce a node.
-// If ACL is enabled, both -U and -P authentication flags are included.
-// Passing -U without -P would cause asinfo to prompt for a password on stdin
-// and hang/fail without a TTY, so the caller must resolve adminPassword from
-// the same Secret used by getPasswordFromSecret. An empty adminPassword with
-// an admin user present results in -U only (preserved for callers that need
-// to inspect the command shape, e.g. tests), but the production caller
-// (quiesceNode) always supplies it.
-func buildQuiesceCommand(cluster *ackov1alpha1.AerospikeCluster, port int, adminPassword string) []string {
+// buildAsinfoCommand constructs an asinfo command for an arbitrary verb (e.g.
+// "quiesce:", "recluster:"). If ACL is enabled, both -U and -P authentication
+// flags are included. Passing -U without -P would cause asinfo to prompt for a
+// password on stdin and hang/fail without a TTY, so the caller must resolve
+// adminPassword from the same Secret used by getPasswordFromSecret. An empty
+// adminPassword with an admin user present results in -U only (preserved for
+// callers that need to inspect the command shape, e.g. tests).
+func buildAsinfoCommand(verb string, cluster *ackov1alpha1.AerospikeCluster, port int, adminPassword string) []string {
 	cmd := []string{
 		"asinfo",
-		"-v", "quiesce:",
+		"-v", verb,
 		"-h", "localhost",
 		"-p", fmt.Sprintf("%d", port),
 	}
@@ -259,4 +286,11 @@ func buildQuiesceCommand(cluster *ackov1alpha1.AerospikeCluster, port int, admin
 	}
 
 	return cmd
+}
+
+// buildQuiesceCommand constructs the asinfo command to quiesce a node.
+// It is a thin wrapper over buildAsinfoCommand for the "quiesce:" verb,
+// retained for callers and tests that reference it by name.
+func buildQuiesceCommand(cluster *ackov1alpha1.AerospikeCluster, port int, adminPassword string) []string {
+	return buildAsinfoCommand("quiesce:", cluster, port, adminPassword)
 }

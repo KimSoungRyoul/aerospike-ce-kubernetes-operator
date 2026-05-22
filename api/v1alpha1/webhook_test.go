@@ -4383,6 +4383,91 @@ func TestValidate_NetworkPort_StringTypeRejected(t *testing.T) {
 	}
 }
 
+func TestValidate_NetworkPort_CustomServicePortRejected(t *testing.T) {
+	// A custom service port is syntactically valid but unsupported: the operator
+	// hard-codes the container port and the asinfo health probes to 3000, so a
+	// cluster with service.port=4000 never reaches Ready. Admission must reject it.
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeConfig: &AerospikeConfigSpec{
+				Value: map[string]any{
+					"network": map[string]any{
+						"service":   map[string]any{"port": 4000},
+						"heartbeat": map[string]any{"port": 3002, "mode": "mesh"},
+						"fabric":    map[string]any{"port": 3001},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error for custom service.port=4000, got nil")
+	}
+	if !strings.Contains(err.Error(), "network.service.port=4000 is not supported") {
+		t.Errorf("expected unsupported-port error for service.port=4000, got: %v", err)
+	}
+}
+
+func TestValidate_NetworkPort_CustomHeartbeatAndFabricPortRejected(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeConfig: &AerospikeConfigSpec{
+				Value: map[string]any{
+					"network": map[string]any{
+						"service":   map[string]any{"port": 3000},
+						"heartbeat": map[string]any{"port": 3100, "mode": "mesh"},
+						"fabric":    map[string]any{"port": 3200},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error for custom heartbeat/fabric ports, got nil")
+	}
+	if !strings.Contains(err.Error(), "network.heartbeat.port=3100 is not supported") {
+		t.Errorf("expected unsupported-port error for heartbeat.port=3100, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "network.fabric.port=3200 is not supported") {
+		t.Errorf("expected unsupported-port error for fabric.port=3200, got: %v", err)
+	}
+}
+
+func TestValidate_NetworkPort_DefaultPortsAccepted(t *testing.T) {
+	// The exact fixed ports must pass cleanly — this guards against the
+	// fixed-port check rejecting a correctly-configured cluster.
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeConfig: &AerospikeConfigSpec{
+				Value: map[string]any{
+					"network": map[string]any{
+						"service":   map[string]any{"port": int(DefaultServicePort)},
+						"heartbeat": map[string]any{"port": int(DefaultHeartbeatPort), "mode": "mesh"},
+						"fabric":    map[string]any{"port": int(DefaultFabricPort)},
+					},
+				},
+			},
+		},
+	}
+
+	if errs := v.validateNetworkPortUniqueness(cluster); len(errs) != 0 {
+		t.Errorf("expected no errors for default ports, got: %v", errs)
+	}
+}
+
 func TestValidate_NetworkPortUniqueness_NoNetworkSection(t *testing.T) {
 	v := &AerospikeClusterValidator{}
 	cluster := &AerospikeCluster{

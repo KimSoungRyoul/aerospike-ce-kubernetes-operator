@@ -1,14 +1,26 @@
 package controller
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+
+	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
 )
+
+// errMonitoringGetFailure is a sentinel non-NotFound error used to simulate an
+// API failure during monitoring-resource cleanup.
+var errMonitoringGetFailure = errors.New("simulated API server failure")
 
 func TestToStringMap(t *testing.T) {
 	tests := []struct {
@@ -307,5 +319,42 @@ func TestMetricsServiceNeedsUpdate(t *testing.T) {
 				t.Fatalf("metricsServiceNeedsUpdate() = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestReconcileMetricsService_CleanupGetErrorNotSwallowed is the regression test
+// for the monitoring cleanup error-masking fix. When monitoring is disabled and
+// the Get for the existing metrics Service fails with a non-NotFound error, the
+// reconcile must surface that error instead of silently returning nil — a
+// swallowed error would leak the Service while reporting success.
+func TestReconcileMetricsService_CleanupGetErrorNotSwallowed(t *testing.T) {
+	scheme := rollingRestartScheme(t)
+
+	cluster := &ackov1alpha1.AerospikeCluster{}
+	cluster.Name = "demo"
+	cluster.Namespace = ctrlTestNamespace
+
+	base := fake.NewClientBuilder().
+		WithScheme(scheme).
+		Build()
+
+	wrapped := interceptor.NewClient(base, interceptor.Funcs{
+		Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey,
+			obj client.Object, opts ...client.GetOption) error {
+			if _, ok := obj.(*corev1.Service); ok {
+				return apierrors.NewInternalError(errMonitoringGetFailure)
+			}
+			return c.Get(ctx, key, obj, opts...)
+		},
+	})
+
+	r := &AerospikeClusterReconciler{Client: wrapped, Scheme: scheme}
+
+	err := r.reconcileMetricsService(context.Background(), cluster, false)
+	if err == nil {
+		t.Fatal("expected error when cleanup Get fails with a non-NotFound error, got nil")
+	}
+	if !strings.Contains(err.Error(), "getting metrics service") {
+		t.Errorf("expected wrapped cleanup Get error, got: %v", err)
 	}
 }
