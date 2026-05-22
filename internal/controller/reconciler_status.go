@@ -234,7 +234,18 @@ func (r *AerospikeClusterReconciler) enrichStatusWithAerospikeInfo(
 // It sets MigratingPartitions on pods whose IP matches a key in perNode, clears
 // MigratingPartitions on pods not present in perNode, and updates the cluster-level
 // MigrationStatus and MigrationComplete condition.
+//
+// An empty perNode map means no node reported a usable migration stat (every
+// node had a nil host, or the stat was absent everywhere). Treating that as
+// "0 partitions remaining" would falsely flip MigrationComplete to True, which
+// could let a deferred scale-down or rolling restart proceed before migration
+// actually finished. In that case the previous MigrationStatus/condition is
+// left untouched so a stale-but-safe value is kept instead of a false positive.
 func applyMigrationStats(cluster *ackov1alpha1.AerospikeCluster, perNode map[string]int64) {
+	if len(perNode) == 0 {
+		return
+	}
+
 	// Build pod-IP → pod-name lookup.
 	podIPToPodName := make(map[string]string, len(cluster.Status.Pods))
 	for podName, ps := range cluster.Status.Pods {

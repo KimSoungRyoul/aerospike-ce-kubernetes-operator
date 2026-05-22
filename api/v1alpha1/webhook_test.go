@@ -5090,3 +5090,114 @@ func TestValidate_NamespacesAsMapRejected(t *testing.T) {
 		t.Errorf("expected 'must be a list' in error, got: %v", err)
 	}
 }
+
+// TestValidate_NamespacesAsScalarRejected covers the remaining shape gap: when
+// aerospikeConfig.namespaces is a scalar (string/number/bool) — e.g. the common
+// YAML mistake `namespaces: default` — the type switch previously fell through
+// silently, so the CR was admitted and configgen failed later at reconcile time.
+func TestValidate_NamespacesAsScalarRejected(t *testing.T) {
+	scalarValues := []any{
+		"default",      // string
+		3,              // int
+		true,           // bool
+		[]string{"ns"}, // typed slice (not []any)
+	}
+	for _, scalar := range scalarValues {
+		v := &AerospikeClusterValidator{}
+		cluster := &AerospikeCluster{
+			Spec: AerospikeClusterSpec{
+				Size:  3,
+				Image: "aerospike:ce-8.1.1.1",
+				AerospikeConfig: &AerospikeConfigSpec{
+					Value: map[string]any{
+						"namespaces": scalar,
+					},
+				},
+			},
+		}
+
+		_, err := v.validate(cluster)
+		if err == nil {
+			t.Fatalf("expected error when aerospikeConfig.namespaces is %T", scalar)
+		}
+		if !strings.Contains(err.Error(), "must be a list") {
+			t.Errorf("expected 'must be a list' in error for %T, got: %v", scalar, err)
+		}
+	}
+}
+
+// --- rack count vs cluster size (more racks than pods) ---
+
+// TestValidate_MoreRacksThanSizeRejected covers the footgun where rackConfig
+// defines more racks than spec.size: getRackSize then assigns 0 replicas to at
+// least one rack, producing a 0-replica StatefulSet that never carries data.
+func TestValidate_MoreRacksThanSizeRejected(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  2,
+			Image: "aerospike:ce-8.1.1.1",
+			RackConfig: &RackConfig{
+				Racks: []Rack{
+					{ID: 1},
+					{ID: 2},
+					{ID: 3},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error when rack count exceeds spec.size")
+	}
+	if !strings.Contains(err.Error(), "rack count must not exceed spec.size") {
+		t.Errorf("error should mention the rack-count/size mismatch, got: %v", err)
+	}
+}
+
+// TestValidate_RackCountEqualToSizeAccepted confirms the boundary case
+// (one pod per rack) is allowed.
+func TestValidate_RackCountEqualToSizeAccepted(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			RackConfig: &RackConfig{
+				Racks: []Rack{
+					{ID: 1},
+					{ID: 2},
+					{ID: 3},
+				},
+			},
+		},
+	}
+
+	if _, err := v.validate(cluster); err != nil {
+		t.Fatalf("rack count equal to spec.size should be accepted, got: %v", err)
+	}
+}
+
+// TestValidate_MoreRacksThanSizeAllowedWithTemplate confirms the rack/size
+// cross-check is deferred when size is supplied by a referenced template
+// (size == 0 && templateRef != nil).
+func TestValidate_MoreRacksThanSizeAllowedWithTemplate(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:        0,
+			TemplateRef: &TemplateRef{Name: "ce-template"},
+			RackConfig: &RackConfig{
+				Racks: []Rack{
+					{ID: 1},
+					{ID: 2},
+				},
+			},
+		},
+	}
+
+	if _, err := v.validate(cluster); err != nil {
+		t.Fatalf("rack/size check should be deferred to template resolution, got: %v", err)
+	}
+}
