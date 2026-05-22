@@ -125,11 +125,16 @@ func (r *AerospikeClusterReconciler) updateStatusAndPhase(
 	}
 
 	// Use RetryOnConflict for the final status write. On conflict, re-fetch the
-	// object and re-apply the computed status to avoid a full requeue cycle.
+	// object and recompute the status to avoid a full requeue cycle.
 	// Non-conflict errors are returned immediately without refetching, since
 	// RetryOnConflict won't retry them anyway and refetching would clobber
 	// concurrent writes by other reconcilers.
-	computedStatus := latest.Status.DeepCopy()
+	//
+	// computedObservedGeneration is the ObservedGeneration this reconcile
+	// computed (against the spec it actually processed). It is preserved across
+	// the conflict-retry path so a concurrent spec bump does not get falsely
+	// marked as observed (see the IMPORTANT note below).
+	computedObservedGeneration := latest.Status.ObservedGeneration
 	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		if err := r.Status().Update(ctx, latest); err != nil {
 			// Only refetch on conflict — RetryOnConflict will not retry on
@@ -142,15 +147,39 @@ func (r *AerospikeClusterReconciler) updateStatusAndPhase(
 			if fetchErr != nil {
 				return fetchErr
 			}
-			refetched.Status = *computedStatus
-			// IMPORTANT: do NOT overwrite ObservedGeneration with refetched.Generation.
+
+			// Recompute status against the refetched object instead of
+			// stamping a pre-conflict snapshot onto it. The snapshot's
+			// Status.Pods could be stale (a concurrent reconcile may have
+			// just published newer pod-readiness), and blindly re-applying it
+			// would regress that state. populateStatus re-lists pods, so the
+			// retry writes fresh pod-readiness.
+			if _, fetchErr := r.populateStatus(ctx, refetched); fetchErr != nil {
+				return fetchErr
+			}
+			refetched.Status.Phase = phase
+			refetched.Status.PhaseReason = phaseReason
+			setFineGrainedConditions(refetched, opts)
+			if phase == ackov1alpha1.AerospikePhaseCompleted {
+				refetched.Status.AppliedSpec = refetched.Spec.DeepCopy()
+				refetched.Status.OperatorVersion = version.Version
+				now := metav1.Now()
+				refetched.Status.LastReconcileTime = &now
+				refetched.Status.PendingRestartPods = nil
+				r.enrichStatusWithAerospikeInfo(ctx, refetched)
+				r.populateExternalEndpoints(ctx, refetched)
+			}
+
+			// IMPORTANT: do NOT advance ObservedGeneration to refetched.Generation.
 			// The conflict often comes from a concurrent spec update (Generation bump).
-			// If we aligned ObservedGeneration to the new Generation here, we would
-			// falsely advertise that this reconcile has observed the new spec — when
-			// in fact computedStatus was built from the *previous* spec. Keeping the
-			// computed value lets the controller-runtime watch detect the gap
+			// populateStatus above set ObservedGeneration to the refetched (new)
+			// Generation; restore the value this reconcile actually computed so we
+			// do not falsely advertise that the new spec has been observed. Keeping
+			// the computed value lets the controller-runtime watch detect the gap
 			// (Generation > ObservedGeneration) and trigger a fresh reconcile that
 			// actually processes the new spec.
+			refetched.Status.ObservedGeneration = computedObservedGeneration
+
 			latest = refetched
 			return err
 		}

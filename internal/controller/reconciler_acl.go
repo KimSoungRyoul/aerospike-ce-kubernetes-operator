@@ -66,26 +66,40 @@ func (r *AerospikeClusterReconciler) reconcileACL(
 	r.Recorder.Eventf(cluster, corev1.EventTypeNormal, EventACLSyncStarted,
 		"ACL synchronization started")
 
-	aeroClient, err := r.getAerospikeClientWithRetry(ctx, cluster)
-	if err != nil {
-		metrics.ACLSyncTotal.WithLabelValues(cluster.Namespace, cluster.Name, "error").Inc()
-		return false, fmt.Errorf("ACL sync: connecting to cluster: %w", err)
+	// getClient hands out an Aerospike client for both the first attempt and the
+	// transient-error retry. Every client it creates is tracked and closed when
+	// reconcileACL returns, so the retry path never reuses a stale broken
+	// connection and never leaks a connection either.
+	var openClients []*aero.Client
+	defer func() {
+		for _, c := range openClients {
+			closeAerospikeClient(c)
+		}
+	}()
+	getClient := func(forRetry bool) (*aero.Client, error) {
+		c, cErr := r.getAerospikeClientWithRetry(ctx, cluster)
+		if cErr != nil {
+			return nil, cErr
+		}
+		openClients = append(openClients, c)
+		return c, nil
 	}
-	defer closeAerospikeClient(aeroClient)
 
 	// Sync roles first (users may depend on roles).
 	// Retry once on transient connection errors (connection reset, timeout, etc.)
 	// that may occur during rolling restarts when nodes are briefly unavailable.
-	if err := retryOnTransient(func() error {
-		return r.reconcileRoles(ctx, aeroClient, cluster)
+	// The retry uses a freshly-created client so a stale broken connection is
+	// not reused.
+	if err := retryOnTransientWithReconnect(getClient, func(c *aero.Client) error {
+		return r.reconcileRoles(ctx, c, cluster)
 	}); err != nil {
 		metrics.ACLSyncTotal.WithLabelValues(cluster.Namespace, cluster.Name, "error").Inc()
 		return false, fmt.Errorf("ACL sync roles: %w", err)
 	}
 
 	// Sync users with the same single-retry pattern for transient errors.
-	if err := retryOnTransient(func() error {
-		return r.reconcileUsers(ctx, aeroClient, cluster)
+	if err := retryOnTransientWithReconnect(getClient, func(c *aero.Client) error {
+		return r.reconcileUsers(ctx, c, cluster)
 	}); err != nil {
 		metrics.ACLSyncTotal.WithLabelValues(cluster.Namespace, cluster.Name, "error").Inc()
 		return false, fmt.Errorf("ACL sync users: %w", err)
@@ -211,8 +225,15 @@ func (r *AerospikeClusterReconciler) reconcileUsers(
 		// is idempotent — it's a no-op when the password hasn't changed.
 		// This ensures Secret-based password updates are applied even though
 		// Secret changes don't increment the CR's generation.
+		//
+		// A failure here must be returned, not swallowed: if it were only
+		// logged, reconcileACL would still report success and ACLSynced would
+		// be set True even though the password was never rotated. Returning the
+		// error propagates it up through reconcileACL so ACLSynced is set False
+		// with a meaningful reason. Transient errors are retried by the
+		// retryOnTransientWithClient wrapper around reconcileUsers.
 		if err := aeroClient.ChangePassword(adminPolicy, userSpec.Name, password); err != nil {
-			log.Error(err, "Password change failed (non-fatal, continuing)", "user", userSpec.Name)
+			return fmt.Errorf("changing password for user %s: %w", userSpec.Name, err)
 		}
 	}
 
