@@ -1,9 +1,16 @@
 package controller
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
+	ackoerrors "github.com/ksr/aerospike-ce-kubernetes-operator/internal/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func TestGetServicePort(t *testing.T) {
@@ -105,6 +112,62 @@ func TestGetAerospikeClientWithRetry_MethodSignature(t *testing.T) {
 	fn := r.getAerospikeClientWithRetry
 	// Use fn to satisfy the compiler.
 	_ = fn
+}
+
+// TestGetAerospikeClientWithRetry_NoRetryOnValidationError verifies that the
+// retry wrapper returns immediately on a permanent ValidationError instead of
+// burning ~14s of exponential backoff (2s+4s+8s). A missing admin Secret on an
+// ACL-enabled cluster surfaces such a validation error via getPasswordFromSecret.
+func TestGetAerospikeClientWithRetry_NoRetryOnValidationError(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme(client-go) error = %v", err)
+	}
+	if err := ackov1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme(acko) error = %v", err)
+	}
+
+	cluster := &ackov1alpha1.AerospikeCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "demo",
+			Namespace: "default",
+		},
+		Spec: ackov1alpha1.AerospikeClusterSpec{
+			AerospikeAccessControl: &ackov1alpha1.AerospikeAccessControlSpec{
+				Users: []ackov1alpha1.AerospikeUserSpec{
+					{
+						Name:       "admin",
+						SecretName: "missing-admin-secret", // not created in the fake client
+						Roles:      []string{"sys-admin", "user-admin"},
+					},
+				},
+			},
+		},
+	}
+
+	r := &AerospikeClusterReconciler{
+		Client: fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(cluster).
+			Build(),
+		Scheme: scheme,
+	}
+
+	start := time.Now()
+	_, err := r.getAerospikeClientWithRetry(context.Background(), cluster)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("getAerospikeClientWithRetry() error = nil, want validation error")
+	}
+	if !ackoerrors.IsValidation(err) {
+		t.Errorf("getAerospikeClientWithRetry() error is not a ValidationError: %v", err)
+	}
+	// With retries the wrapper would sleep at least 2s before the first retry.
+	// A correct short-circuit returns near-instantly.
+	if elapsed >= 2*time.Second {
+		t.Errorf("getAerospikeClientWithRetry() took %v; expected immediate return on validation error", elapsed)
+	}
 }
 
 func TestBuildQuiesceCommand(t *testing.T) {

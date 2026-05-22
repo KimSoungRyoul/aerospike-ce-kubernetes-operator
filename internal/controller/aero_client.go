@@ -84,6 +84,11 @@ func (r *AerospikeClusterReconciler) getAerospikeClient(
 // getAerospikeClientWithRetry wraps getAerospikeClient with retry logic using
 // exponential backoff (2s, 4s, 8s). This is useful during initial deployment
 // when DNS may not yet be resolving for the headless service.
+//
+// Permanent validation errors (e.g. a missing admin Secret or a Secret without
+// a "password" key) are returned immediately: they will never self-heal, so
+// retrying just burns ~14s of backoff sleep on every reconcile and delays the
+// circuit breaker from surfacing the permanent error to the user.
 func (r *AerospikeClusterReconciler) getAerospikeClientWithRetry(
 	ctx context.Context,
 	cluster *ackov1alpha1.AerospikeCluster,
@@ -113,6 +118,10 @@ func (r *AerospikeClusterReconciler) getAerospikeClientWithRetry(
 			return client, nil
 		}
 		lastErr = err
+		// Don't burn backoff cycles on errors that cannot self-heal.
+		if ackoerrors.IsValidation(err) {
+			return nil, err
+		}
 	}
 
 	return nil, fmt.Errorf("failed after %d retries: %w", maxRetries, lastErr)
