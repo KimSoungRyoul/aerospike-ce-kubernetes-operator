@@ -1,9 +1,18 @@
 package controller
 
 import (
+	"context"
 	"testing"
 
 	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
+	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/utils"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/record"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func TestGetEffectiveConfig(t *testing.T) {
@@ -221,5 +230,92 @@ func TestGetEffectiveConfig_RackConfigOnly(t *testing.T) {
 	got := r.getEffectiveConfig(cluster, rack)
 	if got != rackConfig {
 		t.Errorf("when cluster config is nil, getEffectiveConfig should return rack config pointer directly")
+	}
+}
+
+// TestReconcileConfigMapDoesNotMutateClusterSpec verifies that reconcileConfigMap
+// does not leak access-address placeholders into the shared
+// cluster.Spec.AerospikeConfig when spec.aerospikeNetworkPolicy is set.
+//
+// getEffectiveConfig returns cluster.Spec.AerospikeConfig directly when there is
+// no rack-level config to merge, so InjectAccessAddressPlaceholders must operate
+// on a deep copy. Otherwise the placeholders pollute the dynamic-config diff
+// (forcing a cold restart for every dynamic change) and cluster.Status.AerospikeConfig.
+func TestReconcileConfigMapDoesNotMutateClusterSpec(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme(client-go) error = %v", err)
+	}
+	if err := ackov1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme(acko) error = %v", err)
+	}
+
+	cluster := &ackov1alpha1.AerospikeCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "demo",
+			Namespace: "default",
+		},
+		Spec: ackov1alpha1.AerospikeClusterSpec{
+			Size: 1,
+			// aerospikeNetworkPolicy set => InjectAccessAddressPlaceholders is active.
+			AerospikeNetworkPolicy: &ackov1alpha1.AerospikeNetworkPolicy{
+				AccessType: ackov1alpha1.AerospikeNetworkTypePod,
+			},
+			AerospikeConfig: &ackov1alpha1.AerospikeConfigSpec{
+				Value: map[string]any{
+					"service": map[string]any{
+						"cluster-name": "demo",
+					},
+					"network": map[string]any{
+						"service": map[string]any{
+							"port": 3000,
+						},
+						"heartbeat": map[string]any{
+							"mode": "mesh",
+							"port": 3002,
+						},
+						"fabric": map[string]any{
+							"port": 3001,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	reconciler := &AerospikeClusterReconciler{
+		Client: fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(cluster).
+			Build(),
+		Scheme:   scheme,
+		Recorder: record.NewFakeRecorder(8),
+	}
+
+	rack := &ackov1alpha1.Rack{ID: 0}
+	// getEffectiveConfig returns cluster.Spec.AerospikeConfig directly here
+	// (no rack override), so this is the pointer that must not be mutated.
+	effective := reconciler.getEffectiveConfig(cluster, rack)
+
+	if err := reconciler.reconcileConfigMap(context.Background(), cluster, rack, effective); err != nil {
+		t.Fatalf("reconcileConfigMap() error = %v", err)
+	}
+
+	// The placeholder must NOT have leaked into the shared cluster spec.
+	netSection := cluster.Spec.AerospikeConfig.Value["network"].(map[string]any)
+	svcSection := netSection["service"].(map[string]any)
+	if _, leaked := svcSection["access-address"]; leaked {
+		t.Errorf("access-address placeholder leaked into cluster.Spec.AerospikeConfig: %v", svcSection)
+	}
+
+	// Sanity check: the ConfigMap itself was still generated with the placeholder.
+	cm := &corev1.ConfigMap{}
+	cmName := utils.ConfigMapName(cluster.Name, rack.ID)
+	if err := reconciler.Get(context.Background(),
+		types.NamespacedName{Name: cmName, Namespace: cluster.Namespace}, cm); err != nil {
+		t.Fatalf("Get(ConfigMap) error = %v", err)
+	}
+	if cm.Data["aerospike.conf"] == "" {
+		t.Fatal("generated ConfigMap has no aerospike.conf data")
 	}
 }

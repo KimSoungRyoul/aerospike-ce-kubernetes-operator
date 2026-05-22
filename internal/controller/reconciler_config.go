@@ -52,9 +52,21 @@ func (r *AerospikeClusterReconciler) reconcileConfigMap(
 				},
 			},
 		}
+	} else {
+		// getEffectiveConfig may return cluster.Spec.AerospikeConfig (or a rack's
+		// AerospikeConfig) directly when there is nothing to merge. Deep-copy it
+		// here so the InjectAccessAddressPlaceholders mutation below stays local
+		// to ConfigMap generation and does not leak placeholders into the shared
+		// spec. Without this copy, when spec.aerospikeNetworkPolicy is set the
+		// placeholders pollute cluster.Spec.AerospikeConfig.Value for the rest of
+		// the reconcile pass — they end up in the dynamic-config diff (a static
+		// access-address key absent from the old config forces every dynamic
+		// change to a cold restart) and in cluster.Status.AerospikeConfig.
+		effectiveConfig = effectiveConfig.DeepCopy()
 	}
 
-	// Inject access-address placeholders based on network policy
+	// Inject access-address placeholders based on network policy. Operates on the
+	// local copy above so the placeholders never reach the shared cluster spec.
 	var podSvcType string
 	if cluster.Spec.PodService != nil {
 		podSvcType = cluster.Spec.PodService.ServiceType
