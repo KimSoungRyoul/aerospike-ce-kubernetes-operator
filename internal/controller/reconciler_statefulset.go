@@ -260,7 +260,7 @@ func (r *AerospikeClusterReconciler) cleanupOrphanedPVCsAfterScaleDown(
 	log.Info("All scaled-down pods terminated, cleaning up orphaned cascade-delete PVCs",
 		"name", stsName, "old", oldReplicas, "new", targetReplicas)
 	deleted, err := storage.DeleteOrphanedCascadeDeletePVCs(
-		ctx, r.Client, cluster.Namespace, stsName, targetReplicas, storageSpec)
+		ctx, r.Client, cluster.Namespace, cluster.Name, stsName, targetReplicas, storageSpec)
 	if err != nil {
 		log.Error(err, "Failed to delete orphaned cascade PVCs", "statefulset", stsName)
 		r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventPVCCleanupFailed,
@@ -402,7 +402,7 @@ func (r *AerospikeClusterReconciler) cleanupRemovedRacks(
 
 		// Step 3a: Delete cascade-delete PVCs now that pods are gone.
 		storageSpec := cluster.Spec.Storage
-		if err := storage.DeleteCascadeDeletePVCs(ctx, r.Client, cluster.Namespace, stsName, storageSpec); err != nil {
+		if err := storage.DeleteCascadeDeletePVCs(ctx, r.Client, cluster.Namespace, cluster.Name, stsName, storageSpec); err != nil {
 			log.Error(err, "Failed to delete cascade PVCs for removed rack", "statefulset", stsName)
 			r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventPVCCleanupFailed,
 				"Failed to delete cascade PVCs for removed rack %s: %v", stsName, err)
@@ -492,19 +492,32 @@ func (r *AerospikeClusterReconciler) detectScaling(
 // computePodSpecHash returns a short SHA256 hash derived from the cluster image
 // and pod-level spec settings so that changes to the pod template (aside from
 // config) are captured.
+//
+// PodService and AerospikeNetworkPolicy are included because they change what
+// the operator renders into the pod template: AerospikeNetworkPolicy drives the
+// ConfigMap's access-address placeholders and PodService injects a per-pod
+// service env var into the container. Without hashing them, editing
+// spec.podService or spec.aerospikeNetworkPolicy would update the ConfigMap but
+// leave needsUpdate false, so the StatefulSet template would never be patched
+// and pods would keep stale config. Both are JSON-serializable pointers; a nil
+// value is omitted and hashes stably.
 func computePodSpecHash(cluster *ackov1alpha1.AerospikeCluster, rack *ackov1alpha1.Rack) string {
 	input := struct {
-		Image           string                                `json:"image"`
-		PodSpec         *ackov1alpha1.AerospikePodSpec        `json:"podSpec,omitempty"`
-		Monitoring      *ackov1alpha1.AerospikeMonitoringSpec `json:"monitoring,omitempty"`
-		RackID          int                                   `json:"rackID"`
-		PreStopSleepSec int                                   `json:"preStopSleepSec"`
+		Image                  string                                `json:"image"`
+		PodSpec                *ackov1alpha1.AerospikePodSpec        `json:"podSpec,omitempty"`
+		Monitoring             *ackov1alpha1.AerospikeMonitoringSpec `json:"monitoring,omitempty"`
+		PodService             *ackov1alpha1.AerospikeServiceSpec    `json:"podService,omitempty"`
+		AerospikeNetworkPolicy *ackov1alpha1.AerospikeNetworkPolicy  `json:"aerospikeNetworkPolicy,omitempty"`
+		RackID                 int                                   `json:"rackID"`
+		PreStopSleepSec        int                                   `json:"preStopSleepSec"`
 	}{
-		Image:           cluster.Spec.Image,
-		PodSpec:         cluster.Spec.PodSpec,
-		Monitoring:      cluster.Spec.Monitoring,
-		RackID:          rack.ID,
-		PreStopSleepSec: podutil.PreStopSleepSeconds,
+		Image:                  cluster.Spec.Image,
+		PodSpec:                cluster.Spec.PodSpec,
+		Monitoring:             cluster.Spec.Monitoring,
+		PodService:             cluster.Spec.PodService,
+		AerospikeNetworkPolicy: cluster.Spec.AerospikeNetworkPolicy,
+		RackID:                 rack.ID,
+		PreStopSleepSec:        podutil.PreStopSleepSeconds,
 	}
 	return utils.ShortSHA256(input)
 }

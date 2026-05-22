@@ -111,6 +111,150 @@ func TestComputePodSpecHash_ChangesWithMonitoring(t *testing.T) {
 	}
 }
 
+func TestComputePodSpecHash_ChangesWithAerospikeNetworkPolicy(t *testing.T) {
+	cluster1 := &ackov1alpha1.AerospikeCluster{
+		Spec: ackov1alpha1.AerospikeClusterSpec{
+			Image: "aerospike:ce-8.1.1.1",
+		},
+	}
+	cluster2 := &ackov1alpha1.AerospikeCluster{
+		Spec: ackov1alpha1.AerospikeClusterSpec{
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeNetworkPolicy: &ackov1alpha1.AerospikeNetworkPolicy{
+				AccessType: ackov1alpha1.AerospikeNetworkTypeHostExternal,
+			},
+		},
+	}
+	rack := &ackov1alpha1.Rack{ID: 0}
+
+	hash1 := computePodSpecHash(cluster1, rack)
+	hash2 := computePodSpecHash(cluster2, rack)
+
+	if hash1 == hash2 {
+		t.Error("hash should change when aerospikeNetworkPolicy changes")
+	}
+}
+
+func TestComputePodSpecHash_ChangesWithNetworkPolicyAccessType(t *testing.T) {
+	cluster1 := &ackov1alpha1.AerospikeCluster{
+		Spec: ackov1alpha1.AerospikeClusterSpec{
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeNetworkPolicy: &ackov1alpha1.AerospikeNetworkPolicy{
+				AccessType: ackov1alpha1.AerospikeNetworkTypePod,
+			},
+		},
+	}
+	cluster2 := &ackov1alpha1.AerospikeCluster{
+		Spec: ackov1alpha1.AerospikeClusterSpec{
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeNetworkPolicy: &ackov1alpha1.AerospikeNetworkPolicy{
+				AccessType: ackov1alpha1.AerospikeNetworkTypeHostExternal,
+			},
+		},
+	}
+	rack := &ackov1alpha1.Rack{ID: 0}
+
+	hash1 := computePodSpecHash(cluster1, rack)
+	hash2 := computePodSpecHash(cluster2, rack)
+
+	if hash1 == hash2 {
+		t.Error("hash should change when aerospikeNetworkPolicy.accessType changes")
+	}
+}
+
+func TestComputePodSpecHash_ChangesWithPodService(t *testing.T) {
+	cluster1 := &ackov1alpha1.AerospikeCluster{
+		Spec: ackov1alpha1.AerospikeClusterSpec{
+			Image: "aerospike:ce-8.1.1.1",
+		},
+	}
+	cluster2 := &ackov1alpha1.AerospikeCluster{
+		Spec: ackov1alpha1.AerospikeClusterSpec{
+			Image: "aerospike:ce-8.1.1.1",
+			PodService: &ackov1alpha1.AerospikeServiceSpec{
+				ServiceType: "NodePort",
+			},
+		},
+	}
+	rack := &ackov1alpha1.Rack{ID: 0}
+
+	hash1 := computePodSpecHash(cluster1, rack)
+	hash2 := computePodSpecHash(cluster2, rack)
+
+	if hash1 == hash2 {
+		t.Error("hash should change when podService changes")
+	}
+}
+
+func TestComputePodSpecHash_ChangesWithPodServiceType(t *testing.T) {
+	cluster1 := &ackov1alpha1.AerospikeCluster{
+		Spec: ackov1alpha1.AerospikeClusterSpec{
+			Image: "aerospike:ce-8.1.1.1",
+			PodService: &ackov1alpha1.AerospikeServiceSpec{
+				ServiceType: "ClusterIP",
+			},
+		},
+	}
+	cluster2 := &ackov1alpha1.AerospikeCluster{
+		Spec: ackov1alpha1.AerospikeClusterSpec{
+			Image: "aerospike:ce-8.1.1.1",
+			PodService: &ackov1alpha1.AerospikeServiceSpec{
+				ServiceType: "LoadBalancer",
+			},
+		},
+	}
+	rack := &ackov1alpha1.Rack{ID: 0}
+
+	hash1 := computePodSpecHash(cluster1, rack)
+	hash2 := computePodSpecHash(cluster2, rack)
+
+	if hash1 == hash2 {
+		t.Error("hash should change when podService.serviceType changes")
+	}
+}
+
+func TestComputePodSpecHash_SameWithIdenticalNetworkAndPodService(t *testing.T) {
+	mk := func() *ackov1alpha1.AerospikeCluster {
+		return &ackov1alpha1.AerospikeCluster{
+			Spec: ackov1alpha1.AerospikeClusterSpec{
+				Image: "aerospike:ce-8.1.1.1",
+				AerospikeNetworkPolicy: &ackov1alpha1.AerospikeNetworkPolicy{
+					AccessType: ackov1alpha1.AerospikeNetworkTypeHostExternal,
+				},
+				PodService: &ackov1alpha1.AerospikeServiceSpec{
+					ServiceType: "NodePort",
+				},
+			},
+		}
+	}
+	rack := &ackov1alpha1.Rack{ID: 0}
+
+	hash1 := computePodSpecHash(mk(), rack)
+	hash2 := computePodSpecHash(mk(), rack)
+
+	if hash1 != hash2 {
+		t.Errorf("hash should be identical for identical podService/aerospikeNetworkPolicy: %q != %q", hash1, hash2)
+	}
+}
+
+func TestComputePodSpecHash_NilNetworkAndPodServiceStable(t *testing.T) {
+	// A cluster with nil PodService / AerospikeNetworkPolicy must hash stably
+	// and identically across calls (nil pointers are omitted from the JSON).
+	cluster := &ackov1alpha1.AerospikeCluster{
+		Spec: ackov1alpha1.AerospikeClusterSpec{
+			Image: "aerospike:ce-8.1.1.1",
+		},
+	}
+	rack := &ackov1alpha1.Rack{ID: 0}
+
+	hash1 := computePodSpecHash(cluster, rack)
+	hash2 := computePodSpecHash(cluster, rack)
+
+	if hash1 != hash2 {
+		t.Errorf("nil podService/aerospikeNetworkPolicy should hash stably: %q != %q", hash1, hash2)
+	}
+}
+
 func TestComputePodSpecHash_SameWithDifferentConfig(t *testing.T) {
 	// PodSpecHash should NOT change when only aerospikeConfig changes
 	// (that's what configHash is for)

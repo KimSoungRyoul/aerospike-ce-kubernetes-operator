@@ -48,7 +48,7 @@ func (r *AerospikeClusterReconciler) handleDeletion(
 		}
 		var pvcErrors []error
 		for _, sts := range stsList.Items {
-			if err := storage.DeleteCascadeDeletePVCs(ctx, r.Client, cluster.Namespace, sts.Name, cluster.Spec.Storage); err != nil {
+			if err := storage.DeleteCascadeDeletePVCs(ctx, r.Client, cluster.Namespace, cluster.Name, sts.Name, cluster.Spec.Storage); err != nil {
 				if !k8serrors.IsNotFound(err) {
 					log.Error(err, "Failed to delete cascade PVCs for StatefulSet", "statefulset", sts.Name)
 					r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventPVCCleanupFailed,

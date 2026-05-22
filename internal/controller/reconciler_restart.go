@@ -146,12 +146,14 @@ func (r *AerospikeClusterReconciler) reconcileRollingRestart(
 		}
 	}()
 
+	// Publish the truly-pending pods before any early return so observers see
+	// them even while the batch is blocked on migration or readiness gates.
+	cluster.Status.PendingRestartPods = pendingNames
+
 	// Hold the next batch when migration or readiness gates are blocking.
 	if r.isBatchBlocked(ctx, cluster, rack.ID, rackPods) {
 		return true, nil
 	}
-
-	cluster.Status.PendingRestartPods = pendingNames
 
 	// Restart up to batchSize pods, continuing on individual pod failures.
 	restarted, failedPods, batchPods := r.restartPodBatch(ctx, cluster, podsToRestart, sts, desiredHash,
@@ -466,7 +468,7 @@ func (r *AerospikeClusterReconciler) coldRestartPod(
 		if !ok {
 			log.V(1).Info("Failed to parse pod name for PVC cleanup, skipping local PVC deletion", "pod", pod.Name)
 		} else {
-			if err := storage.DeleteLocalPVCsForPod(ctx, r.Client, cluster.Namespace, stsName, ordinal, cluster.Spec.Storage); err != nil {
+			if err := storage.DeleteLocalPVCsForPod(ctx, r.Client, cluster.Namespace, cluster.Name, stsName, ordinal, cluster.Spec.Storage); err != nil {
 				log.Error(err, "Failed to delete local PVCs before restart", "pod", pod.Name)
 				r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventLocalPVCDeleteFailed,
 					"Failed to delete local PVCs for pod %s before restart: %v", pod.Name, err)

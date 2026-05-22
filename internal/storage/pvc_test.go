@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -148,5 +149,68 @@ func TestExtractVolumeName_NonNumericOrdinal(t *testing.T) {
 	_, ok := extractVolumeName("data-my-cluster-0-abc", "my-cluster-0")
 	if ok {
 		t.Error("should not extract when ordinal is non-numeric")
+	}
+}
+
+// --- GetPVCsForStatefulSet tests ---
+
+// TestGetPVCsForStatefulSet_PrefixCollisionDoesNotMatchSibling verifies that a
+// PVC belonging to a sibling cluster whose name is a prefix-collision is NOT
+// attributed to this cluster's StatefulSet.
+//
+// Cluster "foo" has STS "foo-0" with PVC "data-foo-0-5".
+// Cluster "foo-0" has STS "foo-0-0" with PVC "data-foo-0-0-3".
+// The "-foo-0-" name substring matches both, so without the instance-label
+// scope the sibling PVC would be wrongly returned (and later deleted).
+func TestGetPVCsForStatefulSet_PrefixCollisionDoesNotMatchSibling(t *testing.T) {
+	const (
+		clusterFoo  = "foo"
+		stsFoo      = "foo-0"
+		clusterFoo0 = "foo-0"
+		stsFoo0     = "foo-0-0"
+	)
+
+	ownPVC := newPVCForCluster("data-"+stsFoo+"-5", clusterFoo)       // data-foo-0-5
+	siblingPVC := newPVCForCluster("data-"+stsFoo0+"-3", clusterFoo0) // data-foo-0-0-3
+	c := buildFakeClient(ownPVC, siblingPVC)
+
+	ctx := context.Background()
+	pvcs, err := GetPVCsForStatefulSet(ctx, c, testNamespace, clusterFoo, stsFoo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(pvcs) != 1 {
+		names := make([]string, 0, len(pvcs))
+		for i := range pvcs {
+			names = append(names, pvcs[i].Name)
+		}
+		t.Fatalf("GetPVCsForStatefulSet(%q) returned %d PVCs %v, want exactly 1 (own PVC only)",
+			stsFoo, len(pvcs), names)
+	}
+	if pvcs[0].Name != ownPVC.Name {
+		t.Errorf("matched PVC = %q, want %q (sibling cluster PVC must not be matched)",
+			pvcs[0].Name, ownPVC.Name)
+	}
+}
+
+// TestGetPVCsForStatefulSet_LegacyUnlabeledFallback verifies the fallback path:
+// when no labeled PVCs exist, the name-substring check still finds legacy PVCs.
+func TestGetPVCsForStatefulSet_LegacyUnlabeledFallback(t *testing.T) {
+	legacy := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "data-" + testStsName + "-0",
+			Namespace: testNamespace,
+		},
+	}
+	c := buildFakeClient(legacy)
+
+	ctx := context.Background()
+	pvcs, err := GetPVCsForStatefulSet(ctx, c, testNamespace, testClusterName, testStsName)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(pvcs) != 1 || pvcs[0].Name != legacy.Name {
+		t.Errorf("legacy unlabeled PVC should be found via fallback, got %v", pvcs)
 	}
 }
