@@ -2720,6 +2720,42 @@ func TestValidate_ReplicationFactorValidFloat(t *testing.T) {
 	}
 }
 
+// TestValidate_ReplicationFactorStringType verifies that a string-typed
+// replication-factor (the common YAML mistake `replication-factor: "2"`) is
+// rejected with an error that names the real problem — the wrong type — rather
+// than the misleading "must be >= 1, got 0" that the unhandled-type fall-through
+// previously produced.
+func TestValidate_ReplicationFactorStringType(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeConfig: &AerospikeConfigSpec{
+				Value: map[string]any{
+					"namespaces": []any{
+						map[string]any{
+							"name":               "test",
+							"replication-factor": "2",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error when replication-factor is a string")
+	}
+	if !strings.Contains(err.Error(), "must be an integer") {
+		t.Errorf("error should mention the type mismatch ('must be an integer'), got: %v", err)
+	}
+	if strings.Contains(err.Error(), "got 0") {
+		t.Errorf("error should not report the misleading 'got 0' for a string value, got: %v", err)
+	}
+}
+
 // --- Rack ID validation tests ---
 
 func TestValidate_RackIDZero(t *testing.T) {

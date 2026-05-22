@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -646,11 +647,43 @@ func (r *AerospikeClusterReconciler) getRollingUpdateBatchSize(cluster *ackov1al
 }
 
 // getMaxIgnorablePods returns the number of pods that can be ignored.
+//
+// Unlike the batch-size fields, maxIgnorablePods has a meaningful zero value:
+// it means "ignore no unhealthy pods" (the strict default), and the webhook
+// explicitly validates maxIgnorablePods with a minimum of 0. resolveIntOrPercent
+// clamps its result to a minimum of 1 (correct for batch sizes, which must move
+// at least one pod), so calling it directly on an explicit 0 / "0%" would
+// silently bump the value to 1 and let the rolling restart skip one unhealthy
+// pod the user explicitly told it not to skip. An explicit zero is therefore
+// resolved to 0 here before delegating to resolveIntOrPercent.
 func (r *AerospikeClusterReconciler) getMaxIgnorablePods(cluster *ackov1alpha1.AerospikeCluster, totalPods int32) int32 {
 	if cluster.Spec.RackConfig != nil && cluster.Spec.RackConfig.MaxIgnorablePods != nil {
-		return resolveIntOrPercent(cluster.Spec.RackConfig.MaxIgnorablePods, totalPods)
+		mip := cluster.Spec.RackConfig.MaxIgnorablePods
+		if isExplicitZeroIntOrPercent(mip) {
+			return 0
+		}
+		return resolveIntOrPercent(mip, totalPods)
 	}
 	return 0
+}
+
+// isExplicitZeroIntOrPercent reports whether an IntOrString represents an
+// explicit zero — either the integer 0 or the percentage "0%". A zero result
+// from a non-zero percentage (e.g. "10%" of a 3-pod cluster rounding down) is
+// NOT treated as explicit zero; only a literally-zero spec value is.
+func isExplicitZeroIntOrPercent(val *intstr.IntOrString) bool {
+	if val == nil {
+		return false
+	}
+	if val.Type == intstr.Int {
+		return val.IntVal == 0
+	}
+	numStr, ok := strings.CutSuffix(val.StrVal, "%")
+	if !ok {
+		return false
+	}
+	n, err := strconv.Atoi(numStr)
+	return err == nil && n == 0
 }
 
 // listRackPods fetches all pods for a specific rack in a single API call,

@@ -1089,6 +1089,14 @@ func (v *AerospikeClusterValidator) validateReplicationFactor(cluster *Aerospike
 				continue
 			}
 			rfInt = int(n)
+		default:
+			// A non-numeric value (most commonly a string from YAML quoting,
+			// e.g. replication-factor: "2") would otherwise fall through with
+			// rfInt=0 and trip the misleading "must be >= 1, got 0" branch
+			// below. Surface the real problem — the wrong type — instead.
+			errors = append(errors, fmt.Sprintf(
+				"namespace %q: replication-factor must be an integer, got %T (%v)", nsName, rf, rf))
+			continue
 		}
 		if rfInt < 1 {
 			errors = append(errors, fmt.Sprintf(

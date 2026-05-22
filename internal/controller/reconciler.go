@@ -516,8 +516,13 @@ func calculateBackoff(failCount int32) time.Duration {
 	if failCount <= 0 {
 		return defaultReconcileRetryInterval
 	}
-	// Cap the exponent to avoid overflow: 2^8 = 256s which is < maxBackoffSeconds (300).
-	exponent := min(failCount, 8)
+	// Cap the exponent at 9 (2^9 = 512s) so the maxBackoffSeconds (300s / 5 min)
+	// cap below is actually reachable. Capping the exponent at 8 (2^8 = 256s)
+	// would keep the result permanently under 300s, making both the
+	// maxBackoffSeconds constant and the clamp dead code and silently lowering
+	// the real maximum backoff to 256s — contrary to this function's documented
+	// 5-minute cap. The exponent cap also still guards against math.Pow overflow.
+	exponent := min(failCount, 9)
 	seconds := math.Pow(2, float64(exponent))
 	if seconds > float64(maxBackoffSeconds) {
 		seconds = float64(maxBackoffSeconds)
