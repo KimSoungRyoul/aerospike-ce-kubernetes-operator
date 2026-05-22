@@ -103,7 +103,7 @@ func TestFinalizeOperationPhase_AllCompleted_NoFailures(t *testing.T) {
 	completed := map[string]bool{"pod-0": true, "pod-1": true, "pod-2": true}
 	opStatus := &ackov1alpha1.OperationStatus{Phase: ackov1alpha1.AerospikePhaseInProgress}
 
-	done := finalizeOperationPhase(opStatus, pods, completed)
+	done := finalizeOperationPhase(opStatus, pods, completed, map[string]bool{})
 	if !done {
 		t.Fatal("expected done=true when every pod is in completedSet")
 	}
@@ -117,15 +117,16 @@ func TestFinalizeOperationPhase_AllCompleted_WithFailures_GoesToError(t *testing
 		{ObjectMeta: metav1.ObjectMeta{Name: "pod-0"}},
 		{ObjectMeta: metav1.ObjectMeta{Name: "pod-1"}},
 	}
-	// Both pods are "completed" in the sense that we've stopped retrying them,
-	// but one of them ended up on the FailedPods list.
-	completed := map[string]bool{"pod-0": true, "pod-1": true}
+	// pod-0 succeeded; pod-1 was attempted but failed. A failed pod counts as
+	// resolved, so nothing is outstanding and the operation must terminate.
+	completed := map[string]bool{"pod-0": true}
+	failed := map[string]bool{"pod-1": true}
 	opStatus := &ackov1alpha1.OperationStatus{
 		Phase:      ackov1alpha1.AerospikePhaseInProgress,
 		FailedPods: []string{"pod-1"},
 	}
 
-	done := finalizeOperationPhase(opStatus, pods, completed)
+	done := finalizeOperationPhase(opStatus, pods, completed, failed)
 	if !done {
 		t.Fatal("expected done=true when nothing is outstanding")
 	}
@@ -144,7 +145,7 @@ func TestFinalizeOperationPhase_PartialProgress_StaysInProgress(t *testing.T) {
 	completed := map[string]bool{"pod-0": true} // pod-1, pod-2 still pending
 	opStatus := &ackov1alpha1.OperationStatus{Phase: ackov1alpha1.AerospikePhaseInProgress}
 
-	done := finalizeOperationPhase(opStatus, pods, completed)
+	done := finalizeOperationPhase(opStatus, pods, completed, map[string]bool{})
 	if done {
 		t.Fatal("expected done=false while pods remain outstanding")
 	}
@@ -170,7 +171,7 @@ func TestFinalizeOperationPhase_RecoversFromInterleavedProgress(t *testing.T) {
 	completed := map[string]bool{"pod-0": true, "pod-1": true}
 	opStatus := &ackov1alpha1.OperationStatus{Phase: ackov1alpha1.AerospikePhaseInProgress}
 
-	done := finalizeOperationPhase(opStatus, pods, completed)
+	done := finalizeOperationPhase(opStatus, pods, completed, map[string]bool{})
 	if !done {
 		t.Fatal("regression: phase stuck InProgress after all pods completed")
 	}
@@ -181,11 +182,87 @@ func TestFinalizeOperationPhase_RecoversFromInterleavedProgress(t *testing.T) {
 
 func TestFinalizeOperationPhase_NoPods_IsCompleted(t *testing.T) {
 	opStatus := &ackov1alpha1.OperationStatus{Phase: ackov1alpha1.AerospikePhaseInProgress}
-	done := finalizeOperationPhase(opStatus, nil, map[string]bool{})
+	done := finalizeOperationPhase(opStatus, nil, map[string]bool{}, map[string]bool{})
 	if !done {
 		t.Fatal("expected done=true with no target pods")
 	}
 	if opStatus.Phase != ackov1alpha1.AerospikePhaseCompleted {
 		t.Errorf("phase = %q, want %q", opStatus.Phase, ackov1alpha1.AerospikePhaseCompleted)
+	}
+}
+
+// TestFinalizeOperationPhase_AllFailed_ReachesTerminalError is the direct
+// regression for the infinite-reconcile bug: every target pod failed its
+// warm/cold restart. Before the fix, failed pods were absent from completedSet
+// so remainingPods stayed > 0, the operation never left InProgress, and the
+// cluster requeued every 5s forever. A failed pod must now count as resolved
+// so the operation reaches the terminal Error phase.
+func TestFinalizeOperationPhase_AllFailed_ReachesTerminalError(t *testing.T) {
+	pods := []*corev1.Pod{
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-0"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-1"}},
+	}
+	completed := map[string]bool{}
+	failed := map[string]bool{"pod-0": true, "pod-1": true}
+	opStatus := &ackov1alpha1.OperationStatus{
+		Phase:      ackov1alpha1.AerospikePhaseInProgress,
+		FailedPods: []string{"pod-0", "pod-1"},
+	}
+
+	done := finalizeOperationPhase(opStatus, pods, completed, failed)
+	if !done {
+		t.Fatal("regression: operation never terminates when every pod fails (infinite reconcile loop)")
+	}
+	if opStatus.Phase != ackov1alpha1.AerospikePhaseError {
+		t.Errorf("phase = %q, want %q (a fully-failed operation must reach terminal Error)",
+			opStatus.Phase, ackov1alpha1.AerospikePhaseError)
+	}
+}
+
+// TestFinalizeOperationPhase_FailedPodNotRetriedKeepsOutstanding verifies that
+// while one pod has failed (resolved) another genuinely pending pod still keeps
+// the operation InProgress — i.e. a failed pod neither blocks completion nor
+// masks remaining work.
+func TestFinalizeOperationPhase_FailedPodNotRetriedKeepsOutstanding(t *testing.T) {
+	pods := []*corev1.Pod{
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-0"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-1"}},
+	}
+	completed := map[string]bool{}
+	failed := map[string]bool{"pod-0": true} // pod-1 not yet attempted
+	opStatus := &ackov1alpha1.OperationStatus{Phase: ackov1alpha1.AerospikePhaseInProgress}
+
+	done := finalizeOperationPhase(opStatus, pods, completed, failed)
+	if done {
+		t.Fatal("expected done=false: pod-1 is still outstanding")
+	}
+	if opStatus.Phase != ackov1alpha1.AerospikePhaseInProgress {
+		t.Errorf("phase = %q, want %q", opStatus.Phase, ackov1alpha1.AerospikePhaseInProgress)
+	}
+}
+
+// TestOperationFailedPodsDedup simulates the cross-reconcile dedup logic from
+// reconcileOperations: a pod already on FailedPods from a previous reconcile
+// must not be appended again, otherwise FailedPods grows unbounded with
+// duplicates on every 5s requeue.
+func TestOperationFailedPodsDedup(t *testing.T) {
+	// Prior status carried forward into a fresh opStatus, as reconcileOperations does.
+	prev := &ackov1alpha1.OperationStatus{FailedPods: []string{"pod-0"}}
+	opStatus := &ackov1alpha1.OperationStatus{FailedPods: prev.FailedPods}
+
+	failedSet := make(map[string]bool)
+	for _, p := range prev.FailedPods {
+		failedSet[p] = true
+	}
+
+	// Re-observe pod-0 failing on the next reconcile.
+	podName := "pod-0"
+	if !failedSet[podName] {
+		opStatus.FailedPods = append(opStatus.FailedPods, podName)
+		failedSet[podName] = true
+	}
+
+	if len(opStatus.FailedPods) != 1 {
+		t.Fatalf("FailedPods = %v, want exactly one entry (no duplicates across reconciles)", opStatus.FailedPods)
 	}
 }

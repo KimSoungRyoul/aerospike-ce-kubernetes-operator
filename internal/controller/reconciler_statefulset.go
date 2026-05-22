@@ -375,16 +375,17 @@ func (r *AerospikeClusterReconciler) cleanupRemovedRacks(
 		// fully gone but the orphan PVCs/ConfigMap survive and are handled
 		// by the cleanup path keyed off rackID below).
 		//
-		// If the rackID cannot be parsed from the STS name we refuse to
-		// proceed: a partial cleanup that deletes PVCs without first
-		// confirming pods are gone re-introduces the "PVC deleted while pods
-		// alive" hazard.
+		// If the rackID cannot be parsed from the STS name we skip this
+		// StatefulSet rather than failing: a non-numeric suffix means this is
+		// not an operator-managed rack StatefulSet, so it is not ours to clean
+		// up. Returning a hard error here would abort the entire reconcile for
+		// every other rack over a single unrecognized name.
 		rackIDStr := strings.TrimPrefix(stsName, cluster.Name+"-")
 		rackID, convErr := strconv.Atoi(rackIDStr)
 		if convErr != nil {
-			return fmt.Errorf("cannot derive rackID from StatefulSet name %q (cluster %q): %w; "+
-				"refusing rack cleanup to avoid deleting PVCs while pods may still be running",
-				stsName, cluster.Name, convErr)
+			log.V(1).Info("Skipping StatefulSet with unparseable rackID suffix; not an operator-managed rack",
+				"statefulset", stsName, "err", convErr)
+			continue
 		}
 
 		pods, listErr := r.listRackPods(ctx, cluster, rackID)

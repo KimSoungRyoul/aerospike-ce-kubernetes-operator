@@ -778,16 +778,31 @@ func (v *AerospikeClusterValidator) validateNamespaceConfig(nsMap map[string]any
 		}
 	}
 
-	// Validate replication-factor: single-node clusters should use 1
+	// Validate replication-factor: single-node clusters should use 1.
+	// Accept every integer type a decoder can plausibly produce (int, int32,
+	// int64, float64, json.Number); an unhandled type would otherwise silently
+	// skip the range check.
 	if rf, ok := nsMap["replication-factor"]; ok {
 		switch v := rf.(type) {
 		case int:
 			if v < 1 || v > 4 {
 				errors = append(errors, fmt.Sprintf("namespace[%d] %q: replication-factor must be between 1 and 4 (got %d)", index, nsName, v))
 			}
+		case int32:
+			if v < 1 || v > 4 {
+				errors = append(errors, fmt.Sprintf("namespace[%d] %q: replication-factor must be between 1 and 4 (got %d)", index, nsName, v))
+			}
+		case int64:
+			if v < 1 || v > 4 {
+				errors = append(errors, fmt.Sprintf("namespace[%d] %q: replication-factor must be between 1 and 4 (got %d)", index, nsName, v))
+			}
 		case float64:
 			if v < 1 || v > 4 {
 				errors = append(errors, fmt.Sprintf("namespace[%d] %q: replication-factor must be between 1 and 4 (got %v)", index, nsName, v))
+			}
+		case json.Number:
+			if n, err := v.Int64(); err == nil && (n < 1 || n > 4) {
+				errors = append(errors, fmt.Sprintf("namespace[%d] %q: replication-factor must be between 1 and 4 (got %s)", index, nsName, v.String()))
 			}
 		}
 	}
@@ -1027,9 +1042,14 @@ func (v *AerospikeClusterValidator) validateReplicationFactor(cluster *Aerospike
 			continue
 		}
 		rfInt := 0
+		// Accept every integer type a decoder can plausibly produce. Missing
+		// an int32 case here caused an int32-typed value to fall through with
+		// rfInt=0 and trip the misleading "must be >= 1, got 0" branch below.
 		switch val := rf.(type) {
 		case int:
 			rfInt = val
+		case int32:
+			rfInt = int(val)
 		case int64:
 			rfInt = int(val)
 		case float64:
@@ -1039,6 +1059,14 @@ func (v *AerospikeClusterValidator) validateReplicationFactor(cluster *Aerospike
 				continue
 			}
 			rfInt = int(val)
+		case json.Number:
+			n, err := val.Int64()
+			if err != nil {
+				errors = append(errors, fmt.Sprintf(
+					"namespace %q: replication-factor must be a positive integer, got %s", nsName, val.String()))
+				continue
+			}
+			rfInt = int(n)
 		}
 		if rfInt < 1 {
 			errors = append(errors, fmt.Sprintf(
