@@ -603,6 +603,12 @@ func getDirtyVolumes(storageSpec *ackov1alpha1.AerospikeStorageSpec) []string {
 }
 
 // markDirtyVolumes records dirty volumes in the cluster status for the given pod.
+//
+// It uses a MergeFrom status patch (not a full Status().Update) so that only the
+// DirtyVolumes field of the target pod is written. A full replace would clobber
+// Status.Pods fields written concurrently by updateDynamicConfigStatus /
+// recordPodRestartStatus, which also patch the same map. This mirrors the
+// pattern used in updateDynamicConfigStatus.
 func (r *AerospikeClusterReconciler) markDirtyVolumes(
 	ctx context.Context,
 	cluster *ackov1alpha1.AerospikeCluster,
@@ -618,10 +624,11 @@ func (r *AerospikeClusterReconciler) markDirtyVolumes(
 		latest.Status.Pods = make(map[string]ackov1alpha1.AerospikePodStatus)
 	}
 
+	base := latest.DeepCopy()
 	podStatus := latest.Status.Pods[podName]
 	podStatus.DirtyVolumes = dirtyVols
 	latest.Status.Pods[podName] = podStatus
-	return r.Status().Update(ctx, latest)
+	return r.Status().Patch(ctx, latest, client.MergeFrom(base))
 }
 
 // getRollingUpdateBatchSize returns the effective rolling update batch size.
