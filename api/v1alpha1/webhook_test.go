@@ -3428,6 +3428,85 @@ func TestValidate_ACLLeadingTrailingWhitespacePrivilegeRejected(t *testing.T) {
 	}
 }
 
+func TestValidate_ACLUserWithEmptyRoleName(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeAccessControl: &AerospikeAccessControlSpec{
+				Users: []AerospikeUserSpec{
+					{
+						Name:       "admin",
+						SecretName: "admin-secret",
+						Roles:      []string{"sys-admin", "user-admin"},
+					},
+					{
+						Name:       "app-user",
+						SecretName: "app-secret",
+						Roles:      []string{"read", ""},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error for user with empty role name")
+	}
+	if !strings.Contains(err.Error(), "must not be empty") {
+		t.Errorf("expected 'must not be empty' error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), `"app-user"`) {
+		t.Errorf("expected error to name the offending user 'app-user', got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "roles[1]") {
+		t.Errorf("expected error to name the offending index roles[1], got: %v", err)
+	}
+}
+
+func TestValidate_ACLEmptyRoleNameDoesNotAlsoTriggerUndefinedRole(t *testing.T) {
+	// An empty-string role entry should be flagged once as "must not be empty"
+	// and NOT also flagged as "references undefined role" — the continue in the
+	// validator should skip the defined-role check for that entry.
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeAccessControl: &AerospikeAccessControlSpec{
+				Users: []AerospikeUserSpec{
+					{
+						Name:       "admin",
+						SecretName: "admin-secret",
+						Roles:      []string{"sys-admin", "user-admin"},
+					},
+					{
+						Name:       "app-user",
+						SecretName: "app-secret",
+						Roles:      []string{""},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error for user with empty role name")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "must not be empty") {
+		t.Errorf("expected 'must not be empty' error, got: %v", err)
+	}
+	// The undefined-role check below the empty-string guard should be skipped
+	// via continue, so we must NOT see the undefined-role message for this user.
+	if strings.Contains(msg, `user "app-user" references undefined role ""`) {
+		t.Errorf("empty role name should not also trigger 'references undefined role' for the same entry, got: %v", err)
+	}
+}
+
 // --- Overrides without TemplateRef validation tests ---
 
 func TestValidate_OverridesWithoutTemplateRefRejected(t *testing.T) {

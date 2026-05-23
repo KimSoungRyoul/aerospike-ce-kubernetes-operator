@@ -899,7 +899,11 @@ func (v *AerospikeClusterValidator) validateAccessControl(acl *AerospikeAccessCo
 		definedRoles[role.Name] = true
 	}
 	for _, user := range acl.Users {
-		for _, roleName := range user.Roles {
+		for i, roleName := range user.Roles {
+			if roleName == "" {
+				errors = append(errors, fmt.Sprintf("user %q roles[%d]: role name must not be empty", user.Name, i))
+				continue
+			}
 			if !aerospikeCEBuiltinRoles[roleName] && !definedRoles[roleName] {
 				errors = append(errors, fmt.Sprintf("user %q references undefined role %q", user.Name, roleName))
 			}
