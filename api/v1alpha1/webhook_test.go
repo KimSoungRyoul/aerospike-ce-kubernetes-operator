@@ -1233,6 +1233,104 @@ func TestValidate_Storage_SubPathAndSubPathExprMutuallyExclusive_InitContainer(t
 	}
 }
 
+func TestValidate_Storage_DuplicateContainerName_Sidecars(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			Storage: &AerospikeStorageSpec{
+				Volumes: []VolumeSpec{
+					{
+						Name: "data",
+						Source: VolumeSource{
+							EmptyDir: &corev1.EmptyDirVolumeSource{},
+						},
+						Sidecars: []VolumeAttachment{
+							{ContainerName: "exporter", Path: "/data"},
+							{ContainerName: "exporter", Path: "/data2"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error for duplicate containerName in sidecars")
+	}
+	if !strings.Contains(err.Error(), "sidecars[1] containerName \"exporter\" duplicates sidecars[0]") {
+		t.Errorf("error should mention duplicate sidecars containerName, got: %v", err)
+	}
+}
+
+func TestValidate_Storage_DuplicateContainerName_InitContainers(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			Storage: &AerospikeStorageSpec{
+				Volumes: []VolumeSpec{
+					{
+						Name: "data",
+						Source: VolumeSource{
+							EmptyDir: &corev1.EmptyDirVolumeSource{},
+						},
+						InitContainers: []VolumeAttachment{
+							{ContainerName: "init", Path: "/data"},
+							{ContainerName: "init", Path: "/data2"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error for duplicate containerName in initContainers")
+	}
+	if !strings.Contains(err.Error(), "initContainers[1] containerName \"init\" duplicates initContainers[0]") {
+		t.Errorf("error should mention duplicate initContainers containerName, got: %v", err)
+	}
+}
+
+func TestValidate_Storage_DuplicateContainerName_SidecarVsInitContainer(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			Storage: &AerospikeStorageSpec{
+				Volumes: []VolumeSpec{
+					{
+						Name: "data",
+						Source: VolumeSource{
+							EmptyDir: &corev1.EmptyDirVolumeSource{},
+						},
+						Sidecars: []VolumeAttachment{
+							{ContainerName: "shared", Path: "/data"},
+						},
+						InitContainers: []VolumeAttachment{
+							{ContainerName: "shared", Path: "/data"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error when sidecars and initContainers share a containerName")
+	}
+	if !strings.Contains(err.Error(), "initContainers[0] containerName \"shared\" duplicates sidecars[0]") {
+		t.Errorf("error should mention sidecars/initContainers cross duplicate, got: %v", err)
+	}
+}
+
 func TestValidate_Storage_DeleteLocalStorageWithoutClasses(t *testing.T) {
 	v := &AerospikeClusterValidator{}
 	cluster := &AerospikeCluster{
