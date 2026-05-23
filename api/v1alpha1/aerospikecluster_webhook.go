@@ -487,6 +487,11 @@ func (v *AerospikeClusterValidator) validate(cluster *AerospikeCluster) (admissi
 		}
 	}
 
+	// Validate podSpec.sidecars[] and podSpec.initContainers[] container names.
+	if cluster.Spec.PodSpec != nil {
+		allErrors = append(allErrors, validatePodSpecContainerNames(cluster.Spec.PodSpec)...)
+	}
+
 	// Validate rack config
 	if cluster.Spec.RackConfig != nil {
 		rackErrors := v.validateRackConfig(cluster.Spec.RackConfig)
@@ -886,7 +891,11 @@ func (v *AerospikeClusterValidator) validateAccessControl(acl *AerospikeAccessCo
 
 	// Check for duplicate role names
 	seenRoles := make(map[string]bool)
-	for _, role := range acl.Roles {
+	for i, role := range acl.Roles {
+		if role.Name == "" {
+			errors = append(errors, fmt.Sprintf("accessControl.roles[%d]: role name must not be empty", i))
+			continue
+		}
 		if seenRoles[role.Name] {
 			errors = append(errors, fmt.Sprintf("accessControl.roles: duplicate role name %q", role.Name))
 		}
@@ -1435,6 +1444,65 @@ func validateVolumeAttachments(vol VolumeSpec, index int) []string {
 			errors = append(errors, fmt.Sprintf(
 				"storage.volumes[%d] %q: initContainers[%d] containerName %q duplicates sidecars[%d]",
 				index, vol.Name, j, ic.ContainerName, prev))
+		}
+	}
+
+	return errors
+}
+
+// builtinPodContainerNames lists container names reserved by the operator that
+// users must not reuse for sidecars or extra init containers. The main server
+// container name is sourced from the canonical AerospikeContainerName constant
+// (api/v1alpha1/constants.go); the init container name is hard-coded here to
+// mirror internal/podutil.InitContainerName without introducing an api ->
+// internal import cycle. Keep these two strings in sync with podutil.
+var builtinPodContainerNames = map[string]bool{
+	AerospikeContainerName: true, // "aerospike-server"
+	"aerospike-init":       true, // mirrors internal/podutil.InitContainerName
+}
+
+// validatePodSpecContainerNames rejects user-supplied sidecar / extra init
+// container names that conflict with another user entry or with the operator's
+// built-in containers. Kubernetes itself rejects Pods that share a name across
+// containers / initContainers, so surfacing this at admission time gives a
+// faster, clearer error than waiting for the StatefulSet to fail.
+func validatePodSpecContainerNames(podSpec *AerospikePodSpec) []string {
+	var errors []string
+
+	sidecarNames := make(map[string]int, len(podSpec.Sidecars))
+	for i, sc := range podSpec.Sidecars {
+		if builtinPodContainerNames[sc.Name] {
+			errors = append(errors, fmt.Sprintf(
+				"spec.podSpec.sidecars[%d] name %q conflicts with operator built-in container name",
+				i, sc.Name))
+		}
+		if prev, seen := sidecarNames[sc.Name]; seen {
+			errors = append(errors, fmt.Sprintf(
+				"spec.podSpec.sidecars[%d] name %q duplicates sidecars[%d]",
+				i, sc.Name, prev))
+		} else {
+			sidecarNames[sc.Name] = i
+		}
+	}
+
+	initNames := make(map[string]int, len(podSpec.InitContainers))
+	for i, ic := range podSpec.InitContainers {
+		if builtinPodContainerNames[ic.Name] {
+			errors = append(errors, fmt.Sprintf(
+				"spec.podSpec.initContainers[%d] name %q conflicts with operator built-in container name",
+				i, ic.Name))
+		}
+		if prev, seen := initNames[ic.Name]; seen {
+			errors = append(errors, fmt.Sprintf(
+				"spec.podSpec.initContainers[%d] name %q duplicates initContainers[%d]",
+				i, ic.Name, prev))
+		} else {
+			initNames[ic.Name] = i
+		}
+		if prev, seen := sidecarNames[ic.Name]; seen {
+			errors = append(errors, fmt.Sprintf(
+				"spec.podSpec.initContainers[%d] name %q duplicates sidecars[%d]",
+				i, ic.Name, prev))
 		}
 	}
 
