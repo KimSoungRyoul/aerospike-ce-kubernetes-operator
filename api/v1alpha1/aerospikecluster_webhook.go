@@ -1475,6 +1475,7 @@ func validatePodSpecContainerNames(podSpec *AerospikePodSpec) []string {
 			errors = append(errors, fmt.Sprintf(
 				"spec.podSpec.sidecars[%d] name %q conflicts with operator built-in container name",
 				i, sc.Name))
+			continue
 		}
 		if prev, seen := sidecarNames[sc.Name]; seen {
 			errors = append(errors, fmt.Sprintf(
@@ -1491,6 +1492,7 @@ func validatePodSpecContainerNames(podSpec *AerospikePodSpec) []string {
 			errors = append(errors, fmt.Sprintf(
 				"spec.podSpec.initContainers[%d] name %q conflicts with operator built-in container name",
 				i, ic.Name))
+			continue
 		}
 		if prev, seen := initNames[ic.Name]; seen {
 			errors = append(errors, fmt.Sprintf(

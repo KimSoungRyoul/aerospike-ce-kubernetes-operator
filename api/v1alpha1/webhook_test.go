@@ -1475,6 +1475,58 @@ func TestValidate_PodSpec_InitContainerConflictWithBuiltinContainer(t *testing.T
 	}
 }
 
+func TestValidate_PodSpec_BuiltinConflictSuppressesDuplicateError(t *testing.T) {
+	cases := []struct {
+		name        string
+		podSpec     *AerospikePodSpec
+		conflictMsg string
+	}{
+		{
+			name: "sidecars both aerospike-server",
+			podSpec: &AerospikePodSpec{
+				Sidecars: []corev1.Container{
+					{Name: "aerospike-server", Image: "user:v1"},
+					{Name: "aerospike-server", Image: "user:v2"},
+				},
+			},
+			conflictMsg: `spec.podSpec.sidecars[0] name "aerospike-server" conflicts with operator built-in container name`,
+		},
+		{
+			name: "initContainers both aerospike-init",
+			podSpec: &AerospikePodSpec{
+				InitContainers: []corev1.Container{
+					{Name: "aerospike-init", Image: "user:v1"},
+					{Name: "aerospike-init", Image: "user:v2"},
+				},
+			},
+			conflictMsg: `spec.podSpec.initContainers[0] name "aerospike-init" conflicts with operator built-in container name`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			v := &AerospikeClusterValidator{}
+			cluster := &AerospikeCluster{
+				Spec: AerospikeClusterSpec{
+					Size:    3,
+					Image:   "aerospike:ce-8.1.1.1",
+					PodSpec: tc.podSpec,
+				},
+			}
+
+			_, err := v.validate(cluster)
+			if err == nil {
+				t.Fatal("expected built-in conflict error")
+			}
+			if !strings.Contains(err.Error(), tc.conflictMsg) {
+				t.Errorf("error should mention built-in conflict, got: %v", err)
+			}
+			if got := strings.Count(err.Error(), "duplicates"); got != 0 {
+				t.Errorf("expected no duplicate-name errors when built-in conflict fires, got %d in: %v", got, err)
+			}
+		})
+	}
+}
+
 func TestValidate_Storage_DeleteLocalStorageWithoutClasses(t *testing.T) {
 	v := &AerospikeClusterValidator{}
 	cluster := &AerospikeCluster{
