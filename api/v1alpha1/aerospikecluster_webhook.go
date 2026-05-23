@@ -1389,25 +1389,56 @@ func (v *AerospikeClusterValidator) validateVolume(vol VolumeSpec, index int) ([
 			index, vol.Name))
 	}
 
-	// Validate SubPath and SubPathExpr in sidecar attachments
+	errors = append(errors, validateVolumeAttachments(vol, index)...)
+
+	return errors, warnings
+}
+
+// validateVolumeAttachments validates per-container volume attachments for a
+// single volume: subPath/subPathExpr mutual exclusion and duplicate containerName
+// detection within sidecars, within initContainers, and across the two lists
+// (a Pod cannot have the same container name as both an init and a sidecar/main).
+func validateVolumeAttachments(vol VolumeSpec, index int) []string {
+	var errors []string
+
+	sidecarNames := make(map[string]int, len(vol.Sidecars))
 	for j, sc := range vol.Sidecars {
 		if sc.SubPath != "" && sc.SubPathExpr != "" {
 			errors = append(errors, fmt.Sprintf(
 				"storage.volumes[%d] %q: sidecars[%d] %q subPath and subPathExpr are mutually exclusive",
 				index, vol.Name, j, sc.ContainerName))
 		}
+		if prev, seen := sidecarNames[sc.ContainerName]; seen {
+			errors = append(errors, fmt.Sprintf(
+				"storage.volumes[%d] %q: sidecars[%d] containerName %q duplicates sidecars[%d]",
+				index, vol.Name, j, sc.ContainerName, prev))
+		} else {
+			sidecarNames[sc.ContainerName] = j
+		}
 	}
 
-	// Validate SubPath and SubPathExpr in init container attachments
+	initNames := make(map[string]int, len(vol.InitContainers))
 	for j, ic := range vol.InitContainers {
 		if ic.SubPath != "" && ic.SubPathExpr != "" {
 			errors = append(errors, fmt.Sprintf(
 				"storage.volumes[%d] %q: initContainers[%d] %q subPath and subPathExpr are mutually exclusive",
 				index, vol.Name, j, ic.ContainerName))
 		}
+		if prev, seen := initNames[ic.ContainerName]; seen {
+			errors = append(errors, fmt.Sprintf(
+				"storage.volumes[%d] %q: initContainers[%d] containerName %q duplicates initContainers[%d]",
+				index, vol.Name, j, ic.ContainerName, prev))
+		} else {
+			initNames[ic.ContainerName] = j
+		}
+		if prev, seen := sidecarNames[ic.ContainerName]; seen {
+			errors = append(errors, fmt.Sprintf(
+				"storage.volumes[%d] %q: initContainers[%d] containerName %q duplicates sidecars[%d]",
+				index, vol.Name, j, ic.ContainerName, prev))
+		}
 	}
 
-	return errors, warnings
+	return errors
 }
 
 // aerospikeReservedPorts lists ports used by Aerospike server that must not conflict.
