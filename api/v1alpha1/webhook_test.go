@@ -1331,6 +1331,202 @@ func TestValidate_Storage_DuplicateContainerName_SidecarVsInitContainer(t *testi
 	}
 }
 
+// --- PodSpec sidecar / initContainer name validation tests ---
+
+func TestValidate_PodSpec_DuplicateContainerName_Sidecars(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			PodSpec: &AerospikePodSpec{
+				Sidecars: []corev1.Container{
+					{Name: "exporter", Image: "exporter:v1"},
+					{Name: "exporter", Image: "exporter:v2"},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error for duplicate container name in podSpec.sidecars")
+	}
+	if !strings.Contains(err.Error(), `spec.podSpec.sidecars[1] name "exporter" duplicates sidecars[0]`) {
+		t.Errorf("error should mention duplicate sidecars name, got: %v", err)
+	}
+}
+
+func TestValidate_PodSpec_DuplicateContainerName_InitContainers(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			PodSpec: &AerospikePodSpec{
+				InitContainers: []corev1.Container{
+					{Name: "warmup", Image: "warmup:v1"},
+					{Name: "warmup", Image: "warmup:v2"},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error for duplicate container name in podSpec.initContainers")
+	}
+	if !strings.Contains(err.Error(), `spec.podSpec.initContainers[1] name "warmup" duplicates initContainers[0]`) {
+		t.Errorf("error should mention duplicate initContainers name, got: %v", err)
+	}
+}
+
+func TestValidate_PodSpec_DuplicateContainerName_SidecarVsInitContainer(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			PodSpec: &AerospikePodSpec{
+				Sidecars: []corev1.Container{
+					{Name: "shared", Image: "side:v1"},
+				},
+				InitContainers: []corev1.Container{
+					{Name: "shared", Image: "init:v1"},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error when podSpec sidecars and initContainers share a name")
+	}
+	if !strings.Contains(err.Error(), `spec.podSpec.initContainers[0] name "shared" duplicates sidecars[0]`) {
+		t.Errorf("error should mention cross sidecars/initContainers duplicate, got: %v", err)
+	}
+}
+
+func TestValidate_PodSpec_SidecarConflictWithBuiltinContainer(t *testing.T) {
+	cases := []struct {
+		builtinName string
+	}{
+		{"aerospike-server"},
+		{"aerospike-init"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.builtinName, func(t *testing.T) {
+			v := &AerospikeClusterValidator{}
+			cluster := &AerospikeCluster{
+				Spec: AerospikeClusterSpec{
+					Size:  3,
+					Image: "aerospike:ce-8.1.1.1",
+					PodSpec: &AerospikePodSpec{
+						Sidecars: []corev1.Container{
+							{Name: tc.builtinName, Image: "user:v1"},
+						},
+					},
+				},
+			}
+
+			_, err := v.validate(cluster)
+			if err == nil {
+				t.Fatalf("expected error when sidecar name %q collides with built-in container", tc.builtinName)
+			}
+			want := fmt.Sprintf(`spec.podSpec.sidecars[0] name %q conflicts with operator built-in container name`, tc.builtinName)
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error should mention built-in conflict, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidate_PodSpec_InitContainerConflictWithBuiltinContainer(t *testing.T) {
+	cases := []struct {
+		builtinName string
+	}{
+		{"aerospike-server"},
+		{"aerospike-init"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.builtinName, func(t *testing.T) {
+			v := &AerospikeClusterValidator{}
+			cluster := &AerospikeCluster{
+				Spec: AerospikeClusterSpec{
+					Size:  3,
+					Image: "aerospike:ce-8.1.1.1",
+					PodSpec: &AerospikePodSpec{
+						InitContainers: []corev1.Container{
+							{Name: tc.builtinName, Image: "user:v1"},
+						},
+					},
+				},
+			}
+
+			_, err := v.validate(cluster)
+			if err == nil {
+				t.Fatalf("expected error when initContainer name %q collides with built-in container", tc.builtinName)
+			}
+			want := fmt.Sprintf(`spec.podSpec.initContainers[0] name %q conflicts with operator built-in container name`, tc.builtinName)
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error should mention built-in conflict, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidate_PodSpec_BuiltinConflictSuppressesDuplicateError(t *testing.T) {
+	cases := []struct {
+		name        string
+		podSpec     *AerospikePodSpec
+		conflictMsg string
+	}{
+		{
+			name: "sidecars both aerospike-server",
+			podSpec: &AerospikePodSpec{
+				Sidecars: []corev1.Container{
+					{Name: "aerospike-server", Image: "user:v1"},
+					{Name: "aerospike-server", Image: "user:v2"},
+				},
+			},
+			conflictMsg: `spec.podSpec.sidecars[0] name "aerospike-server" conflicts with operator built-in container name`,
+		},
+		{
+			name: "initContainers both aerospike-init",
+			podSpec: &AerospikePodSpec{
+				InitContainers: []corev1.Container{
+					{Name: "aerospike-init", Image: "user:v1"},
+					{Name: "aerospike-init", Image: "user:v2"},
+				},
+			},
+			conflictMsg: `spec.podSpec.initContainers[0] name "aerospike-init" conflicts with operator built-in container name`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			v := &AerospikeClusterValidator{}
+			cluster := &AerospikeCluster{
+				Spec: AerospikeClusterSpec{
+					Size:    3,
+					Image:   "aerospike:ce-8.1.1.1",
+					PodSpec: tc.podSpec,
+				},
+			}
+
+			_, err := v.validate(cluster)
+			if err == nil {
+				t.Fatal("expected built-in conflict error")
+			}
+			if !strings.Contains(err.Error(), tc.conflictMsg) {
+				t.Errorf("error should mention built-in conflict, got: %v", err)
+			}
+			if got := strings.Count(err.Error(), "duplicates"); got != 0 {
+				t.Errorf("expected no duplicate-name errors when built-in conflict fires, got %d in: %v", got, err)
+			}
+		})
+	}
+}
+
 func TestValidate_Storage_DeleteLocalStorageWithoutClasses(t *testing.T) {
 	v := &AerospikeClusterValidator{}
 	cluster := &AerospikeCluster{
@@ -3912,6 +4108,49 @@ func TestValidate_DuplicateRoleNames(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "duplicate role name") {
 		t.Errorf("error should mention 'duplicate role name', got: %v", err)
+	}
+}
+
+func TestValidate_AccessControl_EmptyRoleName(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeAccessControl: &AerospikeAccessControlSpec{
+				Users: []AerospikeUserSpec{
+					{
+						Name:       "admin",
+						SecretName: "admin-secret",
+						Roles:      []string{"sys-admin", "user-admin"},
+					},
+				},
+				Roles: []AerospikeRoleSpec{
+					{
+						Name:       "custom-role",
+						Privileges: []string{"read"},
+					},
+					{
+						Name:       "",
+						Privileges: []string{"write"},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error for empty role name in accessControl.roles")
+	}
+	if !strings.Contains(err.Error(), "accessControl.roles[1]: role name must not be empty") {
+		t.Errorf("error should mention 'accessControl.roles[1]: role name must not be empty', got: %v", err)
+	}
+	// Empty entry must be skipped (via continue) so it does not collide with a
+	// later empty entry as a "duplicate role name" — there is no defined empty
+	// role on the cluster.
+	if strings.Contains(err.Error(), `duplicate role name ""`) {
+		t.Errorf("empty role name should not also trigger 'duplicate role name', got: %v", err)
 	}
 }
 
