@@ -773,6 +773,8 @@ func (r *AerospikeClusterReconciler) setConfigDegraded(
 		log.Error(err, "Failed to set ConfigDegraded status")
 		return
 	}
+	metrics.ClusterPhase.WithLabelValues(latest.Namespace, latest.Name).
+		Set(metrics.PhaseToFloat(string(ackov1alpha1.AerospikePhaseConfigDegraded)))
 
 	r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventDynamicConfigDegraded,
 		"Cluster entered ConfigDegraded phase: rollback failed on pods %s", strings.Join(failedPods, ", "))

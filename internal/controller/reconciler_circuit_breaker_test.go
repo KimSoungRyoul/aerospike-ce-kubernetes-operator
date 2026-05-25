@@ -555,6 +555,61 @@ func TestBackoffActivePhaseUpdatesMetric(t *testing.T) {
 	}
 }
 
+func TestConfigDegradedPhaseUpdatesMetric(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := ackov1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme() error = %v", err)
+	}
+
+	stored := &ackov1alpha1.AerospikeCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "config-degraded-demo",
+			Namespace: "default",
+		},
+		Status: ackov1alpha1.AerospikeClusterStatus{
+			Phase:       ackov1alpha1.AerospikePhaseInProgress,
+			PhaseReason: "Reconciliation started",
+		},
+	}
+
+	reconciler := &AerospikeClusterReconciler{
+		Client: fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithStatusSubresource(&ackov1alpha1.AerospikeCluster{}).
+			WithObjects(stored).
+			Build(),
+		Scheme:   scheme,
+		Recorder: record.NewFakeRecorder(10),
+	}
+
+	metrics.ClusterPhase.WithLabelValues(stored.Namespace, stored.Name).
+		Set(metrics.PhaseToFloat(string(ackov1alpha1.AerospikePhaseInProgress)))
+	t.Cleanup(func() {
+		metrics.ClusterPhase.DeleteLabelValues(stored.Namespace, stored.Name)
+	})
+
+	reconciler.setConfigDegraded(context.Background(), stored, []string{"pod-0"})
+
+	updated := &ackov1alpha1.AerospikeCluster{}
+	if err := reconciler.Get(
+		context.Background(),
+		types.NamespacedName{Name: stored.Name, Namespace: stored.Namespace},
+		updated,
+	); err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if updated.Status.Phase != ackov1alpha1.AerospikePhaseConfigDegraded {
+		t.Fatalf("Phase = %q, want %q", updated.Status.Phase, ackov1alpha1.AerospikePhaseConfigDegraded)
+	}
+
+	gotGauge := testutil.ToFloat64(metrics.ClusterPhase.WithLabelValues(stored.Namespace, stored.Name))
+	wantGauge := metrics.PhaseToFloat(string(ackov1alpha1.AerospikePhaseConfigDegraded))
+	if gotGauge != wantGauge {
+		t.Errorf("acko_cluster_phase = %v, want %v (ConfigDegraded); setConfigDegraded must update the gauge",
+			gotGauge, wantGauge)
+	}
+}
+
 func TestCircuitBreakerResetClearsReconcileHealthyCondition(t *testing.T) {
 	cluster := &ackov1alpha1.AerospikeCluster{
 		ObjectMeta: metav1.ObjectMeta{Generation: 3},

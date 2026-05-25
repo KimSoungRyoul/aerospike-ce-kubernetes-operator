@@ -23,6 +23,7 @@ func TestPhaseToFloat(t *testing.T) {
 		{"Paused", 9},
 		{"Deleting", 10},
 		{"BackoffActive", 11},
+		{"ConfigDegraded", 12},
 		{"", 0},
 		{"Unknown", 0},
 	}

@@ -196,6 +196,8 @@ func PhaseToFloat(phase string) float64 {
 		return 10
 	case "BackoffActive":
 		return 11
+	case "ConfigDegraded":
+		return 12
 	default:
 		return 0
 	}
