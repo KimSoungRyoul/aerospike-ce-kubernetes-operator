@@ -95,7 +95,7 @@ in project-hub for `acko-realm.json`).
 
 NOTE: CRD installation is disabled (crds.install=false).
 Ensure acko-crds is installed separately before creating AerospikeCluster resources:
-  helm install acko-crds oci://ghcr.io/aerospike-ce-ecosystem/charts/acko-crds --version {{ .Chart.Version }}
+  helm install acko-crds oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator-crds --version {{ .Chart.Version }}
 {{- end }}
 
 NOTE: The embedded PostgreSQL *sidecar* has been REMOVED. The api now runs on
