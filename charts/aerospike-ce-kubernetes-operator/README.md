@@ -414,7 +414,7 @@ You can customize the UI with per-component image, service, resource, and enviro
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
   --version 1.3.1 \
   --namespace aerospike-operator --create-namespace \
-  --set ui.imageTag=0.24.0 \
+  --set ui.imageTag=0.30.0 \
   --set ui.api.image.repository=ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-api \
   --set ui.web.image.repository=ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-web \
   --set ui.web.service.type=LoadBalancer \

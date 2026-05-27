@@ -65,14 +65,14 @@ To see all available values:
 helm show values oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator
 ```
 
-#### Pin a different Cluster Manager UI release
+#### Pin a Cluster Manager UI release
 
-The Cluster Manager UI (`ui-api` and `ui-web` Deployments) is versioned independently from the operator. The chart pins a known-good `aerospike-cluster-manager` release in `ui.imageTag`. To track a different release, override it globally:
+The Cluster Manager UI (`ui-api` and `ui-web` Deployments) is versioned independently from the operator. The chart defaults `ui.imageTag` to `latest` so a fresh install always picks up the newest `aerospike-cluster-manager` image (Deployment `imagePullPolicy` defaults to `Always` to match). For reproducible deployments, override it with a specific cluster-manager release:
 
 ```bash
 helm install aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
   -n aerospike-operator --create-namespace \
-  --set ui.imageTag=0.24.0
+  --set ui.imageTag=0.30.0
 ```
 
 Or override a single component via `ui.api.image.tag` / `ui.web.image.tag`. Available tags are listed at [aerospike-cluster-manager-api](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/pkgs/container/aerospike-cluster-manager-api) and [aerospike-cluster-manager-web](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager/pkgs/container/aerospike-cluster-manager-web).

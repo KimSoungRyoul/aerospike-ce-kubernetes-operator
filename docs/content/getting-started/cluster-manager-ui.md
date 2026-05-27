@@ -613,7 +613,7 @@ restore → upgrade runbook.
 | `ui.api.enabled` | Deploy the Cluster Manager API (FastAPI). Combine with `ui.web.enabled=false` for both-off (operator-only). | `true` |
 | `ui.web.enabled` | Deploy the Cluster Manager web (Next.js). Combine with `ui.api.enabled=false` for both-off (operator-only). | `true` |
 | `ui.replicaCount` | Replica count for each UI Deployment (api / web) | `1` |
-| `ui.imageTag` | Default image tag for both UI components (api + web) | `"0.24.0"` |
+| `ui.imageTag` | Default image tag for both UI components (api + web). Defaults to `latest` so installs track the newest ACM release; pin to a specific version (e.g. `"0.30.0"`) for reproducible deployments. | `"latest"` |
 | `ui.api.image.repository` | API (FastAPI) container image | `ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-api` |
 | `ui.web.image.repository` | Web (Next.js) container image | `ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-web` |
 | `ui.api.service.type` / `ui.web.service.type` | Service type for each component | `ClusterIP` |

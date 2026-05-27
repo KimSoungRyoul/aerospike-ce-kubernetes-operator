@@ -400,13 +400,16 @@ ui:
   imagePullSecrets: []
 
   # -- Default tag for both UI components (api + web).
-  # aerospike-cluster-manager is versioned independently from the operator,
-  # so the chart pins a known-good cluster-manager release here rather than
-  # letting the UI image tag fall through to .Chart.AppVersion (which is
-  # the operator's version and may not exist as a cluster-manager tag).
-  # Override per-component via ui.api.image.tag / ui.web.image.tag, or
-  # set this to "" to fall through to .Chart.AppVersion.
-  imageTag: "0.24.0"
+  # aerospike-cluster-manager is versioned independently from the operator
+  # and ships releases more frequently than ACKO. The chart defaults to
+  # "latest" so a fresh install always picks up the most recent ACM image
+  # without waiting for an ACKO release that bumps a pinned tag. Because
+  # "latest" is a mutable tag, ui.api.image.pullPolicy / ui.web.image.pullPolicy
+  # default to Always so pods actually refetch on restart.
+  # Pin to a specific cluster-manager release (e.g. "0.30.0") for
+  # reproducible deployments, or override per-component via
+  # ui.api.image.tag / ui.web.image.tag.
+  imageTag: "latest"
 
   # =============================================================================
   # API (FastAPI) — port 8000 internally, Service port 80
@@ -422,7 +425,10 @@ ui:
       # ui.imageTag (preferred) or .Chart.AppVersion. See the
       # ui.api.image helper in _helpers.tpl.
       tag: ""
-      pullPolicy: IfNotPresent
+      # -- Default Always because ui.imageTag is "latest" — a mutable tag
+      # that IfNotPresent would cache indefinitely. Switch to IfNotPresent
+      # when pinning ui.imageTag to an immutable version.
+      pullPolicy: Always
     service:
       type: ClusterIP
       # -- Service port exposed (HTTP default 80). Traffic is forwarded to containerPort 8000.
@@ -731,7 +737,10 @@ ui:
       # ui.imageTag (preferred) or .Chart.AppVersion. See the
       # ui.web.image helper in _helpers.tpl.
       tag: ""
-      pullPolicy: IfNotPresent
+      # -- Default Always because ui.imageTag is "latest" — a mutable tag
+      # that IfNotPresent would cache indefinitely. Switch to IfNotPresent
+      # when pinning ui.imageTag to an immutable version.
+      pullPolicy: Always
     service:
       type: ClusterIP
       port: 3100
