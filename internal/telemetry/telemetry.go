@@ -166,24 +166,21 @@ func signalEnabled(signal string) (bool, error) {
 	}
 }
 
-// resolveAttributeValueLengthLimit picks the effective per-attribute byte cap.
+// resolveAttributeValueLengthLimit picks the effective per-attribute byte cap
+// for the LOGS pipeline only. The spans pipeline uses sdktrace.NewSpanLimits(),
+// which the OTel Go SDK already wires up to honor both
+// OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT and the cross-signal
+// OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT fallback; the Setup() code there just
+// substitutes the safe default when the SDK reports -1. sdklog has no
+// equivalent env-aware limit constructor, so we resolve manually here.
 //
-// The OTel Go SDK's sdktrace.NewSpanLimits() already reads
-// OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT / OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT
-// and applies them, but the SDK's hard-coded default when both are unset is
-// -1 (unlimited). For an operator that watches cluster-wide, unlimited means
-// a single zap field carrying a serialized Pod / StatefulSet body can put the
-// whole OTLP export over the receiver's 4 MiB limit, so we substitute a 4 KiB
-// cap whenever the env vars do not pin a non-negative value explicitly.
-//
-// `specific` is the signal-scoped key (e.g. OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT
-// for spans, OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT for logs); `general`
-// is the cross-signal fallback (OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT). The
-// specific key takes precedence so a "tighter logs but laxer traces"
-// configuration is reachable. Malformed values (non-integer, negative) silently
-// fall back to the safe default — surfacing a startup error would refuse to
-// start the operator over a typo in an observability env var, which is the
-// wrong trade-off.
+// `specific` is the signal-scoped key (OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT
+// for log records); `general` is the cross-signal fallback
+// (OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT). The specific key takes precedence so a
+// "tighter logs but laxer traces" configuration is reachable. Malformed values
+// (non-integer, negative) silently fall back to the safe default — surfacing a
+// startup error would refuse to start the operator over a typo in an
+// observability env var, which is the wrong trade-off.
 func resolveAttributeValueLengthLimit(specific, general string) int {
 	for _, key := range []string{specific, general} {
 		raw, ok := os.LookupEnv(key)
