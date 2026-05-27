@@ -145,13 +145,13 @@ Aerospike Cluster Manager는 오퍼레이터와 함께 두 개의 독립적인 D
 | `ui.api.enabled` | bool | `true` | Cluster Manager API (FastAPI) 컴포넌트 배포. `ui.web.enabled=false`와 함께 false로 설정하면 UI를 완전히 끔. |
 | `ui.web.enabled` | bool | `true` | Cluster Manager web (Next.js) 컴포넌트 배포. `ui.api.enabled=false`와 함께 false로 설정하면 UI를 완전히 끔. |
 | `ui.replicaCount` | int | `1` | 각 UI Deployment(api / web)의 레플리카 수. |
-| `ui.imageTag` | string | `"0.24.0"` | api/web 두 컴포넌트의 기본 이미지 태그. `aerospike-cluster-manager`는 오퍼레이터와 독립적으로 버전 관리되므로 차트가 검증된 릴리스를 여기에 핀. `""`로 설정 시 `.Chart.AppVersion` 사용. |
+| `ui.imageTag` | string | `"latest"` | api/web 두 컴포넌트의 기본 이미지 태그. `aerospike-cluster-manager`는 오퍼레이터와 독립적으로 더 자주 릴리스되므로 기본값 `latest`로 새 설치가 ACKO 릴리스 없이도 최신 ACM 이미지를 추적. 재현 가능한 배포가 필요하면 특정 버전(예: `"0.30.0"`)으로 핀. Pod `pullPolicy`는 mutable 태그 재페치를 위해 기본 `Always`. |
 | `ui.api.image.repository` | string | `ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-api` | API(FastAPI) 컨테이너 이미지 리포지토리. |
 | `ui.api.image.tag` | string | `""` | API 이미지 태그. 비어 있으면 `ui.imageTag` 사용. |
-| `ui.api.image.pullPolicy` | string | `IfNotPresent` | API 이미지 풀 정책. |
+| `ui.api.image.pullPolicy` | string | `Always` | API 이미지 풀 정책. `ui.imageTag`가 `latest`(mutable)이라 기본 `Always`. immutable 태그로 핀하면 `IfNotPresent`로 변경 권장. |
 | `ui.web.image.repository` | string | `ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-web` | Web(Next.js) 컨테이너 이미지 리포지토리. |
 | `ui.web.image.tag` | string | `""` | Web 이미지 태그. 비어 있으면 `ui.imageTag` 사용. |
-| `ui.web.image.pullPolicy` | string | `IfNotPresent` | Web 이미지 풀 정책. |
+| `ui.web.image.pullPolicy` | string | `Always` | Web 이미지 풀 정책. `ui.imageTag`가 `latest`(mutable)이라 기본 `Always`. immutable 태그로 핀하면 `IfNotPresent`로 변경 권장. |
 | `ui.imagePullSecrets` | list | `[]` | 프라이빗 레지스트리용 이미지 풀 시크릿 (모든 UI Deployment에 적용). |
 
 ### 서비스 어카운트 & RBAC

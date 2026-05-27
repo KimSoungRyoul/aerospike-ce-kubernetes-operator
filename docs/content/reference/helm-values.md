@@ -152,13 +152,13 @@ The Aerospike Cluster Manager is a full-stack web dashboard deployed alongside t
 | `ui.api.enabled` | bool | `true` | Deploy the Cluster Manager API (FastAPI) component. Set to false together with `ui.web.enabled=false` to skip the UI entirely. |
 | `ui.web.enabled` | bool | `true` | Deploy the Cluster Manager web (Next.js) component. Set to false together with `ui.api.enabled=false` to skip the UI entirely. |
 | `ui.replicaCount` | int | `1` | Number of replicas for each UI Deployment (api / web). |
-| `ui.imageTag` | string | `"0.24.0"` | Default image tag for both UI components. `aerospike-cluster-manager` is versioned independently from the operator, so the chart pins a known-good release here. Set to `""` to fall through to `.Chart.AppVersion`. |
+| `ui.imageTag` | string | `"latest"` | Default image tag for both UI components. `aerospike-cluster-manager` is versioned independently from the operator and releases more frequently; defaulting to `latest` lets a fresh install track the newest ACM image without an ACKO release. Pin to a specific version (e.g. `"0.30.0"`) for reproducible deployments. |
 | `ui.api.image.repository` | string | `ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-api` | API (FastAPI) container image repository. |
 | `ui.api.image.tag` | string | `""` | API image tag. Empty falls through to `ui.imageTag`. |
-| `ui.api.image.pullPolicy` | string | `IfNotPresent` | API image pull policy. |
+| `ui.api.image.pullPolicy` | string | `Always` | API image pull policy. Defaults to `Always` because `ui.imageTag` is `latest` (mutable). Switch to `IfNotPresent` when pinning to an immutable tag. |
 | `ui.web.image.repository` | string | `ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-web` | Web (Next.js) container image repository. |
 | `ui.web.image.tag` | string | `""` | Web image tag. Empty falls through to `ui.imageTag`. |
-| `ui.web.image.pullPolicy` | string | `IfNotPresent` | Web image pull policy. |
+| `ui.web.image.pullPolicy` | string | `Always` | Web image pull policy. Defaults to `Always` because `ui.imageTag` is `latest` (mutable). Switch to `IfNotPresent` when pinning to an immutable tag. |
 | `ui.imagePullSecrets` | list | `[]` | Image pull secrets for private registries (applied to all UI Deployments). |
 
 ### Service Account & RBAC

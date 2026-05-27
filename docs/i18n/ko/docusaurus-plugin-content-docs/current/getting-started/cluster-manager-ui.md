@@ -78,7 +78,7 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kuber
 | `ui.api.enabled` | Cluster Manager API (FastAPI) 컴포넌트 배포. `ui.web.enabled=false`와 함께 false로 설정하면 UI를 완전히 끔 (operator-only). | `true` |
 | `ui.web.enabled` | Cluster Manager web (Next.js) 컴포넌트 배포. `ui.api.enabled=false`와 함께 false로 설정하면 UI를 완전히 끔 (operator-only). | `true` |
 | `ui.replicaCount` | 각 UI Deployment(api / web)의 레플리카 수 | `1` |
-| `ui.imageTag` | api/web 두 컴포넌트의 기본 이미지 태그 | `"0.24.0"` |
+| `ui.imageTag` | api/web 두 컴포넌트의 기본 이미지 태그. 기본값 `latest`로 ACM 최신 릴리스를 자동 추적하며, 재현 가능한 배포가 필요하면 특정 버전(예: `"0.30.0"`)으로 핀. | `"latest"` |
 | `ui.api.image.repository` | API(FastAPI) 컨테이너 이미지 | `ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-api` |
 | `ui.web.image.repository` | Web(Next.js) 컨테이너 이미지 | `ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-web` |
 | `ui.api.service.type` / `ui.web.service.type` | 컴포넌트별 서비스 타입 | `ClusterIP` |

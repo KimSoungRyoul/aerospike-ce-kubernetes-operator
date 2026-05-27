@@ -270,11 +270,13 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 UI image helpers (per-component).
 Tag resolution order:
   1. ui.api.image.tag / ui.web.image.tag (per-component override)
-  2. ui.imageTag (shared cluster-manager release, pinned in values.yaml)
+  2. ui.imageTag (shared cluster-manager release; defaults to "latest")
   3. .Chart.AppVersion (last resort)
 aerospike-cluster-manager is versioned independently from the operator, so
 falling straight through to .Chart.AppVersion can resolve to a tag that
-does not exist in ghcr.io. ui.imageTag is the intended default knob.
+does not exist in ghcr.io. ui.imageTag is the intended default knob and
+ships as "latest" so the chart tracks ACM releases without an ACKO bump;
+pullPolicy defaults to Always to match.
 */}}
 {{- define "aerospike-ce-kubernetes-operator.ui.imageTag" -}}
 {{- default .Chart.AppVersion .Values.ui.imageTag | toString -}}
