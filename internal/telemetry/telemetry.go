@@ -41,7 +41,9 @@ package telemetry
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"go.opentelemetry.io/contrib/bridges/otelzap"
@@ -60,6 +62,25 @@ import (
 	"go.uber.org/zap/zapcore"
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 )
+
+// defaultAttributeValueLengthLimit caps the bytes any single span / log
+// attribute value can grow to before the SDK truncates it. The OTel Go SDK
+// default is -1 (unlimited), which is unsafe for an operator that watches
+// cluster-wide: if any reconcile-path log or span ever carries a serialized
+// Kubernetes object as an attribute (Pod / StatefulSet / Service / Secret),
+// a single OTLP/gRPC export can balloon past 4 MiB and trigger OOMKilled
+// in busy clusters (#299). 4 KiB is enough to keep human-readable identifiers
+// and short error strings intact; anything larger is truncated by the SDK
+// with a deterministic suffix marker, which is the right trade-off for an
+// operator's observability budget.
+//
+// Trade-off worth knowing: long stacktraces and controller-runtime error
+// strings that embed YAML diffs are the most common casualty of this cap.
+// Operators who need to see full error context can raise it via the standard
+// spec env vars OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT /
+// OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT (and the OTEL_LOGRECORD_*
+// counterparts) — e.g. =16384 for 16 KiB. See resolveAttributeValueLengthLimit.
+const defaultAttributeValueLengthLimit = 4096
 
 // ServiceName is the OTel service.name stamped on every signal the operator
 // emits, and the instrumentation-scope name used for its tracer.
@@ -116,18 +137,98 @@ func activated() bool {
 	return v != "true" && v != "1" && v != "yes"
 }
 
+// signalEnabled reports whether the named signal (traces / metrics / logs)
+// should be exported. Returns:
+//
+//   - (true,  nil)  for "otlp" or unset — the spec default
+//   - (false, nil)  for "none"          — caller skips provider construction
+//   - (false, err)  for any other value — typo in chart values, surface loudly
+//
+// This honors the standard OTel SDK env vars OTEL_TRACES_EXPORTER /
+// OTEL_METRICS_EXPORTER / OTEL_LOGS_EXPORTER so operators can disable a single
+// signal (e.g. metrics) when their collector ships traces+logs receivers but
+// no metrics pipeline — without having to disable telemetry wholesale via
+// OTEL_SDK_DISABLED=true. Same workaround channel used by #299 reporters to
+// stop the OOM cycle while keeping logs flowing through fluent-bit.
+//
+// Reference:
+// https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/#exporter-selection
+func signalEnabled(signal string) (bool, error) {
+	envKey := "OTEL_" + strings.ToUpper(signal) + "_EXPORTER"
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(envKey)))
+	switch v {
+	case "", "otlp":
+		return true, nil
+	case "none":
+		return false, nil
+	default:
+		return false, fmt.Errorf("unsupported %s=%q; expected 'otlp' or 'none'", envKey, v)
+	}
+}
+
+// resolveLogAttributeValueLengthLimit picks the effective per-attribute byte
+// cap for the LOGS pipeline. The spans pipeline uses sdktrace.NewSpanLimits(),
+// which the OTel Go SDK already wires up to honor both
+// OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT and the cross-signal
+// OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT fallback; the Setup() code there just
+// substitutes the safe default when the SDK reports -1. sdklog has no
+// equivalent env-aware limit constructor, so we resolve manually here:
+//
+//   - OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT (signal-scoped, takes precedence)
+//   - OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT (cross-signal fallback)
+//
+// Letting the specific key win on top of the general makes a "tighter logs but
+// laxer traces" configuration reachable. Malformed values (non-integer,
+// negative) silently fall back to the safe default — surfacing a startup error
+// would refuse to start the operator over a typo in an observability env var,
+// which is the wrong trade-off.
+func resolveLogAttributeValueLengthLimit() int {
+	keys := []string{
+		"OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT",
+		"OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT",
+	}
+	for _, key := range keys {
+		raw, ok := os.LookupEnv(key)
+		if !ok {
+			continue
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(raw))
+		if err != nil || n < 0 {
+			continue
+		}
+		return n
+	}
+	return defaultAttributeValueLengthLimit
+}
+
 // Setup builds the OTLP trace/metric/log providers, registers them as the
 // global OpenTelemetry providers, and installs the W3C trace-context + baggage
 // propagator. serviceVersion is stamped onto the resource as service.version.
 //
 // When OTEL_SDK_DISABLED keeps telemetry off, Setup returns a disabled
-// Provider and no error. When a provider fails to build, any partially
+// Provider and no error. Per-signal disable (OTEL_TRACES_EXPORTER=none /
+// OTEL_METRICS_EXPORTER=none / OTEL_LOGS_EXPORTER=none) is honored: the
+// matching provider is left as the global NoOp default while the remaining
+// signals still export. When a provider fails to build, any partially
 // constructed providers are flushed and stopped, an inert Provider is
 // returned, and the error is surfaced so the caller can keep running the
 // operator with telemetry off.
 func Setup(ctx context.Context, serviceVersion string) (*Provider, error) {
 	if !activated() {
 		return &Provider{}, nil
+	}
+
+	tracesOn, err := signalEnabled("traces")
+	if err != nil {
+		return &Provider{}, err
+	}
+	metricsOn, err := signalEnabled("metrics")
+	if err != nil {
+		return &Provider{}, err
+	}
+	logsOn, err := signalEnabled("logs")
+	if err != nil {
+		return &Provider{}, err
 	}
 
 	p := &Provider{}
@@ -158,15 +259,29 @@ func Setup(ctx context.Context, serviceVersion string) (*Provider, error) {
 	// operator continues cleanly with telemetry off.
 
 	// --- Traces ---------------------------------------------------------
-	traceExp, err := otlptrace.New(ctx)
-	if err != nil {
-		return fail(err)
+	var tp *sdktrace.TracerProvider
+	if tracesOn {
+		traceExp, terr := otlptrace.New(ctx)
+		if terr != nil {
+			return fail(terr)
+		}
+		// NewSpanLimits() already honors OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT
+		// (specific) and OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT (general fallback);
+		// see sdk/trace/internal/env. We only override the value when the SDK
+		// has it at its hard-coded -1 (unlimited) default, which is unsafe for
+		// a cluster-wide watcher (#299). All other count limits stay at the
+		// SDK's 128 defaults.
+		spanLimits := sdktrace.NewSpanLimits()
+		if spanLimits.AttributeValueLengthLimit < 0 {
+			spanLimits.AttributeValueLengthLimit = defaultAttributeValueLengthLimit
+		}
+		tp = sdktrace.NewTracerProvider(
+			sdktrace.WithBatcher(traceExp),
+			sdktrace.WithResource(res),
+			sdktrace.WithRawSpanLimits(spanLimits),
+		)
+		p.shutdownFuncs = append(p.shutdownFuncs, tp.Shutdown)
 	}
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(traceExp),
-		sdktrace.WithResource(res),
-	)
-	p.shutdownFuncs = append(p.shutdownFuncs, tp.Shutdown)
 
 	// --- Metrics --------------------------------------------------------
 	// The Prometheus bridge republishes the controller-runtime metrics
@@ -174,46 +289,69 @@ func Setup(ctx context.Context, serviceVersion string) (*Provider, error) {
 	// custom metric from internal/metrics — through OTLP. No metric
 	// definition changes: the same series stay scrapable at /metrics and
 	// are additionally pushed to the collector.
-	metricExp, err := otlpmetric.New(ctx)
-	if err != nil {
-		return fail(err)
+	var mp *sdkmetric.MeterProvider
+	if metricsOn {
+		metricExp, merr := otlpmetric.New(ctx)
+		if merr != nil {
+			return fail(merr)
+		}
+		reader := sdkmetric.NewPeriodicReader(metricExp,
+			sdkmetric.WithProducer(prombridge.NewMetricProducer(
+				prombridge.WithGatherer(ctrlmetrics.Registry),
+			)),
+		)
+		mp = sdkmetric.NewMeterProvider(
+			sdkmetric.WithReader(reader),
+			sdkmetric.WithResource(res),
+		)
+		p.shutdownFuncs = append(p.shutdownFuncs, mp.Shutdown)
 	}
-	reader := sdkmetric.NewPeriodicReader(metricExp,
-		sdkmetric.WithProducer(prombridge.NewMetricProducer(
-			prombridge.WithGatherer(ctrlmetrics.Registry),
-		)),
-	)
-	mp := sdkmetric.NewMeterProvider(
-		sdkmetric.WithReader(reader),
-		sdkmetric.WithResource(res),
-	)
-	p.shutdownFuncs = append(p.shutdownFuncs, mp.Shutdown)
 
 	// --- Logs -----------------------------------------------------------
-	logExp, err := otlplog.New(ctx)
-	if err != nil {
-		return fail(err)
+	var lp *sdklog.LoggerProvider
+	if logsOn {
+		logExp, lerr := otlplog.New(ctx)
+		if lerr != nil {
+			return fail(lerr)
+		}
+		lp = sdklog.NewLoggerProvider(
+			sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp)),
+			sdklog.WithResource(res),
+			// Cap per-log-record attribute byte size for the same reason as
+			// SpanLimits above. Zap fields that wrap a Pod/StatefulSet via
+			// otelzap would otherwise produce multi-megabyte LogRecords on
+			// every reconcile in a cluster-wide watch (#299).
+			sdklog.WithAttributeValueLengthLimit(resolveLogAttributeValueLengthLimit()),
+		)
+		p.shutdownFuncs = append(p.shutdownFuncs, lp.Shutdown)
 	}
-	lp := sdklog.NewLoggerProvider(
-		sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp)),
-		sdklog.WithResource(res),
-	)
-	p.shutdownFuncs = append(p.shutdownFuncs, lp.Shutdown)
 
-	// All three providers built successfully — now publish them globally.
-	otel.SetTracerProvider(tp)
-	otel.SetMeterProvider(mp)
-	logglobal.SetLoggerProvider(lp)
+	// All providers built successfully — now publish them globally. Skip the
+	// SetXProvider call for any disabled signal so the global NoOp survives.
+	if tp != nil {
+		otel.SetTracerProvider(tp)
+	}
+	if mp != nil {
+		otel.SetMeterProvider(mp)
+	}
+	if lp != nil {
+		logglobal.SetLoggerProvider(lp)
+		// otelzap core — cmd/main.go tees this into the zap logger so operator
+		// log lines are exported as OTLP log records alongside traces. Only
+		// attach the core when logs are actually enabled; otherwise leave
+		// p.zapCore nil so the zap tee is skipped.
+		p.zapCore = otelzap.NewCore(ServiceName, otelzap.WithLoggerProvider(lp))
+	}
 	// W3C TraceContext + Baggage so operator spans stitch with the
 	// cluster-manager API and any other OTel-instrumented service.
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{},
 		propagation.Baggage{},
 	))
-	// otelzap core — cmd/main.go tees this into the zap logger so operator
-	// log lines are exported as OTLP log records alongside traces.
-	p.zapCore = otelzap.NewCore(ServiceName, otelzap.WithLoggerProvider(lp))
 
-	p.enabled = true
+	// Enabled reflects whether ANY signal is being exported. All-three-off via
+	// per-signal flags is a legitimate no-op configuration — the caller will
+	// log "OpenTelemetry export enabled" only when at least one pipeline runs.
+	p.enabled = tp != nil || mp != nil || lp != nil
 	return p, nil
 }
