@@ -43,6 +43,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"go.opentelemetry.io/contrib/bridges/otelzap"
@@ -73,9 +74,12 @@ import (
 // with a deterministic suffix marker, which is the right trade-off for an
 // operator's observability budget.
 //
-// Operators who need a higher cap can override via the standard spec env
-// vars OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT / OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT
-// (and the OTEL_LOGRECORD_* counterparts) — see resolveAttributeValueLengthLimit.
+// Trade-off worth knowing: long stacktraces and controller-runtime error
+// strings that embed YAML diffs are the most common casualty of this cap.
+// Operators who need to see full error context can raise it via the standard
+// spec env vars OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT /
+// OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT (and the OTEL_LOGRECORD_*
+// counterparts) — e.g. =16384 for 16 KiB. See resolveAttributeValueLengthLimit.
 const defaultAttributeValueLengthLimit = 4096
 
 // ServiceName is the OTel service.name stamped on every signal the operator
@@ -170,40 +174,29 @@ func signalEnabled(signal string) (bool, error) {
 // -1 (unlimited). For an operator that watches cluster-wide, unlimited means
 // a single zap field carrying a serialized Pod / StatefulSet body can put the
 // whole OTLP export over the receiver's 4 MiB limit, so we substitute a 4 KiB
-// cap whenever the env vars do not pin a value explicitly.
+// cap whenever the env vars do not pin a non-negative value explicitly.
 //
 // `specific` is the signal-scoped key (e.g. OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT
 // for spans, OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT for logs); `general`
 // is the cross-signal fallback (OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT). The
 // specific key takes precedence so a "tighter logs but laxer traces"
-// configuration is reachable.
+// configuration is reachable. Malformed values (non-integer, negative) silently
+// fall back to the safe default — surfacing a startup error would refuse to
+// start the operator over a typo in an observability env var, which is the
+// wrong trade-off.
 func resolveAttributeValueLengthLimit(specific, general string) int {
 	for _, key := range []string{specific, general} {
-		if raw, ok := os.LookupEnv(key); ok {
-			if n, err := parseIntStrict(raw); err == nil && n >= 0 {
-				return n
-			}
+		raw, ok := os.LookupEnv(key)
+		if !ok {
+			continue
 		}
+		n, err := strconv.Atoi(strings.TrimSpace(raw))
+		if err != nil || n < 0 {
+			continue
+		}
+		return n
 	}
 	return defaultAttributeValueLengthLimit
-}
-
-func parseIntStrict(s string) (int, error) {
-	s = strings.TrimSpace(s)
-	n := 0
-	for i, ch := range s {
-		if i == 0 && ch == '-' {
-			return 0, fmt.Errorf("negative limit not allowed")
-		}
-		if ch < '0' || ch > '9' {
-			return 0, fmt.Errorf("non-digit %q", ch)
-		}
-		n = n*10 + int(ch-'0')
-	}
-	if s == "" {
-		return 0, fmt.Errorf("empty")
-	}
-	return n, nil
 }
 
 // Setup builds the OTLP trace/metric/log providers, registers them as the
@@ -270,17 +263,16 @@ func Setup(ctx context.Context, serviceVersion string) (*Provider, error) {
 		if terr != nil {
 			return fail(terr)
 		}
-		// SpanLimits.AttributeValueLengthLimit defaults to -1 (unlimited) in
-		// the SDK. That is unsafe for a cluster-wide watcher because any zap
-		// field or span attribute carrying a serialized Kubernetes object
-		// would let a single OTLP export grow past the 4 MiB collector default
-		// and crash the operator with OOMKilled (#299). Cap the length and
-		// keep all other count limits at their 128 SDK defaults.
+		// NewSpanLimits() already honors OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT
+		// (specific) and OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT (general fallback);
+		// see sdk/trace/internal/env. We only override the value when the SDK
+		// has it at its hard-coded -1 (unlimited) default, which is unsafe for
+		// a cluster-wide watcher (#299). All other count limits stay at the
+		// SDK's 128 defaults.
 		spanLimits := sdktrace.NewSpanLimits()
-		spanLimits.AttributeValueLengthLimit = resolveAttributeValueLengthLimit(
-			"OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT",
-			"OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT",
-		)
+		if spanLimits.AttributeValueLengthLimit < 0 {
+			spanLimits.AttributeValueLengthLimit = defaultAttributeValueLengthLimit
+		}
 		tp = sdktrace.NewTracerProvider(
 			sdktrace.WithBatcher(traceExp),
 			sdktrace.WithResource(res),
