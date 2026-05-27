@@ -258,71 +258,56 @@ func TestSetupRejectsUnknownExporter(t *testing.T) {
 // Attribute-value length caps (#299 OOM root cause)
 // ---------------------------------------------------------------------------
 
-func TestResolveAttributeValueLengthLimitDefault(t *testing.T) {
-	t.Setenv("OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT", "")
+func TestResolveLogAttributeValueLengthLimitDefault(t *testing.T) {
+	t.Setenv("OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT", "")
 	t.Setenv("OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT", "")
 
-	got := resolveAttributeValueLengthLimit(
-		"OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT",
-		"OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT",
-	)
+	got := resolveLogAttributeValueLengthLimit()
 	if got != defaultAttributeValueLengthLimit {
-		t.Errorf("resolveAttributeValueLengthLimit() = %d, want %d", got, defaultAttributeValueLengthLimit)
+		t.Errorf("resolveLogAttributeValueLengthLimit() = %d, want %d", got, defaultAttributeValueLengthLimit)
 	}
 }
 
-func TestResolveAttributeValueLengthLimitSpecificOverridesGeneral(t *testing.T) {
+func TestResolveLogAttributeValueLengthLimitSpecificOverridesGeneral(t *testing.T) {
 	t.Setenv("OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT", "1024")
-	t.Setenv("OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT", "8192")
+	t.Setenv("OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT", "8192")
 
-	got := resolveAttributeValueLengthLimit(
-		"OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT",
-		"OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT",
-	)
+	got := resolveLogAttributeValueLengthLimit()
 	if got != 8192 {
-		t.Errorf("specific=8192 should win over general=1024, got %d", got)
+		t.Errorf("logrecord-specific=8192 should win over general=1024, got %d", got)
 	}
 }
 
-func TestResolveAttributeValueLengthLimitGeneralFallback(t *testing.T) {
-	t.Setenv("OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT", "")
+func TestResolveLogAttributeValueLengthLimitGeneralFallback(t *testing.T) {
+	t.Setenv("OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT", "")
 	t.Setenv("OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT", "2048")
 
-	got := resolveAttributeValueLengthLimit(
-		"OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT",
-		"OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT",
-	)
+	got := resolveLogAttributeValueLengthLimit()
 	if got != 2048 {
-		t.Errorf("general=2048 should be used when specific is unset, got %d", got)
+		t.Errorf("general=2048 should be used when logrecord-specific is unset, got %d", got)
 	}
 }
 
-func TestResolveAttributeValueLengthLimitMalformedFallsBackToDefault(t *testing.T) {
+func TestResolveLogAttributeValueLengthLimitMalformedFallsBackToDefault(t *testing.T) {
 	// Malformed values must not silently revert to SDK unlimited (-1); we
 	// pretend the env var was not set and apply the safe default cap.
-	t.Setenv("OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT", "abc")
+	t.Setenv("OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT", "abc")
 	t.Setenv("OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT", "")
 
-	got := resolveAttributeValueLengthLimit(
-		"OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT",
-		"OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT",
-	)
+	got := resolveLogAttributeValueLengthLimit()
 	if got != defaultAttributeValueLengthLimit {
 		t.Errorf("malformed value should fall back to %d, got %d", defaultAttributeValueLengthLimit, got)
 	}
 }
 
-func TestResolveAttributeValueLengthLimitNegativeFallsBackToDefault(t *testing.T) {
+func TestResolveLogAttributeValueLengthLimitNegativeFallsBackToDefault(t *testing.T) {
 	// A negative override would mean "unlimited" per the OTel SDK, which is
 	// exactly the unsafe configuration #299 hit. Force the safe default
 	// instead of trusting the user-supplied -1.
-	t.Setenv("OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT", "-1")
+	t.Setenv("OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT", "-1")
 	t.Setenv("OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT", "")
 
-	got := resolveAttributeValueLengthLimit(
-		"OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT",
-		"OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT",
-	)
+	got := resolveLogAttributeValueLengthLimit()
 	if got != defaultAttributeValueLengthLimit {
 		t.Errorf("negative override should fall back to %d, got %d", defaultAttributeValueLengthLimit, got)
 	}

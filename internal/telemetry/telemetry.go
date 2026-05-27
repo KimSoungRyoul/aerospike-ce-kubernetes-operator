@@ -166,23 +166,28 @@ func signalEnabled(signal string) (bool, error) {
 	}
 }
 
-// resolveAttributeValueLengthLimit picks the effective per-attribute byte cap
-// for the LOGS pipeline only. The spans pipeline uses sdktrace.NewSpanLimits(),
+// resolveLogAttributeValueLengthLimit picks the effective per-attribute byte
+// cap for the LOGS pipeline. The spans pipeline uses sdktrace.NewSpanLimits(),
 // which the OTel Go SDK already wires up to honor both
 // OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT and the cross-signal
 // OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT fallback; the Setup() code there just
 // substitutes the safe default when the SDK reports -1. sdklog has no
-// equivalent env-aware limit constructor, so we resolve manually here.
+// equivalent env-aware limit constructor, so we resolve manually here:
 //
-// `specific` is the signal-scoped key (OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT
-// for log records); `general` is the cross-signal fallback
-// (OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT). The specific key takes precedence so a
-// "tighter logs but laxer traces" configuration is reachable. Malformed values
-// (non-integer, negative) silently fall back to the safe default — surfacing a
-// startup error would refuse to start the operator over a typo in an
-// observability env var, which is the wrong trade-off.
-func resolveAttributeValueLengthLimit(specific, general string) int {
-	for _, key := range []string{specific, general} {
+//   - OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT (signal-scoped, takes precedence)
+//   - OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT (cross-signal fallback)
+//
+// Letting the specific key win on top of the general makes a "tighter logs but
+// laxer traces" configuration reachable. Malformed values (non-integer,
+// negative) silently fall back to the safe default — surfacing a startup error
+// would refuse to start the operator over a typo in an observability env var,
+// which is the wrong trade-off.
+func resolveLogAttributeValueLengthLimit() int {
+	keys := []string{
+		"OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT",
+		"OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT",
+	}
+	for _, key := range keys {
 		raw, ok := os.LookupEnv(key)
 		if !ok {
 			continue
@@ -309,10 +314,6 @@ func Setup(ctx context.Context, serviceVersion string) (*Provider, error) {
 		if lerr != nil {
 			return fail(lerr)
 		}
-		logAttrValLimit := resolveAttributeValueLengthLimit(
-			"OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT",
-			"OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT",
-		)
 		lp = sdklog.NewLoggerProvider(
 			sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp)),
 			sdklog.WithResource(res),
@@ -320,7 +321,7 @@ func Setup(ctx context.Context, serviceVersion string) (*Provider, error) {
 			// SpanLimits above. Zap fields that wrap a Pod/StatefulSet via
 			// otelzap would otherwise produce multi-megabyte LogRecords on
 			// every reconcile in a cluster-wide watch (#299).
-			sdklog.WithAttributeValueLengthLimit(logAttrValLimit),
+			sdklog.WithAttributeValueLengthLimit(resolveLogAttributeValueLengthLimit()),
 		)
 		p.shutdownFuncs = append(p.shutdownFuncs, lp.Shutdown)
 	}
