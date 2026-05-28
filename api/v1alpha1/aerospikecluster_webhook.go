@@ -711,17 +711,7 @@ func (v *AerospikeClusterValidator) validateAerospikeConfig(config map[string]an
 	// aerospikeAccessControl is configured; the security section is intentionally
 	// skipped during config generation (configgen).
 	if secSection, exists := config["security"]; exists {
-		secMap, ok := secSection.(map[string]any)
-		if !ok {
-			errors = append(errors, fmt.Sprintf("aerospikeConfig.security must be a map, got %T", secSection))
-		} else {
-			for enterpriseKey, reason := range enterpriseOnlySecurityKeys {
-				if _, found := secMap[enterpriseKey]; found {
-					errors = append(errors, fmt.Sprintf(
-						"aerospikeConfig.security.%s is not allowed in CE edition (%s)", enterpriseKey, reason))
-				}
-			}
-		}
+		errors = append(errors, validateSecuritySection(secSection)...)
 	}
 
 	// Validate top-level section types to catch config errors at admission time
@@ -737,9 +727,7 @@ func (v *AerospikeClusterValidator) validateAerospikeConfig(config map[string]an
 		}
 	}
 	if logging, exists := config["logging"]; exists {
-		if _, ok := logging.([]any); !ok {
-			errors = append(errors, fmt.Sprintf("aerospikeConfig.logging must be a list, got %T", logging))
-		}
+		errors = append(errors, validateLoggingSection(logging)...)
 	}
 
 	// Validate heartbeat mode is mesh (CE only supports mesh)
@@ -762,6 +750,90 @@ var enterpriseOnlySecurityKeys = map[string]string{
 	"ldap":   "LDAP authentication is Enterprise-only",
 	"log":    "security audit logging is Enterprise-only",
 	"syslog": "security syslog sink is Enterprise-only",
+}
+
+// enterpriseOnlyLoggingContexts lists logging context keys that are Enterprise-only.
+// These are valid Aerospike logging context names but only emit messages on
+// Enterprise builds; setting them on CE causes aerospikd to abort at startup
+// with an "unknown context" error because the audit subsystem is unlinked.
+//
+// References:
+//   - https://aerospike.com/docs/server/operations/configure/log
+//   - https://aerospike.com/docs/server/operations/configure/security/auditing
+var enterpriseOnlyLoggingContexts = map[string]string{
+	"audit":                 "security audit context is Enterprise-only",
+	"report-data-op":        "data-op audit reporting is Enterprise-only",
+	"report-data-op-user":   "data-op-user audit reporting is Enterprise-only",
+	"report-data-op-role":   "data-op-role audit reporting is Enterprise-only",
+	"report-sys-admin":      "sys-admin audit reporting is Enterprise-only",
+	"report-user-admin":     "user-admin audit reporting is Enterprise-only",
+	"report-violation":      "violation audit reporting is Enterprise-only",
+	"report-authentication": "authentication audit reporting is Enterprise-only",
+}
+
+// validateSecuritySection enforces CE constraints on aerospikeConfig.security.
+// The security stanza must be a map; enterprise-only sub-keys (tls, ldap, log,
+// syslog) are rejected even when the value is nil or a non-map (the presence of
+// the key alone is enough to know the user intended an enterprise feature).
+//
+// Defensive type checks: the function never panics regardless of what shape the
+// caller hands it (nil interface, scalar, list, map). Unexpected types yield a
+// descriptive admission error instead.
+func validateSecuritySection(secSection any) []string {
+	var errs []string
+	secMap, ok := secSection.(map[string]any)
+	if !ok {
+		return []string{fmt.Sprintf("aerospikeConfig.security must be a map, got %T", secSection)}
+	}
+	for enterpriseKey, reason := range enterpriseOnlySecurityKeys {
+		if _, found := secMap[enterpriseKey]; found {
+			errs = append(errs, fmt.Sprintf(
+				"aerospikeConfig.security.%s is not allowed in CE edition (%s)", enterpriseKey, reason))
+		}
+	}
+	return errs
+}
+
+// validateLoggingSection enforces CE constraints on aerospikeConfig.logging.
+// Aerospike CE accepts a list of sink entries (console / syslog / file by path),
+// each a map of context-name -> level. Enterprise-only contexts (audit + the
+// report-* family) trigger a startup crash on CE because the audit subsystem
+// is unlinked. We reject them at admission time so the cluster never enters a
+// permanent CrashLoopBackOff.
+//
+// Type assertions are defensive: malformed entries (non-map, missing/blank
+// name, non-string context values) produce admission errors instead of panics.
+// Mirrors the runtime checks in configgen.generateLoggingSection so the
+// webhook fails fast on the same shapes that the renderer would reject later.
+func validateLoggingSection(logging any) []string {
+	logs, ok := logging.([]any)
+	if !ok {
+		return []string{fmt.Sprintf("aerospikeConfig.logging must be a list, got %T", logging)}
+	}
+	var errs []string
+	for i, entry := range logs {
+		logMap, ok := entry.(map[string]any)
+		if !ok {
+			errs = append(errs, fmt.Sprintf(
+				"aerospikeConfig.logging[%d] must be a map, got %T", i, entry))
+			continue
+		}
+		nameVal, hasName := logMap["name"]
+		if !hasName {
+			errs = append(errs, fmt.Sprintf(
+				"aerospikeConfig.logging[%d] is missing the required 'name' key", i))
+		} else if nameStr, ok := nameVal.(string); !ok || nameStr == "" {
+			errs = append(errs, fmt.Sprintf(
+				"aerospikeConfig.logging[%d].name must be a non-empty string, got %T", i, nameVal))
+		}
+		for ctxKey, reason := range enterpriseOnlyLoggingContexts {
+			if _, found := logMap[ctxKey]; found {
+				errs = append(errs, fmt.Sprintf(
+					"aerospikeConfig.logging[%d].%s is not allowed in CE edition (%s)", i, ctxKey, reason))
+			}
+		}
+	}
+	return errs
 }
 
 // enterpriseOnlyNamespaceKeys lists namespace-level config keys that are Enterprise-only.
