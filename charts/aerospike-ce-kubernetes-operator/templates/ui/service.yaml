@@ -16,9 +16,9 @@ metadata:
 spec:
   type: {{ .Values.ui.api.service.type }}
   ports:
-    - name: api
+    - name: {{ include "aerospike-ce-kubernetes-operator.ui.api.containerName" . }}
       port: {{ .Values.ui.api.service.port }}
-      targetPort: api
+      targetPort: {{ include "aerospike-ce-kubernetes-operator.ui.api.containerName" . }}
       protocol: TCP
       appProtocol: http
   selector:

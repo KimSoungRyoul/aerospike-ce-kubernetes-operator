@@ -198,6 +198,24 @@ app.kubernetes.io/component: ui-web
 {{- end }}
 
 {{/*
+UI api container / port name. The value is used in five places that must
+agree (otherwise probes fail or Service selects nothing):
+  - Deployment containers[0].name
+  - Deployment containers[0].ports[0].name
+  - Service ports[0].name
+  - Service ports[0].targetPort (port name reference, not number)
+  - ServiceMonitor endpoints[0].port
+The default `api` keeps backwards compatibility. Override with
+`ui.api.containerName` when integrating with admission webhooks that match
+on container name (e.g. OpenTelemetry Operator
+`instrumentation.opentelemetry.io/container-names`) — generic `api` is
+ambiguous across a namespace with other sidecars.
+*/}}
+{{- define "aerospike-ce-kubernetes-operator.ui.api.containerName" -}}
+{{- default "api" .Values.ui.api.containerName -}}
+{{- end }}
+
+{{/*
 Chart-managed PostgreSQL (ui.database.postgresql.deploy=true) name & labels.
 */}}
 {{- define "aerospike-ce-kubernetes-operator.ui.postgres.fullname" -}}
