@@ -3604,6 +3604,34 @@ func TestValidate_MaxUnavailableNil(t *testing.T) {
 	}
 }
 
+// TestValidate_MaxUnavailableDeferredToTemplate confirms that the
+// maxUnavailable >= size warning is suppressed when spec.size is 0 and a
+// templateRef is set. Without the guard every templateRef-backed cluster with
+// maxUnavailable set produces a spurious "PodDisruptionBudget will not prevent
+// full disruption" warning because spec.Size is 0 at admission time.
+func TestValidate_MaxUnavailableDeferredToTemplate(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	mu := intstr.FromInt32(1)
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:           0,
+			TemplateRef:    &TemplateRef{Name: "ce-template"},
+			MaxUnavailable: &mu,
+		},
+	}
+
+	warnings, err := v.validate(cluster)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, w := range warnings {
+		if strings.Contains(w, "maxUnavailable") {
+			t.Errorf("maxUnavailable warning should be deferred to template resolution, got: %v", w)
+		}
+	}
+}
+
 // --- ServiceMonitor / Monitoring consistency tests ---
 
 func TestValidate_ServiceMonitorEnabledWithoutMonitoring(t *testing.T) {
@@ -5195,6 +5223,38 @@ func TestValidate_RackBatchSize_NilRackConfig(t *testing.T) {
 	for _, w := range warnings {
 		if strings.Contains(w, "resolves to 0 pods") {
 			t.Errorf("unexpected rack batch size warning when rackConfig is nil: %v", w)
+		}
+	}
+}
+
+// TestValidate_RackBatchSizeDeferredToTemplate confirms that the
+// rackConfig.rollingUpdateBatchSize percentage-resolves-to-0 warning is
+// suppressed when spec.size is 0 and a templateRef is set. Without the guard
+// every templateRef-backed cluster with a percentage
+// rackConfig.rollingUpdateBatchSize produces a spurious "resolves to 0 pods
+// for cluster size 0" warning because spec.Size is 0 at admission time.
+func TestValidate_RackBatchSizeDeferredToTemplate(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	bs := intstr.FromString("50%")
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:        0,
+			TemplateRef: &TemplateRef{Name: "ce-template"},
+			RackConfig: &RackConfig{
+				Racks:                  []Rack{{ID: 1}},
+				RollingUpdateBatchSize: &bs,
+			},
+		},
+	}
+
+	warnings, err := v.validate(cluster)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, w := range warnings {
+		if strings.Contains(w, "rackConfig.rollingUpdateBatchSize") || strings.Contains(w, "resolves to 0 pods") {
+			t.Errorf("rackConfig.rollingUpdateBatchSize warning should be deferred to template resolution, got: %v", w)
 		}
 	}
 }

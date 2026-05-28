@@ -1249,7 +1249,16 @@ func (v *AerospikeClusterValidator) validateBatchSize(cluster *AerospikeCluster)
 }
 
 // validateMaxUnavailable warns if maxUnavailable is >= cluster size.
+//
+// When spec.size is 0 and spec.templateRef is set, the size will be supplied
+// later by the resolved template; the mu >= size comparison is skipped to avoid
+// a spurious "PodDisruptionBudget will not prevent full disruption" warning
+// that fires for every templateRef-backed cluster with maxUnavailable set.
+// Mirrors the sizeDeferredToTemplate pattern used in validateBatchSize (#305).
 func (v *AerospikeClusterValidator) validateMaxUnavailable(cluster *AerospikeCluster) admission.Warnings {
+	if cluster.Spec.Size == 0 && cluster.Spec.TemplateRef != nil {
+		return nil
+	}
 	if cluster.Spec.MaxUnavailable == nil {
 		return nil
 	}
@@ -1798,8 +1807,18 @@ func (v *AerospikeClusterValidator) validateNetworkPortUniqueness(cluster *Aeros
 }
 
 // validateRackBatchSize warns when a rack-level percentage batch size resolves to 0 pods.
+//
+// When spec.size is 0 and spec.templateRef is set, the size will be supplied
+// later by the resolved template; the percentage-resolves-to-0 check is skipped
+// to avoid a spurious "resolves to 0 pods for cluster size 0" warning that
+// fires for every templateRef-backed cluster with a percentage
+// rackConfig.rollingUpdateBatchSize. Mirrors the sizeDeferredToTemplate pattern
+// used in validateBatchSize (#305).
 func (v *AerospikeClusterValidator) validateRackBatchSize(cluster *AerospikeCluster) admission.Warnings {
 	if cluster.Spec.RackConfig == nil || cluster.Spec.RackConfig.RollingUpdateBatchSize == nil {
+		return nil
+	}
+	if cluster.Spec.Size == 0 && cluster.Spec.TemplateRef != nil {
 		return nil
 	}
 	bs := cluster.Spec.RackConfig.RollingUpdateBatchSize
