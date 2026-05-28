@@ -150,11 +150,11 @@ spec:
         {{- end }}
       {{- end }}
       containers:
-        - name: api
+        - name: {{ include "aerospike-ce-kubernetes-operator.ui.api.containerName" . }}
           image: {{ include "aerospike-ce-kubernetes-operator.ui.api.image" . }}
           imagePullPolicy: {{ .Values.ui.api.image.pullPolicy }}
           ports:
-            - name: api
+            - name: {{ include "aerospike-ce-kubernetes-operator.ui.api.containerName" . }}
               containerPort: {{ .Values.ui.api.service.targetPort }}
               protocol: TCP
           envFrom:

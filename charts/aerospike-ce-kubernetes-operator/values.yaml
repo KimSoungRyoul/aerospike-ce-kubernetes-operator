@@ -419,6 +419,17 @@ ui:
     # Set to false to deploy only the web frontend (then set
     # `ui.web.env.apiUrl` to your external API endpoint).
     enabled: true
+    # -- Container / port name used by the api Deployment and its Service
+    # (and ServiceMonitor port reference). Default `api` keeps backwards
+    # compatibility, but the generic name collides with admission webhooks
+    # that filter on container name in a namespace shared with other
+    # workloads (e.g. OpenTelemetry Operator
+    # `instrumentation.opentelemetry.io/container-names`). Override with a
+    # specific name like `cluster-manager-api` to disambiguate. When
+    # overridden, the api `livenessProbe` / `readinessProbe` / `startupProbe`
+    # `httpGet.port` (named port reference) under `ui.api.*Probe` must be
+    # updated to the same value.
+    containerName: api
     image:
       repository: ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-api
       # -- Container image tag. Leave empty to fall through to
