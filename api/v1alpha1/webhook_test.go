@@ -1994,6 +1994,47 @@ func TestValidateUpdate_RejectsOperationChangeWhileInProgress(t *testing.T) {
 	}
 }
 
+func TestValidateUpdate_RejectsPodListChangeWhileInProgress(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+
+	oldCluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			Operations: []OperationSpec{
+				{Kind: OperationWarmRestart, ID: "op-1", PodList: []string{"pod-0", "pod-1"}},
+			},
+		},
+		Status: AerospikeClusterStatus{
+			OperationStatus: &OperationStatus{
+				ID:    "op-1",
+				Kind:  OperationWarmRestart,
+				Phase: AerospikePhaseInProgress,
+			},
+		},
+	}
+
+	// Same ID and Kind, but PodList changed — must still be rejected to avoid
+	// silently redirecting an in-flight operation to a different pod set.
+	newCluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			Operations: []OperationSpec{
+				{Kind: OperationWarmRestart, ID: "op-1", PodList: []string{"pod-0", "pod-2"}},
+			},
+		},
+	}
+
+	_, err := v.ValidateUpdate(context.Background(), oldCluster, newCluster)
+	if err == nil {
+		t.Fatal("expected error when changing PodList of an InProgress operation")
+	}
+	if !strings.Contains(err.Error(), "InProgress") {
+		t.Errorf("error should mention 'InProgress', got: %v", err)
+	}
+}
+
 func TestValidateUpdate_AllowsSameOperationWhileInProgress(t *testing.T) {
 	v := &AerospikeClusterValidator{}
 
