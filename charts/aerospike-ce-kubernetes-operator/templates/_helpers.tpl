@@ -216,6 +216,32 @@ ambiguous across a namespace with other sidecars.
 {{- end }}
 
 {{/*
+Render a UI api probe (liveness / readiness / startup) with `httpGet.port`
+forced to the configured container/port name. PR #301 made the container
+name configurable, but the default probes in values.yaml hardcode
+`port: api`, so an override like `ui.api.containerName=cluster-manager-api`
+would otherwise produce a probe that references a port name no port
+declares — the kubelet then fails with "named port not found" and the
+pod never becomes Ready.
+
+Users can still override the rest of the probe (path / timing / scheme /
+host) via `ui.api.{liveness,readiness,startup}Probe`; only the port name
+is auto-aligned. Probes that use `tcpSocket` / `exec` / `grpc` are
+emitted unchanged because they do not reference an HTTP port name.
+
+Usage:
+  {{- include "aerospike-ce-kubernetes-operator.ui.api.probe"
+       (dict "probe" .Values.ui.api.livenessProbe "ctx" .) | nindent 12 }}
+*/}}
+{{- define "aerospike-ce-kubernetes-operator.ui.api.probe" -}}
+{{- $probe := deepCopy .probe -}}
+{{- if $probe.httpGet -}}
+{{- $_ := set $probe.httpGet "port" (include "aerospike-ce-kubernetes-operator.ui.api.containerName" .ctx) -}}
+{{- end -}}
+{{- toYaml $probe -}}
+{{- end }}
+
+{{/*
 Chart-managed PostgreSQL (ui.database.postgresql.deploy=true) name & labels.
 */}}
 {{- define "aerospike-ce-kubernetes-operator.ui.postgres.fullname" -}}

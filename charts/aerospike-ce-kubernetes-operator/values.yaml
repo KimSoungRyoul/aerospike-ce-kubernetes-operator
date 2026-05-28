@@ -425,10 +425,11 @@ ui:
     # that filter on container name in a namespace shared with other
     # workloads (e.g. OpenTelemetry Operator
     # `instrumentation.opentelemetry.io/container-names`). Override with a
-    # specific name like `cluster-manager-api` to disambiguate. When
-    # overridden, the api `livenessProbe` / `readinessProbe` / `startupProbe`
-    # `httpGet.port` (named port reference) under `ui.api.*Probe` must be
-    # updated to the same value.
+    # specific name like `cluster-manager-api` to disambiguate. The api
+    # `livenessProbe` / `readinessProbe` / `startupProbe` `httpGet.port`
+    # is auto-aligned to this value by the chart, so users only need to
+    # set `containerName` (the `port: api` shown below is a default that
+    # gets rewritten at render time).
     containerName: api
     image:
       repository: ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-api

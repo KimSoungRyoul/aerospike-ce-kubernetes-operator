@@ -706,12 +706,20 @@ func collectAerospikeInfo(
 		wg.Add(1)
 		go func(node *aero.Node, podName string) {
 			defer wg.Done()
+			// Acquire a semaphore slot or bail out on cancellation.
+			// The release defer MUST be co-located with the acquire branch
+			// so that:
+			//   1. The cancellation branch never tries to release a slot
+			//      it did not take (a stray `<-sem` would steal a slot
+			//      from a peer worker).
+			//   2. A panic between acquire and release cannot leak the
+			//      slot — the defer is registered the instant we own it.
 			select {
 			case sem <- struct{}{}:
+				defer func() { <-sem }() // release semaphore slot
 			case <-ctx.Done():
 				return
 			}
-			defer func() { <-sem }() // release semaphore slot
 
 			info := aeroPodInfo{}
 

@@ -259,17 +259,24 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- /*
+            Probe `httpGet.port` is always rewritten to the container/port
+            name (see the `ui.api.probe` helper) so that overriding
+            `ui.api.containerName` does not leave the probes pointing at a
+            non-existent named port. Users can still customise path /
+            timing / scheme / host via `ui.api.{liveness,readiness,startup}Probe`.
+          */}}
           {{- with .Values.ui.api.livenessProbe }}
           livenessProbe:
-            {{- toYaml . | nindent 12 }}
+            {{- include "aerospike-ce-kubernetes-operator.ui.api.probe" (dict "probe" . "ctx" $) | nindent 12 }}
           {{- end }}
           {{- with .Values.ui.api.readinessProbe }}
           readinessProbe:
-            {{- toYaml . | nindent 12 }}
+            {{- include "aerospike-ce-kubernetes-operator.ui.api.probe" (dict "probe" . "ctx" $) | nindent 12 }}
           {{- end }}
           {{- with .Values.ui.api.startupProbe }}
           startupProbe:
-            {{- toYaml . | nindent 12 }}
+            {{- include "aerospike-ce-kubernetes-operator.ui.api.probe" (dict "probe" . "ctx" $) | nindent 12 }}
           {{- end }}
           lifecycle:
             preStop:
