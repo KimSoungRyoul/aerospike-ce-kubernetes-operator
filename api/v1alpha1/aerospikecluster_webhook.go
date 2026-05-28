@@ -1228,7 +1228,16 @@ func (v *AerospikeClusterValidator) validateWorkDirectory(cluster *AerospikeClus
 }
 
 // validateBatchSize checks the rolling update batch size against cluster size.
+//
+// When spec.size is 0 and spec.templateRef is set, the size will be supplied
+// later by the resolved template; the bs > size comparison is skipped to avoid
+// a spurious "all pods may restart simultaneously" warning that fires for every
+// templateRef-backed cluster with rollingUpdateBatchSize>0. Mirrors the
+// sizeDeferredToTemplate pattern used in validateReplicationFactor.
 func (v *AerospikeClusterValidator) validateBatchSize(cluster *AerospikeCluster) admission.Warnings {
+	if cluster.Spec.Size == 0 && cluster.Spec.TemplateRef != nil {
+		return nil
+	}
 	if cluster.Spec.RollingUpdateBatchSize == nil {
 		return nil
 	}

@@ -941,6 +941,33 @@ func TestValidate_RollingUpdateBatchSizeNil(t *testing.T) {
 	}
 }
 
+// TestValidate_RollingUpdateBatchSizeDeferredToTemplate confirms that the
+// batchSize > size warning is suppressed when spec.size is 0 and a templateRef
+// is set. Without the guard every templateRef-backed cluster with
+// rollingUpdateBatchSize>0 produces a spurious "all pods may restart
+// simultaneously" warning because spec.Size is 0 at admission time.
+func TestValidate_RollingUpdateBatchSizeDeferredToTemplate(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:                   0,
+			TemplateRef:            &TemplateRef{Name: "ce-template"},
+			RollingUpdateBatchSize: int32Ptr(2),
+		},
+	}
+
+	warnings, err := v.validate(cluster)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, w := range warnings {
+		if strings.Contains(w, "rollingUpdateBatchSize") {
+			t.Errorf("batchSize warning should be deferred to template resolution, got: %v", w)
+		}
+	}
+}
+
 // --- Defaulter core behavior tests ---
 
 func TestDefault_SetsClusterName(t *testing.T) {
