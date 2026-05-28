@@ -11,7 +11,7 @@ metadata:
     {{- end }}
 spec:
   endpoints:
-    - port: {{ include "aerospike-ce-kubernetes-operator.ui.api.containerName" . }}
+    - port: {{ include "aerospike-ce-kubernetes-operator.ui.api.portName" . }}
       scheme: http
       path: /api/metrics
       {{- with .Values.ui.metrics.serviceMonitor.interval }}

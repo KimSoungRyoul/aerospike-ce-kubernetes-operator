@@ -216,6 +216,54 @@ ambiguous across a namespace with other sidecars.
 {{- end }}
 
 {{/*
+UI api port name. Must satisfy Kubernetes IANA_SVC_NAME (≤15 chars, lowercase
+alphanumeric + hyphens, must contain at least one letter). The container
+name is also used as the port name when no explicit `ui.api.portName` is
+set — but container names can be up to 63 chars while port names cannot,
+so we truncate-and-validate here instead of letting the kube-apiserver
+reject the Deployment / Service at apply time.
+
+Override `ui.api.portName` directly when the container name exceeds 15
+chars (e.g. containerName=cluster-manager-api → portName=cm-api). Failing
+fast in helm with a clear message beats a server-side
+`spec.ports[0].name: Invalid value: ... must be no more than 15 characters`
+that surfaces only at install time and confuses the chain of cause.
+*/}}
+{{- define "aerospike-ce-kubernetes-operator.ui.api.portName" -}}
+{{- $name := default (include "aerospike-ce-kubernetes-operator.ui.api.containerName" .) .Values.ui.api.portName -}}
+{{- if gt (len $name) 15 -}}
+{{- fail (printf "ui.api.portName / containerName %q is %d chars; Kubernetes port names must be ≤15 chars. Set ui.api.portName to a short alias (e.g. \"cm-api\") when overriding ui.api.containerName with a longer string." $name (len $name)) -}}
+{{- end -}}
+{{- $name -}}
+{{- end }}
+
+{{/*
+Render a UI api probe (liveness / readiness / startup) with `httpGet.port`
+forced to the configured container/port name. PR #301 made the container
+name configurable, but the default probes in values.yaml hardcode
+`port: api`, so an override like `ui.api.containerName=cluster-manager-api`
+would otherwise produce a probe that references a port name no port
+declares — the kubelet then fails with "named port not found" and the
+pod never becomes Ready.
+
+Users can still override the rest of the probe (path / timing / scheme /
+host) via `ui.api.{liveness,readiness,startup}Probe`; only the port name
+is auto-aligned. Probes that use `tcpSocket` / `exec` / `grpc` are
+emitted unchanged because they do not reference an HTTP port name.
+
+Usage:
+  {{- include "aerospike-ce-kubernetes-operator.ui.api.probe"
+       (dict "probe" .Values.ui.api.livenessProbe "ctx" .) | nindent 12 }}
+*/}}
+{{- define "aerospike-ce-kubernetes-operator.ui.api.probe" -}}
+{{- $probe := deepCopy .probe -}}
+{{- if $probe.httpGet -}}
+{{- $_ := set $probe.httpGet "port" (include "aerospike-ce-kubernetes-operator.ui.api.portName" .ctx) -}}
+{{- end -}}
+{{- toYaml $probe -}}
+{{- end }}
+
+{{/*
 Chart-managed PostgreSQL (ui.database.postgresql.deploy=true) name & labels.
 */}}
 {{- define "aerospike-ce-kubernetes-operator.ui.postgres.fullname" -}}

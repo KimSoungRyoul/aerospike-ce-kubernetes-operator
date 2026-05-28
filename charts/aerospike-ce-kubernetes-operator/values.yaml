@@ -425,11 +425,20 @@ ui:
     # that filter on container name in a namespace shared with other
     # workloads (e.g. OpenTelemetry Operator
     # `instrumentation.opentelemetry.io/container-names`). Override with a
-    # specific name like `cluster-manager-api` to disambiguate. When
-    # overridden, the api `livenessProbe` / `readinessProbe` / `startupProbe`
-    # `httpGet.port` (named port reference) under `ui.api.*Probe` must be
-    # updated to the same value.
+    # specific name like `cluster-manager-api` to disambiguate. The api
+    # `livenessProbe` / `readinessProbe` / `startupProbe` `httpGet.port`
+    # is auto-aligned to this value by the chart, so users only need to
+    # set `containerName` (the `port: api` shown below is a default that
+    # gets rewritten at render time).
     containerName: api
+    # -- Port name (Deployment containers[0].ports[0].name + Service ports[0].name
+    # / targetPort + ServiceMonitor endpoints[0].port + the auto-aligned probe
+    # httpGet.port). Defaults to `containerName` to keep the single-knob ergonomic.
+    # Kubernetes IANA_SVC_NAME limits port names to ≤15 chars, so set this
+    # explicitly to a short alias whenever `containerName` exceeds 15 chars
+    # (e.g. containerName=cluster-manager-api → portName=cm-api). The chart
+    # fails fast at render time with a clear message otherwise.
+    portName: ""
     image:
       repository: ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-api
       # -- Container image tag. Leave empty to fall through to
