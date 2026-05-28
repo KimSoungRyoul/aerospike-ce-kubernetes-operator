@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -283,7 +284,8 @@ func (v *AerospikeClusterValidator) ValidateUpdate(ctx context.Context, oldClust
 			return nil, fmt.Errorf("cannot change operations while operation %q is InProgress", oldCluster.Status.OperationStatus.ID)
 		}
 		for i := range oldOps {
-			if oldOps[i].ID != newOps[i].ID || oldOps[i].Kind != newOps[i].Kind {
+			if oldOps[i].ID != newOps[i].ID || oldOps[i].Kind != newOps[i].Kind ||
+				!slices.Equal(oldOps[i].PodList, newOps[i].PodList) {
 				return nil, fmt.Errorf("cannot change operations while operation %q is InProgress", oldCluster.Status.OperationStatus.ID)
 			}
 		}
