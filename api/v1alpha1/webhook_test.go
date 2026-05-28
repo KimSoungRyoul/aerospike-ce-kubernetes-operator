@@ -5866,3 +5866,183 @@ func TestValidate_MoreRacksThanSizeAllowedWithTemplate(t *testing.T) {
 		t.Fatalf("rack/size check should be deferred to template resolution, got: %v", err)
 	}
 }
+
+// --- CE logging-section validation tests (validateLoggingSection) ---
+
+// TestValidate_CELoggingEnterpriseContextsRejected verifies that enterprise-only
+// logging context keys (audit + the report-* family) are rejected by the
+// admission webhook. Setting any of these on a CE cluster causes aerospikd to
+// abort at startup with an "unknown context" error.
+func TestValidate_CELoggingEnterpriseContextsRejected(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+
+	entContexts := []string{
+		"audit",
+		"report-data-op",
+		"report-data-op-user",
+		"report-data-op-role",
+		"report-sys-admin",
+		"report-user-admin",
+		"report-violation",
+		"report-authentication",
+	}
+
+	for _, ctxKey := range entContexts {
+		t.Run(ctxKey, func(t *testing.T) {
+			cluster := &AerospikeCluster{
+				Spec: AerospikeClusterSpec{
+					Size:  3,
+					Image: "aerospike:ce-8.1.1.1",
+					AerospikeConfig: &AerospikeConfigSpec{
+						Value: map[string]any{
+							"logging": []any{
+								map[string]any{
+									"name": "/var/log/aerospike/aerospike.log",
+									"any":  "info",
+									ctxKey: "info",
+								},
+							},
+						},
+					},
+				},
+			}
+
+			_, err := v.validate(cluster)
+			if err == nil {
+				t.Fatalf("expected error for enterprise-only logging context %q, got nil", ctxKey)
+			}
+			expected := fmt.Sprintf("logging[0].%s is not allowed in CE", ctxKey)
+			if !strings.Contains(err.Error(), expected) {
+				t.Errorf("expected error to contain %q, got: %v", expected, err)
+			}
+		})
+	}
+}
+
+// TestValidate_CELoggingValidSinksAccepted verifies that all CE-supported
+// logging sinks (console, stderr, syslog, file by path) are accepted along
+// with arbitrary CE context names (e.g. info, any, namespace).
+func TestValidate_CELoggingValidSinksAccepted(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeConfig: &AerospikeConfigSpec{
+				Value: map[string]any{
+					"logging": []any{
+						map[string]any{"name": "console", "any": "info"},
+						map[string]any{"name": "stderr", "any": "warning"},
+						map[string]any{"name": "syslog", "any": "info"},
+						map[string]any{"name": "/var/log/aerospike/aerospike.log", "any": "info", "namespace": "debug"},
+					},
+				},
+			},
+		},
+	}
+
+	if _, err := v.validate(cluster); err != nil {
+		t.Errorf("expected valid CE logging config to be accepted, got: %v", err)
+	}
+}
+
+// TestValidate_CELoggingMalformedEntries verifies that malformed logging
+// entries are rejected with a descriptive error rather than panicking. Covers:
+//   - logging value that is not a list
+//   - logging entry that is not a map
+//   - logging entry missing the required name key
+//   - logging entry with a non-string name
+func TestValidate_CELoggingMalformedEntries(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+
+	cases := []struct {
+		desc    string
+		logging any
+		wantSub string
+	}{
+		{
+			desc:    "scalar instead of list",
+			logging: "info",
+			wantSub: "aerospikeConfig.logging must be a list",
+		},
+		{
+			desc:    "entry is a string",
+			logging: []any{"console"},
+			wantSub: "logging[0] must be a map",
+		},
+		{
+			desc:    "entry missing name",
+			logging: []any{map[string]any{"any": "info"}},
+			wantSub: "logging[0] is missing the required 'name' key",
+		},
+		{
+			desc:    "entry with non-string name",
+			logging: []any{map[string]any{"name": 42, "any": "info"}},
+			wantSub: "logging[0].name must be a non-empty string",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.desc, func(t *testing.T) {
+			cluster := &AerospikeCluster{
+				Spec: AerospikeClusterSpec{
+					Size:  3,
+					Image: "aerospike:ce-8.1.1.1",
+					AerospikeConfig: &AerospikeConfigSpec{
+						Value: map[string]any{"logging": tc.logging},
+					},
+				},
+			}
+
+			// Must not panic regardless of input shape.
+			_, err := v.validate(cluster)
+			if err == nil {
+				t.Fatalf("expected error for %s, got nil", tc.desc)
+			}
+			if !strings.Contains(err.Error(), tc.wantSub) {
+				t.Errorf("expected error to contain %q, got: %v", tc.wantSub, err)
+			}
+		})
+	}
+}
+
+// TestValidate_SecuritySectionMalformedNoPanic verifies that malformed
+// security section shapes (nil interface, scalars, lists) produce a
+// descriptive admission error and never panic. The original implementation
+// used a single inline type assertion that could trip subtle nil-handling
+// paths; validateSecuritySection now centralises the defensive checks.
+func TestValidate_SecuritySectionMalformedNoPanic(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+
+	cases := []struct {
+		desc    string
+		section any
+	}{
+		{"explicit nil", nil},
+		{"scalar string", "enable-security"},
+		{"scalar bool", true},
+		{"list shape", []any{"enable-security"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.desc, func(t *testing.T) {
+			cluster := &AerospikeCluster{
+				Spec: AerospikeClusterSpec{
+					Size:  3,
+					Image: "aerospike:ce-8.1.1.1",
+					AerospikeConfig: &AerospikeConfigSpec{
+						Value: map[string]any{"security": tc.section},
+					},
+				},
+			}
+
+			_, err := v.validate(cluster)
+			if err == nil {
+				t.Fatalf("expected error for malformed security section %s, got nil", tc.desc)
+			}
+			if !strings.Contains(err.Error(), "aerospikeConfig.security must be a map") {
+				t.Errorf("expected 'security must be a map' error, got: %v", err)
+			}
+		})
+	}
+}
