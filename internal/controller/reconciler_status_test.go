@@ -474,6 +474,80 @@ func TestSetFineGrainedConditions(t *testing.T) {
 			t.Errorf("MigrationComplete = %q, want True", cond.Status)
 		}
 	})
+
+	t.Run("ValidConfigHashes accepts per-rack override hashes: ConfigApplied=True", func(t *testing.T) {
+		// 2-rack cluster: rack 0 uses cluster config, rack 1 overrides config.
+		// Their effective hashes differ. Pods carry their rack's effective hash.
+		clusterCfg := &ackov1alpha1.AerospikeConfigSpec{
+			Value: map[string]any{"service": map[string]any{"proto-fd-max": 15000}},
+		}
+		rack1Cfg := &ackov1alpha1.AerospikeConfigSpec{
+			Value: map[string]any{"service": map[string]any{"proto-fd-max": 30000}},
+		}
+		rack0Hash := configHash(clusterCfg)
+		rack1Hash := configHash(rack1Cfg)
+		if rack0Hash == rack1Hash {
+			t.Fatal("test precondition failed: rack hashes should differ")
+		}
+
+		cluster := &ackov1alpha1.AerospikeCluster{}
+		cluster.Spec.AerospikeConfig = clusterCfg
+		cluster.Status.Pods = map[string]ackov1alpha1.AerospikePodStatus{
+			"c-0-0": {ConfigHash: rack0Hash},
+			"c-1-0": {ConfigHash: rack1Hash},
+		}
+
+		setFineGrainedConditions(cluster, StatusUpdateOpts{
+			ValidConfigHashes: map[string]bool{rack0Hash: true, rack1Hash: true},
+		})
+
+		cond := findCondition(cluster, ackov1alpha1.ConditionConfigApplied)
+		if cond == nil {
+			t.Fatal("ConfigApplied condition not found")
+		}
+		if cond.Status != metav1.ConditionTrue {
+			t.Errorf("ConfigApplied = %q, want True (per-rack override hash should be accepted)", cond.Status)
+		}
+	})
+
+	t.Run("ValidConfigHashes: pod with unknown hash keeps ConfigApplied=False", func(t *testing.T) {
+		cluster := &ackov1alpha1.AerospikeCluster{}
+		cluster.Status.Pods = map[string]ackov1alpha1.AerospikePodStatus{
+			"c-0-0": {ConfigHash: "goodhash"},
+			"c-1-0": {ConfigHash: "stalehash"},
+		}
+		setFineGrainedConditions(cluster, StatusUpdateOpts{
+			ValidConfigHashes: map[string]bool{"goodhash": true},
+		})
+
+		cond := findCondition(cluster, ackov1alpha1.ConditionConfigApplied)
+		if cond == nil {
+			t.Fatal("ConfigApplied condition not found")
+		}
+		if cond.Status != metav1.ConditionFalse {
+			t.Errorf("ConfigApplied = %q, want False (stale pod hash)", cond.Status)
+		}
+	})
+
+	t.Run("nil ValidConfigHashes falls back to single cluster-level hash", func(t *testing.T) {
+		clusterCfg := &ackov1alpha1.AerospikeConfigSpec{
+			Value: map[string]any{"service": map[string]any{"proto-fd-max": 15000}},
+		}
+		cluster := &ackov1alpha1.AerospikeCluster{}
+		cluster.Spec.AerospikeConfig = clusterCfg
+		cluster.Status.Pods = map[string]ackov1alpha1.AerospikePodStatus{
+			"c-0-0": {ConfigHash: configHash(clusterCfg)},
+		}
+		setFineGrainedConditions(cluster, StatusUpdateOpts{ValidConfigHashes: nil})
+
+		cond := findCondition(cluster, ackov1alpha1.ConditionConfigApplied)
+		if cond == nil {
+			t.Fatal("ConfigApplied condition not found")
+		}
+		if cond.Status != metav1.ConditionTrue {
+			t.Errorf("ConfigApplied = %q, want True (fallback path)", cond.Status)
+		}
+	})
 }
 
 func TestConditionsSnapshot(t *testing.T) {

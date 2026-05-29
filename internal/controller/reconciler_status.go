@@ -38,6 +38,15 @@ type StatusUpdateOpts struct {
 	RestartInProgress bool
 	// Paused indicates reconciliation is paused (ReconciliationPaused=True).
 	Paused bool
+	// ValidConfigHashes is the set of acceptable effective per-rack config hashes.
+	// A pod is considered to have the desired config when its ConfigHash is a key
+	// in this set. This is required because each rack receives the effective hash
+	// of (cluster config DeepMerged with rack.AerospikeConfig), so a single
+	// cluster-level hash would never match pods in racks that override config.
+	// When nil, setFineGrainedConditions falls back to comparing every pod against
+	// the single cluster-level hash (used by callers/tests that do not compute
+	// per-rack hashes).
+	ValidConfigHashes map[string]bool
 }
 
 // updateStatusAndPhase re-fetches the latest cluster object from the API server,
@@ -521,13 +530,29 @@ func removeCondition(cluster *ackov1alpha1.AerospikeCluster, condType string) {
 // ConfigApplied, ReconciliationPaused, ACLSynced, MigrationComplete.
 // Called from updateStatusAndPhase after populateStatus.
 func setFineGrainedConditions(cluster *ackov1alpha1.AerospikeCluster, o StatusUpdateOpts) {
-	// ConfigApplied: true when all pods carry the same config hash as the desired config.
-	desiredHash := configHash(cluster.Spec.AerospikeConfig)
+	// ConfigApplied: true when every pod carries an accepted config hash.
+	//
+	// Pods receive the EFFECTIVE per-rack hash — (cluster config DeepMerged with
+	// rack.AerospikeConfig) — so a single cluster-level hash would never match
+	// pods belonging to a rack that overrides config, leaving ConfigApplied=False
+	// forever even after full convergence. When ValidConfigHashes is provided we
+	// accept any pod whose ConfigHash is in that set. Otherwise we fall back to
+	// the legacy single cluster-level hash comparison.
 	allConfigApplied := len(cluster.Status.Pods) > 0
-	for _, ps := range cluster.Status.Pods {
-		if ps.ConfigHash != desiredHash {
-			allConfigApplied = false
-			break
+	if o.ValidConfigHashes != nil {
+		for _, ps := range cluster.Status.Pods {
+			if !o.ValidConfigHashes[ps.ConfigHash] {
+				allConfigApplied = false
+				break
+			}
+		}
+	} else {
+		desiredHash := configHash(cluster.Spec.AerospikeConfig)
+		for _, ps := range cluster.Status.Pods {
+			if ps.ConfigHash != desiredHash {
+				allConfigApplied = false
+				break
+			}
 		}
 	}
 	if allConfigApplied {
