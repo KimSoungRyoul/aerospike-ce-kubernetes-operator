@@ -44,7 +44,7 @@ func (r *AerospikeClusterReconciler) reconcileMonitoring(
 
 	// Reconcile metrics Service
 	if err := r.reconcileMetricsService(ctx, cluster, monitoringEnabled); err != nil {
-		return err
+		return fmt.Errorf("reconciling metrics service: %w", err)
 	}
 
 	// Reconcile ServiceMonitor
@@ -149,7 +149,10 @@ func (r *AerospikeClusterReconciler) reconcileMetricsService(
 	existing.Spec.Selector = desired.Spec.Selector
 	existing.Labels = labels
 	log.Info("Updating metrics Service", "name", svcName)
-	return r.Update(ctx, existing)
+	if err := r.Update(ctx, existing); err != nil {
+		return fmt.Errorf("updating metrics service %s: %w", svcName, err)
+	}
+	return nil
 }
 
 func (r *AerospikeClusterReconciler) reconcileServiceMonitor(
@@ -238,7 +241,10 @@ func (r *AerospikeClusterReconciler) reconcileServiceMonitor(
 	existing.Object["spec"] = smSpec
 	existing.SetLabels(labels)
 	log.Info("Updating ServiceMonitor", "name", smName)
-	return r.Update(ctx, existing)
+	if err := r.Update(ctx, existing); err != nil {
+		return fmt.Errorf("updating ServiceMonitor %s: %w", smName, err)
+	}
+	return nil
 }
 
 func toStringMap(m map[string]string) map[string]any {
@@ -340,7 +346,10 @@ func (r *AerospikeClusterReconciler) reconcilePrometheusRule(
 	existing.Object["spec"] = prSpec
 	existing.SetLabels(labels)
 	log.Info("Updating PrometheusRule", "name", prName)
-	return r.Update(ctx, existing)
+	if err := r.Update(ctx, existing); err != nil {
+		return fmt.Errorf("updating PrometheusRule %s: %w", prName, err)
+	}
+	return nil
 }
 
 func unstructuredResourceChanged(
