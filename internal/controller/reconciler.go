@@ -667,10 +667,7 @@ func (r *AerospikeClusterReconciler) reconcileCluster(
 	// ConfigApplied condition accepts pods in racks that override config. Each
 	// pod carries its rack's effective hash (rackInfos[i].hash), not a single
 	// cluster-level hash.
-	validConfigHashes := make(map[string]bool, len(rackInfos))
-	for i := range rackInfos {
-		validConfigHashes[rackInfos[i].hash] = true
-	}
+	validConfigHashes := buildValidConfigHashes(rackInfos)
 
 	// Update status and set phase to Completed.
 	statusOpts := StatusUpdateOpts{ACLErr: aclErr, ACLSynced: aclSynced, ValidConfigHashes: validConfigHashes}
@@ -695,6 +692,18 @@ func (r *AerospikeClusterReconciler) reconcileCluster(
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// buildValidConfigHashes returns the set of acceptable effective per-rack
+// config hashes. A pod is considered to carry the desired config when its
+// ConfigHash is a key in this set (see setFineGrainedConditions). Extracted
+// from reconcileCluster to keep that function's cyclomatic complexity in check.
+func buildValidConfigHashes(rackInfos []rackInfo) map[string]bool {
+	validConfigHashes := make(map[string]bool, len(rackInfos))
+	for i := range rackInfos {
+		validConfigHashes[rackInfos[i].hash] = true
+	}
+	return validConfigHashes
 }
 
 // rackInfo holds pre-computed per-rack configuration used during reconciliation.
