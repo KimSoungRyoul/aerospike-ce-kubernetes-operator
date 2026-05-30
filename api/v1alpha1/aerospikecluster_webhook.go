@@ -293,32 +293,44 @@ func (v *AerospikeClusterValidator) ValidateUpdate(ctx context.Context, oldClust
 
 	// Prevent simultaneous addition and removal of rack IDs (which risks data loss
 	// from a rename-like operation). Pure additions or pure removals are fine.
-	if oldCluster.Spec.RackConfig != nil && cluster.Spec.RackConfig != nil {
-		oldIDs := make(map[int]bool, len(oldCluster.Spec.RackConfig.Racks))
-		for _, rack := range oldCluster.Spec.RackConfig.Racks {
-			oldIDs[rack.ID] = true
-		}
-		newIDs := make(map[int]bool, len(cluster.Spec.RackConfig.Racks))
-		for _, rack := range cluster.Spec.RackConfig.Racks {
-			newIDs[rack.ID] = true
-		}
+	//
+	// effectiveRackIDs resolves both specs the same way the reconciler's getRacks
+	// does: when rackConfig is nil or has no racks, the cluster runs a single
+	// default rack with ID 0. Without that fallback the guard only fired when both
+	// specs carried an explicit rackConfig, so dropping rackConfig entirely
+	// (explicit racks -> default rack 0) — which tears down every explicit-rack
+	// StatefulSet and creates a fresh rack-0 one — slipped through unchecked even
+	// though it is exactly the rename-like, data-loss-risky operation the guard
+	// exists to block.
+	oldIDs := effectiveRackIDs(oldCluster.Spec.RackConfig)
+	newIDs := effectiveRackIDs(cluster.Spec.RackConfig)
 
-		// Collect IDs removed (in old but not new) and IDs added (in new but not old).
-		var removedIDs []int
-		for id := range oldIDs {
-			if !newIDs[id] {
-				removedIDs = append(removedIDs, id)
-			}
+	// Collect IDs removed (in old but not new) and IDs added (in new but not old).
+	var removedIDs []int
+	for id := range oldIDs {
+		if !newIDs[id] {
+			removedIDs = append(removedIDs, id)
 		}
-		var addedIDs []int
-		for id := range newIDs {
-			if !oldIDs[id] {
-				addedIDs = append(addedIDs, id)
-			}
+	}
+	var addedIDs []int
+	for id := range newIDs {
+		if !oldIDs[id] {
+			addedIDs = append(addedIDs, id)
 		}
-		if len(removedIDs) > 0 && len(addedIDs) > 0 {
-			return nil, fmt.Errorf("cannot add new rack IDs %v and remove existing rack IDs %v in the same update; please do this in two separate steps (first add, then remove, or vice versa)", addedIDs, removedIDs)
+	}
+	if len(removedIDs) > 0 && len(addedIDs) > 0 {
+		// Sort for a deterministic error message (map iteration order is random).
+		slices.Sort(addedIDs)
+		slices.Sort(removedIDs)
+		// Rack ID 0 is the implicit default rack and can never be named explicitly
+		// (validateRackConfig reserves it), so a transition that adds or removes it —
+		// i.e. introducing or dropping rack-awareness on an existing cluster — has no
+		// valid two-step path. Steer the user to the only safe route instead of
+		// suggesting an impossible "add then remove".
+		if slices.Contains(addedIDs, 0) || slices.Contains(removedIDs, 0) {
+			return nil, fmt.Errorf("cannot add new rack IDs %v and remove existing rack IDs %v in the same update: this switches the cluster between the implicit default rack (ID 0) and explicit racks, which recreates StatefulSets and risks data loss; introduce or remove rack-awareness by creating a new cluster and migrating data instead", addedIDs, removedIDs)
 		}
+		return nil, fmt.Errorf("cannot add new rack IDs %v and remove existing rack IDs %v in the same update; please do this in two separate steps (first add, then remove, or vice versa)", addedIDs, removedIDs)
 	}
 
 	return v.validateWithCtx(ctx, cluster)
@@ -327,6 +339,23 @@ func (v *AerospikeClusterValidator) ValidateUpdate(ctx context.Context, oldClust
 // ValidateDelete implements admission.Validator[*AerospikeCluster].
 func (v *AerospikeClusterValidator) ValidateDelete(ctx context.Context, cluster *AerospikeCluster) (admission.Warnings, error) {
 	return nil, nil
+}
+
+// effectiveRackIDs returns the set of rack IDs the cluster will actually run,
+// mirroring the controller's getRacks fallback: an absent or empty rackConfig
+// means a single default rack with ID 0. Keeping this in sync with getRacks lets
+// ValidateUpdate's add/remove guard reason about the real rack topology rather
+// than the raw spec, so the "drop rackConfig entirely" transition is treated as
+// the simultaneous remove+add it really is.
+func effectiveRackIDs(rackConfig *RackConfig) map[int]bool {
+	if rackConfig == nil || len(rackConfig.Racks) == 0 {
+		return map[int]bool{0: true}
+	}
+	ids := make(map[int]bool, len(rackConfig.Racks))
+	for _, rack := range rackConfig.Racks {
+		ids[rack.ID] = true
+	}
+	return ids
 }
 
 // serviceMonitorName returns the ServiceMonitor name produced by the
