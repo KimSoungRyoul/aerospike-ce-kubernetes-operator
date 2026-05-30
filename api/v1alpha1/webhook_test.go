@@ -6181,3 +6181,97 @@ func TestValidate_SecuritySectionMalformedNoPanic(t *testing.T) {
 		})
 	}
 }
+
+// --- CE minimum image-version validation tests ---
+
+// TestParseMajorVersion covers direct major-version extraction, including the
+// single-segment (dotless) tag case that previously returned an error and so
+// silently bypassed the CE-version gate.
+func TestParseMajorVersion(t *testing.T) {
+	tests := []struct {
+		name    string
+		image   string
+		want    int
+		wantErr bool
+	}{
+		{name: "ce-prefixed full", image: "aerospike:ce-8.1.0.1", want: 8, wantErr: false},
+		{name: "plain full", image: "aerospike:8.1.0.1", want: 8, wantErr: false},
+		{name: "v-prefixed", image: "aerospike:v8.1", want: 8, wantErr: false},
+		{name: "old ce-7 full", image: "aerospike:ce-7.0.0.0", want: 7, wantErr: false},
+		// dotless single-segment tags must still yield the major version.
+		{name: "ce-prefixed dotless 7", image: "aerospike:ce-7", want: 7, wantErr: false},
+		{name: "plain dotless 7", image: "aerospike:7", want: 7, wantErr: false},
+		{name: "ce-prefixed dotless 8", image: "aerospike:ce-8", want: 8, wantErr: false},
+		{name: "v-prefixed dotless 8", image: "aerospike:v8", want: 8, wantErr: false},
+		// genuinely unparseable tags must still error so the caller skips gracefully.
+		{name: "unparseable latest", image: "aerospike:latest", want: 0, wantErr: true},
+		{name: "unparseable empty tag", image: "aerospike:", want: 0, wantErr: true},
+		{name: "no tag at all", image: "aerospike", want: 0, wantErr: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseMajorVersion(tc.image)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("parseMajorVersion(%q) = %d, want error", tc.image, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseMajorVersion(%q) unexpected error: %v", tc.image, err)
+			}
+			if got != tc.want {
+				t.Errorf("parseMajorVersion(%q) = %d, want %d", tc.image, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestValidate_CEImageVersionEnforcement verifies the end-to-end webhook
+// behavior: CE images below the minimum major version are rejected (including
+// single-segment tags, which used to slip through), CE-8+ images are accepted,
+// and unparseable tags are skipped rather than false-rejected.
+func TestValidate_CEImageVersionEnforcement(t *testing.T) {
+	tests := []struct {
+		name    string
+		image   string
+		wantErr bool
+	}{
+		{name: "ce-8 full ok", image: "aerospike:ce-8.1.0.1", wantErr: false},
+		{name: "ce-8 four-segment ok", image: "aerospike:ce-8.1.1.1", wantErr: false},
+		{name: "ce-7 full rejected", image: "aerospike:ce-7.0.0.0", wantErr: true},
+		{name: "latest skipped", image: "aerospike:latest", wantErr: false},
+		{name: "no tag skipped", image: "aerospike", wantErr: false},
+		// dotless single-segment tags must enforce the CE-8 minimum too.
+		{name: "ce-7 dotless rejected", image: "aerospike:ce-7", wantErr: true},
+		{name: "plain 7 dotless rejected", image: "aerospike:7", wantErr: true},
+		{name: "ce-8 dotless ok", image: "aerospike:ce-8", wantErr: false},
+		{name: "v8 dotless ok", image: "aerospike:v8", wantErr: false},
+	}
+
+	v := &AerospikeClusterValidator{}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cluster := &AerospikeCluster{
+				Spec: AerospikeClusterSpec{
+					Size:  3,
+					Image: tc.image,
+				},
+			}
+			_, err := v.validate(cluster)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("validate() with image %q: expected error, got none", tc.image)
+				}
+				if !strings.Contains(err.Error(), "requires Aerospike CE") {
+					t.Errorf("validate() with image %q: expected CE-minimum error, got: %v", tc.image, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("validate() with image %q: unexpected error: %v", tc.image, err)
+			}
+		})
+	}
+}
