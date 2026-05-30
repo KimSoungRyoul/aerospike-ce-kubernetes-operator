@@ -2402,6 +2402,106 @@ func TestValidate_MonitoringValidConfig(t *testing.T) {
 	}
 }
 
+func TestValidate_ServiceMonitorIntervalInvalid(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+
+	// Values the Prometheus Operator's Duration schema rejects. ACKO must catch
+	// these at admission instead of letting the ServiceMonitor fail at apply.
+	invalidIntervals := []string{
+		"30",        // missing unit
+		"5 seconds", // not a duration string
+		"thirty",    // non-numeric
+		"30S",       // wrong-case unit
+		"1.5s",      // fractional not allowed
+		"-5s",       // negative
+	}
+
+	for _, interval := range invalidIntervals {
+		cluster := &AerospikeCluster{
+			Spec: AerospikeClusterSpec{
+				Size:  3,
+				Image: "aerospike:ce-8.1.1.1",
+				Monitoring: &AerospikeMonitoringSpec{
+					Enabled:       true,
+					ExporterImage: "aerospike/aerospike-prometheus-exporter:1.16.1",
+					Port:          9145,
+					ServiceMonitor: &ServiceMonitorSpec{
+						Enabled:  true,
+						Interval: interval,
+					},
+				},
+			},
+		}
+
+		_, err := v.validate(cluster)
+		if err == nil {
+			t.Errorf("expected error for invalid serviceMonitor interval %q", interval)
+			continue
+		}
+		if !strings.Contains(err.Error(), "serviceMonitor.interval") {
+			t.Errorf("interval %q: error should mention 'serviceMonitor.interval', got: %v", interval, err)
+		}
+	}
+}
+
+func TestValidate_ServiceMonitorIntervalValid(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+
+	// Values the Prometheus Operator's Duration schema accepts, plus the empty
+	// string (defaulter fills it in before reconcile).
+	validIntervals := []string{"30s", "1m", "500ms", "2h30m", "1y2w3d", "0", ""}
+
+	for _, interval := range validIntervals {
+		cluster := &AerospikeCluster{
+			Spec: AerospikeClusterSpec{
+				Size:  3,
+				Image: "aerospike:ce-8.1.1.1",
+				Monitoring: &AerospikeMonitoringSpec{
+					Enabled:       true,
+					ExporterImage: "aerospike/aerospike-prometheus-exporter:1.16.1",
+					Port:          9145,
+					ServiceMonitor: &ServiceMonitorSpec{
+						Enabled:  true,
+						Interval: interval,
+					},
+				},
+			},
+		}
+
+		_, err := v.validate(cluster)
+		if err != nil {
+			t.Errorf("unexpected error for valid serviceMonitor interval %q: %v", interval, err)
+		}
+	}
+}
+
+func TestValidate_ServiceMonitorIntervalSkippedWhenDisabled(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+
+	// An invalid interval must not be rejected when the ServiceMonitor itself is
+	// disabled — no ServiceMonitor is created, so the interval is never applied.
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			Monitoring: &AerospikeMonitoringSpec{
+				Enabled:       true,
+				ExporterImage: "aerospike/aerospike-prometheus-exporter:1.16.1",
+				Port:          9145,
+				ServiceMonitor: &ServiceMonitorSpec{
+					Enabled:  false,
+					Interval: "not-a-duration",
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err != nil {
+		t.Errorf("unexpected error for invalid interval on a disabled ServiceMonitor: %v", err)
+	}
+}
+
 func TestValidate_MonitoringDisabledSkipsValidation(t *testing.T) {
 	v := &AerospikeClusterValidator{}
 	// Invalid config but disabled — should pass
