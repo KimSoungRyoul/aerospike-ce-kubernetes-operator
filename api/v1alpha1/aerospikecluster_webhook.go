@@ -593,6 +593,17 @@ func (v *AerospikeClusterValidator) validate(cluster *AerospikeCluster) (admissi
 	warnings = append(warnings, v.validateWorkDirectory(cluster)...)
 	warnings = append(warnings, v.validateBatchSize(cluster)...)
 	warnings = append(warnings, v.validateRackBatchSize(cluster)...)
+	// Structurally reject malformed maxUnavailable (negative int, non-percentage
+	// string, out-of-range percentage) at admission time. The raw value flows
+	// straight into PodDisruptionBudgetSpec.MaxUnavailable (reconciler_pdb.go), so
+	// without this fail-fast check K8s only rejects it at PDB apply time, surfacing
+	// as an opaque reconcilePDB error that can trip the circuit breaker. Reuse the
+	// same helper the rackConfig batch-size fields use; minValue 0 because zero
+	// unavailable pods is a valid (if strict) PDB. The existing warning-level
+	// checks for >=size / >=100% stay below and remain intact.
+	if muErr := validateIntOrString(cluster.Spec.MaxUnavailable, "maxUnavailable", 0); muErr != "" {
+		allErrors = append(allErrors, muErr)
+	}
 	warnings = append(warnings, v.validateMaxUnavailable(cluster)...)
 	if len(cluster.Spec.Operations) > 0 {
 		allErrors = append(allErrors, v.validateOperations(cluster.Spec.Operations)...)
