@@ -42,6 +42,19 @@ var aerospikeclusterlog = logf.Log.WithName("aerospikecluster-resource")
 
 var tomlBareKeyRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
+// prometheusDurationRe mirrors the validation pattern the Prometheus Operator
+// applies to its Duration type (used by ServiceMonitor endpoints[].interval).
+// The reconciler writes monitoring.serviceMonitor.interval verbatim into the
+// ServiceMonitor's scrape interval (reconciler_monitoring.go), so an interval
+// that does not match this pattern is accepted by the Kubernetes API server but
+// rejected by the Prometheus Operator's own CRD schema when the ServiceMonitor
+// is applied — surfacing as an opaque reconcile-time failure instead of a clear
+// admission error. We replicate the pattern locally (like serviceMonitorGVK)
+// rather than importing prometheus-operator, which is not a module dependency.
+// Reference: monitoring.coreos.com/v1 Duration validation.
+var prometheusDurationRe = regexp.MustCompile(
+	`^(0|(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?)$`)
+
 const (
 	maxCEClusterSize     = 8
 	maxCENamespaces      = 2
@@ -1709,6 +1722,25 @@ func (v *AerospikeClusterValidator) validateMonitoring(m *AerospikeMonitoringSpe
 		}
 	} else if m.ExporterImage != "" {
 		warnings = append(warnings, fmt.Sprintf("monitoring.exporterImage %q has no tag; use an explicit version tag for reproducible deployments", m.ExporterImage))
+	}
+
+	// Validate the ServiceMonitor scrape interval. The reconciler writes this
+	// string verbatim into the ServiceMonitor's endpoints[].interval, where the
+	// Prometheus Operator enforces its Duration pattern. An invalid value (e.g.
+	// "30" with no unit, "5 seconds", or the matched-but-degenerate empty string
+	// from a stray whitespace-only value) passes the Kubernetes API server but is
+	// rejected by the Prometheus Operator CRD at apply time, leaving monitoring
+	// silently un-reconciled. Reject it at admission with an actionable message.
+	// The empty interval is allowed here because the defaulter fills it with the
+	// 30s default before reconcile; only an explicitly set, invalid value fails.
+	if m.ServiceMonitor != nil && m.ServiceMonitor.Enabled && m.ServiceMonitor.Interval != "" {
+		if !prometheusDurationRe.MatchString(m.ServiceMonitor.Interval) {
+			errors = append(errors, fmt.Sprintf(
+				"monitoring.serviceMonitor.interval %q is not a valid Prometheus duration "+
+					"(expected values like \"30s\", \"1m\", \"500ms\", \"2h30m\"); "+
+					"the Prometheus Operator rejects other formats when the ServiceMonitor is applied",
+				m.ServiceMonitor.Interval))
+		}
 	}
 
 	// Validate MetricLabels keys and values for TOML compatibility.
