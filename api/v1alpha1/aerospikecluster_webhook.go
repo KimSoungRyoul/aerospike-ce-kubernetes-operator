@@ -1705,7 +1705,7 @@ var aerospikeReservedPorts = map[int32]string{
 // lockstep with what the API server enforces on metadata.labels. fieldPath is
 // the dotted CR path (e.g. "monitoring.serviceMonitor.labels") for clear errors.
 func validateLabels(labels map[string]string, fieldPath string) []string {
-	var errs []string
+	errs := make([]string, 0, len(labels))
 	for k, val := range labels {
 		for _, msg := range validation.IsQualifiedName(k) {
 			errs = append(errs, fmt.Sprintf("%s key %q is not a valid Kubernetes label key: %s", fieldPath, k, msg))
