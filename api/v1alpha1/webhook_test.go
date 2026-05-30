@@ -2475,6 +2475,105 @@ func TestValidate_ServiceMonitorIntervalValid(t *testing.T) {
 	}
 }
 
+// --- ServiceMonitor / PrometheusRule label validation tests ---
+//
+// Mirrors the serviceMonitor.interval fix (#316): the reconciler copies these
+// labels verbatim onto the ServiceMonitor/PrometheusRule via SetLabels, so an
+// invalid label passes the API server but is rejected by the Prometheus
+// Operator CRD at apply time. Admission must reject it up front.
+
+func TestValidate_MonitoringLabelsRejectsInvalid(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	longKey := strings.Repeat("a", 70)   // >63 chars name segment
+	longValue := strings.Repeat("b", 71) // >63 chars label value
+	cases := []struct {
+		name      string
+		labels    map[string]string
+		fieldPath string
+		setSM     bool // labels on serviceMonitor (else prometheusRule)
+	}{
+		{
+			name:      "serviceMonitor invalid key chars",
+			labels:    map[string]string{"bad key!": "value"},
+			fieldPath: "monitoring.serviceMonitor.labels",
+			setSM:     true,
+		},
+		{
+			name:      "serviceMonitor over-long key",
+			labels:    map[string]string{longKey: "value"},
+			fieldPath: "monitoring.serviceMonitor.labels",
+			setSM:     true,
+		},
+		{
+			name:      "prometheusRule over-long value",
+			labels:    map[string]string{"team": longValue},
+			fieldPath: "monitoring.prometheusRule.labels",
+			setSM:     false,
+		},
+		{
+			name:      "prometheusRule invalid value chars",
+			labels:    map[string]string{"team": "bad value!"},
+			fieldPath: "monitoring.prometheusRule.labels",
+			setSM:     false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &AerospikeMonitoringSpec{
+				Enabled:       true,
+				ExporterImage: "exporter:v1",
+				Port:          9145,
+			}
+			if tc.setSM {
+				m.ServiceMonitor = &ServiceMonitorSpec{Enabled: true, Labels: tc.labels}
+			} else {
+				m.PrometheusRule = &PrometheusRuleSpec{Enabled: true, Labels: tc.labels}
+			}
+			cluster := &AerospikeCluster{
+				Spec: AerospikeClusterSpec{
+					Size:       3,
+					Image:      "aerospike:ce-8.1.1.1",
+					Monitoring: m,
+				},
+			}
+			_, err := v.validate(cluster)
+			if err == nil {
+				t.Fatalf("expected error for invalid labels %v, got nil", tc.labels)
+			}
+			if !strings.Contains(err.Error(), tc.fieldPath) {
+				t.Errorf("expected error to mention field path %q, got: %v", tc.fieldPath, err)
+			}
+		})
+	}
+}
+
+func TestValidate_MonitoringLabelsAcceptsValid(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	validLabels := map[string]string{
+		"team":                      "platform",
+		"app.kubernetes.io/part-of": "aerospike",
+		"release":                   "kube-prometheus-stack",
+		"empty-value-allowed":       "",
+	}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			Monitoring: &AerospikeMonitoringSpec{
+				Enabled:        true,
+				ExporterImage:  "exporter:v1",
+				Port:           9145,
+				ServiceMonitor: &ServiceMonitorSpec{Enabled: true, Interval: "30s", Labels: validLabels},
+				PrometheusRule: &PrometheusRuleSpec{Enabled: true, Labels: validLabels},
+			},
+		},
+	}
+	_, err := v.validate(cluster)
+	if err != nil {
+		t.Errorf("expected no error for valid labels, got: %v", err)
+	}
+}
+
 func TestValidate_ServiceMonitorIntervalSkippedWhenDisabled(t *testing.T) {
 	v := &AerospikeClusterValidator{}
 
