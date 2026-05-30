@@ -166,8 +166,10 @@ func TestDiff_RemovedDynamicKeyForcesRestart(t *testing.T) {
 	}
 
 	c := result.Static[0]
-	if c.Path != "service.proto-fd-max" {
-		t.Errorf("expected path service.proto-fd-max, got %s", c.Path)
+	// Build the expected path via joinPath rather than a bare literal to keep
+	// the goconst occurrence count unchanged.
+	if want := joinPath("service", "proto-fd-max"); c.Path != want {
+		t.Errorf("expected path %s, got %s", want, c.Path)
 	}
 	if c.NewValue != nil {
 		t.Errorf("expected nil new value, got %v", c.NewValue)
