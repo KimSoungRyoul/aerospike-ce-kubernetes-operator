@@ -4100,6 +4100,86 @@ func TestValidate_ACLScopedPrivilegeAccepted(t *testing.T) {
 	}
 }
 
+func TestValidate_ACLGlobalPrivilegeScopedRejected(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	for _, code := range []string{"sys-admin", "user-admin", "data-admin"} {
+		t.Run(code, func(t *testing.T) {
+			cluster := &AerospikeCluster{
+				Spec: AerospikeClusterSpec{
+					Size:  3,
+					Image: "aerospike:ce-8.1.1.1",
+					AerospikeAccessControl: &AerospikeAccessControlSpec{
+						Roles: []AerospikeRoleSpec{
+							{Name: "bad-role", Privileges: []string{code + ".myns"}},
+						},
+						Users: []AerospikeUserSpec{
+							{Name: "admin", SecretName: "admin-secret", Roles: []string{"sys-admin", "user-admin"}},
+						},
+					},
+				},
+			}
+
+			_, err := v.validate(cluster)
+			if err == nil {
+				t.Fatalf("expected error for scoped global-only privilege %q", code+".myns")
+			}
+			if !strings.Contains(err.Error(), "global-only privilege") {
+				t.Errorf("error should mention 'global-only privilege', got: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidate_ACLGlobalPrivilegeSetScopedRejected(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeAccessControl: &AerospikeAccessControlSpec{
+				Roles: []AerospikeRoleSpec{
+					{Name: "bad-role", Privileges: []string{"sys-admin.myns.myset"}},
+				},
+				Users: []AerospikeUserSpec{
+					{Name: "admin", SecretName: "admin-secret", Roles: []string{"sys-admin", "user-admin"}},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error for set-scoped global-only privilege 'sys-admin.myns.myset'")
+	}
+	if !strings.Contains(err.Error(), "global-only privilege") {
+		t.Errorf("error should mention 'global-only privilege', got: %v", err)
+	}
+}
+
+func TestValidate_ACLGlobalPrivilegeUnscopedAccepted(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeAccessControl: &AerospikeAccessControlSpec{
+				Roles: []AerospikeRoleSpec{
+					// Unscoped admin privileges are valid; truncate is scopable.
+					{Name: "ops", Privileges: []string{"sys-admin", "user-admin", "data-admin", "truncate.myns"}},
+				},
+				Users: []AerospikeUserSpec{
+					{Name: "admin", SecretName: "admin-secret", Roles: []string{"sys-admin", "user-admin"}},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err != nil {
+		t.Fatalf("expected unscoped admin privileges and scoped truncate to be accepted, got: %v", err)
+	}
+}
+
 // --- Defaulting idempotency test ---
 
 func TestDefault_IsIdempotent(t *testing.T) {

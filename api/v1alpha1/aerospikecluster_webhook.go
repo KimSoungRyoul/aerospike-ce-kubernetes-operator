@@ -970,6 +970,20 @@ var aerospikeCEBuiltinRoles = map[string]bool{
 	"truncate":       true,
 }
 
+// aerospikeGlobalOnlyPrivileges lists the privilege codes that Aerospike treats
+// as global-only: they apply to the whole cluster and cannot be scoped to a
+// namespace or set. Attaching a scope (e.g. "sys-admin.myns") is accepted by the
+// Kubernetes API server but rejected by the Aerospike server when the operator
+// syncs the role, leaving the cluster in ACLSyncError. The data-plane privileges
+// (read, write, read-write, read-write-udf, truncate) are intentionally absent
+// here because they are scopable.
+// Reference: https://aerospike.com/docs/server/operations/configure/security/access-control/index.html
+var aerospikeGlobalOnlyPrivileges = map[string]bool{
+	"sys-admin":  true,
+	"user-admin": true,
+	"data-admin": true,
+}
+
 // validateAccessControl validates the ACL configuration.
 func (v *AerospikeClusterValidator) validateAccessControl(acl *AerospikeAccessControlSpec) []string {
 	var errors []string
@@ -1053,9 +1067,19 @@ func (v *AerospikeClusterValidator) validateAccessControl(acl *AerospikeAccessCo
 				continue
 			}
 			// Format: "<code>" or "<code>.<namespace>" or "<code>.<namespace>.<set>"
-			code := strings.SplitN(privStr, ".", 2)[0]
+			code, scope, scoped := strings.Cut(privStr, ".")
 			if !aerospikeCEBuiltinRoles[code] {
 				errors = append(errors, fmt.Sprintf("role %q has invalid privilege code %q; valid codes: read, write, read-write, read-write-udf, sys-admin, user-admin, data-admin, truncate", role.Name, code))
+				continue
+			}
+			// Admin-level privileges are global-only: Aerospike rejects a
+			// namespace/set scope on them at runtime ("privilege ... cannot be
+			// scoped"), leaving the operator stuck in ACLSyncError. Catch the
+			// mistake at admission time with an actionable message instead.
+			if scoped && aerospikeGlobalOnlyPrivileges[code] {
+				errors = append(errors, fmt.Sprintf(
+					"role %q privilege %q: %q is a global-only privilege and cannot be scoped to a namespace or set (%q)",
+					role.Name, privStr, code, scope))
 			}
 		}
 	}
