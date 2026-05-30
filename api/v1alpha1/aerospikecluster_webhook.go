@@ -322,6 +322,14 @@ func (v *AerospikeClusterValidator) ValidateUpdate(ctx context.Context, oldClust
 		// Sort for a deterministic error message (map iteration order is random).
 		slices.Sort(addedIDs)
 		slices.Sort(removedIDs)
+		// Rack ID 0 is the implicit default rack and can never be named explicitly
+		// (validateRackConfig reserves it), so a transition that adds or removes it —
+		// i.e. introducing or dropping rack-awareness on an existing cluster — has no
+		// valid two-step path. Steer the user to the only safe route instead of
+		// suggesting an impossible "add then remove".
+		if slices.Contains(addedIDs, 0) || slices.Contains(removedIDs, 0) {
+			return nil, fmt.Errorf("cannot add new rack IDs %v and remove existing rack IDs %v in the same update: this switches the cluster between the implicit default rack (ID 0) and explicit racks, which recreates StatefulSets and risks data loss; introduce or remove rack-awareness by creating a new cluster and migrating data instead", addedIDs, removedIDs)
+		}
 		return nil, fmt.Errorf("cannot add new rack IDs %v and remove existing rack IDs %v in the same update; please do this in two separate steps (first add, then remove, or vice versa)", addedIDs, removedIDs)
 	}
 

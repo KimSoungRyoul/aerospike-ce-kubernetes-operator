@@ -4892,6 +4892,11 @@ func TestValidateUpdate_RackConfigDroppedRejected(t *testing.T) {
 	if !strings.Contains(err.Error(), "[1 2]") {
 		t.Errorf("error should name the removed rack IDs [1 2] in sorted order, got: %v", err)
 	}
+	// When the default rack (ID 0) is involved there is no valid two-step path, so
+	// the message must steer toward data migration rather than an impossible add/remove.
+	if !strings.Contains(err.Error(), "migrating data") {
+		t.Errorf("error should guide the user to create a new cluster and migrate data, got: %v", err)
+	}
 }
 
 // An empty Racks slice resolves to the same default rack (ID 0) as a nil
