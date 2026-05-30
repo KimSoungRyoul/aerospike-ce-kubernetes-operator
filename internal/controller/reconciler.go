@@ -663,8 +663,14 @@ func (r *AerospikeClusterReconciler) reconcileCluster(
 		aclSynced = synced
 	}
 
+	// Build the set of acceptable effective per-rack config hashes so the
+	// ConfigApplied condition accepts pods in racks that override config. Each
+	// pod carries its rack's effective hash (rackInfos[i].hash), not a single
+	// cluster-level hash.
+	validConfigHashes := buildValidConfigHashes(rackInfos)
+
 	// Update status and set phase to Completed.
-	statusOpts := StatusUpdateOpts{ACLErr: aclErr, ACLSynced: aclSynced}
+	statusOpts := StatusUpdateOpts{ACLErr: aclErr, ACLSynced: aclSynced, ValidConfigHashes: validConfigHashes}
 	if err := r.updateStatusAndPhase(ctx, namespacedName, ackov1alpha1.AerospikePhaseCompleted, "Cluster is healthy and stable", statusOpts); err != nil {
 		if errors.IsConflict(err) {
 			return ctrl.Result{Requeue: true}, nil
@@ -686,6 +692,18 @@ func (r *AerospikeClusterReconciler) reconcileCluster(
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// buildValidConfigHashes returns the set of acceptable effective per-rack
+// config hashes. A pod is considered to carry the desired config when its
+// ConfigHash is a key in this set (see setFineGrainedConditions). Extracted
+// from reconcileCluster to keep that function's cyclomatic complexity in check.
+func buildValidConfigHashes(rackInfos []rackInfo) map[string]bool {
+	validConfigHashes := make(map[string]bool, len(rackInfos))
+	for i := range rackInfos {
+		validConfigHashes[rackInfos[i].hash] = true
+	}
+	return validConfigHashes
 }
 
 // rackInfo holds pre-computed per-rack configuration used during reconciliation.
@@ -1092,6 +1110,16 @@ func truncateUTF8(s string, maxBytes int) string {
 		return s
 	}
 	const suffix = "..."
+	// When the budget cannot fit the suffix, appending it would exceed maxBytes
+	// (e.g. maxBytes=2 would still return the 3-byte "..."). Drop the suffix and
+	// truncate s to a valid UTF-8 boundary within maxBytes instead.
+	if maxBytes <= len(suffix) {
+		truncated := s[:max(maxBytes, 0)]
+		for len(truncated) > 0 && !utf8.ValidString(truncated) {
+			truncated = truncated[:len(truncated)-1]
+		}
+		return truncated
+	}
 	limit := max(maxBytes-len(suffix), 0)
 	truncated := s[:limit]
 	for len(truncated) > 0 && !utf8.ValidString(truncated) {

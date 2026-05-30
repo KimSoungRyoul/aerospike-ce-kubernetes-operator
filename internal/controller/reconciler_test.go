@@ -377,6 +377,38 @@ func TestTruncateUTF8(t *testing.T) {
 			maxBytes: 10,
 			want:     strings.Repeat("한", 2) + "...",
 		},
+		// maxBytes smaller than the "..." suffix (3 bytes): the suffix must be
+		// dropped so the result never exceeds maxBytes.
+		{
+			name:     "maxBytes 0 returns empty",
+			input:    "hello",
+			maxBytes: 0,
+			want:     "",
+		},
+		{
+			name:     "maxBytes 1 returns single byte without suffix",
+			input:    "hello",
+			maxBytes: 1,
+			want:     "h",
+		},
+		{
+			name:     "maxBytes 2 returns two bytes without suffix",
+			input:    "hello",
+			maxBytes: 2,
+			want:     "he",
+		},
+		{
+			name:     "maxBytes 3 equals suffix length returns three bytes without suffix",
+			input:    "hello",
+			maxBytes: 3,
+			want:     "hel",
+		},
+		{
+			name:     "maxBytes below suffix does not split multi-byte char",
+			input:    "한글",
+			maxBytes: 2,
+			want:     "", // first rune is 3 bytes; cannot fit 2 bytes, so empty
+		},
 	}
 
 	for _, tc := range tests {
@@ -384,6 +416,9 @@ func TestTruncateUTF8(t *testing.T) {
 			got := truncateUTF8(tc.input, tc.maxBytes)
 			if got != tc.want {
 				t.Errorf("truncateUTF8(%q, %d) = %q, want %q", tc.input, tc.maxBytes, got, tc.want)
+			}
+			if len(got) > tc.maxBytes && tc.maxBytes >= 0 {
+				t.Errorf("truncateUTF8(%q, %d) returned %d bytes, exceeds maxBytes", tc.input, tc.maxBytes, len(got))
 			}
 		})
 	}
