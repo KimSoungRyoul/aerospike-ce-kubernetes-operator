@@ -91,7 +91,18 @@ func diffSection(result *DiffResult, prefix string, oldSection, newSection map[s
 		}
 		if _, exists := newSection[key]; !exists {
 			path := joinPath(prefix, key)
-			classifyChange(result, path, oldVal, nil, "")
+			// A removed key means "revert to the server default", which cannot
+			// be expressed as a set-config value: classifying it as dynamic
+			// would build "set-config:context=service;proto-fd-max=<nil>"
+			// (fmt.Sprintf("%v", nil) == "<nil>"), which Aerospike rejects.
+			// So a removed key always forces a restart (Static), exactly as
+			// diffNamespaces does for its removed-key case.
+			result.Static = append(result.Static, Change{
+				Path:     path,
+				Key:      keyWithinContext(path),
+				Context:  firstSegment(path),
+				OldValue: oldVal,
+			})
 		}
 	}
 }
