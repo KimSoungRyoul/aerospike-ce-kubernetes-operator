@@ -107,6 +107,22 @@ func (r *AerospikeClusterReconciler) reconcileOperations(
 		opStatus.FailedPods = cluster.Status.OperationStatus.FailedPods
 	}
 
+	// Before restarting any more pods, honor the same readiness/migration guard
+	// the rolling-restart path uses (reconciler_restart.go isBatchBlocked). The
+	// operations path only fires SIGUSR1 (warm) or issues a Delete (cold) and
+	// marks the pod "completed" immediately — neither waits for the node to
+	// rejoin the mesh or for migrations to drain. Without this guard, a batched
+	// PodRestart on a replication-factor-2 cluster can take a second node down
+	// while the first is still cold/migrating, risking data unavailability. If
+	// the batch is blocked we requeue (inProgress=true) WITHOUT advancing to the
+	// next pod or persisting further "completed" pods. We only gate when work
+	// actually remains, so a finished operation can still reach its terminal
+	// phase below. rackID 0 is logging-only in isBatchBlocked; the migration
+	// check is cluster-wide and the readiness-gate check inspects these pods.
+	if r.operationBatchBlocked(ctx, cluster, pods, completedSet, failedSet) {
+		return true, nil
+	}
+
 	processed := int32(0)
 
 	for _, pod := range pods {
@@ -235,6 +251,50 @@ func finalizeOperationPhase(
 		opStatus.Phase = ackov1alpha1.AerospikePhaseError
 	}
 	return true
+}
+
+// operationBatchBlocked reports whether reconcileOperations should hold the
+// current batch and requeue without restarting any further pod. It reuses the
+// rolling-restart path's isBatchBlocked guard (readiness gate when enabled,
+// otherwise a cluster-wide migration check) so an on-demand PodRestart cannot
+// take a node down while a previously restarted node is still cold/migrating —
+// the same data-availability protection the rolling-restart path already has.
+//
+// The guard is only consulted when work actually remains (some target pod is
+// neither completed nor failed); a finished operation can therefore still reach
+// its terminal phase instead of being held behind a blocked-batch requeue.
+// rackID 0 is logging-only inside isBatchBlocked; the migration probe is
+// cluster-wide and the readiness-gate check inspects the supplied pods.
+func (r *AerospikeClusterReconciler) operationBatchBlocked(
+	ctx context.Context,
+	cluster *ackov1alpha1.AerospikeCluster,
+	pods []*corev1.Pod,
+	completedSet, failedSet map[string]bool,
+) bool {
+	outstanding := false
+	for _, pod := range pods {
+		if !completedSet[pod.Name] && !failedSet[pod.Name] {
+			outstanding = true
+			break
+		}
+	}
+	if !outstanding {
+		return false
+	}
+	return r.isBatchBlocked(ctx, cluster, 0, derefPods(pods))
+}
+
+// derefPods converts a slice of pod pointers into a slice of pod values, as
+// required by isBatchBlocked (which the rolling-restart path calls with the
+// []corev1.Pod returned by listRackPods). nil pointers are skipped defensively.
+func derefPods(pods []*corev1.Pod) []corev1.Pod {
+	out := make([]corev1.Pod, 0, len(pods))
+	for _, p := range pods {
+		if p != nil {
+			out = append(out, *p)
+		}
+	}
+	return out
 }
 
 // filterPodsByNames returns pointers to the pods matching the given names.

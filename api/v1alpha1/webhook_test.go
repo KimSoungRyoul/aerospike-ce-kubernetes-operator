@@ -3977,6 +3977,58 @@ func TestValidate_MaxUnavailableDeferredToTemplate(t *testing.T) {
 	}
 }
 
+// TestValidate_MaxUnavailableStructural locks in the fail-fast structural
+// validation for spec.maxUnavailable. Before this check the webhook only WARNED
+// (for >=size / >=100%) and let negative ints, non-percentage strings, and
+// out-of-range percentages through, so K8s rejected them only at PDB apply time
+// as an opaque reconcilePDB error (which can trip the circuit breaker). These
+// must now be hard ERROR-level admission failures, while structurally-valid
+// values still admit cleanly.
+func TestValidate_MaxUnavailableStructural(t *testing.T) {
+	negative := intstr.FromInt(-1)
+	overPercent := intstr.FromString("150%")
+	nonNumeric := intstr.FromString("abc")
+	validPercent := intstr.FromString("25%")
+	validInt := intstr.FromInt(1)
+
+	tests := []struct {
+		name    string
+		mu      *intstr.IntOrString
+		wantErr bool
+	}{
+		{"negative int rejected", &negative, true},
+		{"percentage over 100 rejected", &overPercent, true},
+		{"non-percentage string rejected", &nonNumeric, true},
+		{"valid percentage admitted", &validPercent, false},
+		{"valid int admitted", &validInt, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := &AerospikeClusterValidator{}
+			cluster := &AerospikeCluster{
+				Spec: AerospikeClusterSpec{
+					Size:           8,
+					Image:          "aerospike:ce-8.1.1.1",
+					MaxUnavailable: tt.mu,
+				},
+			}
+
+			_, err := v.validate(cluster)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected validation error for maxUnavailable=%v, got nil", *tt.mu)
+				}
+				if !strings.Contains(err.Error(), "maxUnavailable") {
+					t.Errorf("error should mention maxUnavailable, got: %v", err)
+				}
+			} else if err != nil {
+				t.Fatalf("expected no error for maxUnavailable=%v, got: %v", *tt.mu, err)
+			}
+		})
+	}
+}
+
 // --- ServiceMonitor / Monitoring consistency tests ---
 
 func TestValidate_ServiceMonitorEnabledWithoutMonitoring(t *testing.T) {

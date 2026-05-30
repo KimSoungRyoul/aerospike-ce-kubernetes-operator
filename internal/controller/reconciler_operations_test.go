@@ -12,6 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
+	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/podutil"
 	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/utils"
 )
 
@@ -364,5 +365,182 @@ func TestOperationFailedPodsDedup(t *testing.T) {
 
 	if len(opStatus.FailedPods) != 1 {
 		t.Fatalf("FailedPods = %v, want exactly one entry (no duplicates across reconciles)", opStatus.FailedPods)
+	}
+}
+
+// operationsScheme builds a scheme with both acko and core/v1 types registered,
+// as the controller-level operations tests need.
+func operationsScheme(t *testing.T) *runtime.Scheme {
+	t.Helper()
+	scheme := runtime.NewScheme()
+	if err := ackov1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme(acko) error = %v", err)
+	}
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatalf("corev1 AddToScheme() error = %v", err)
+	}
+	return scheme
+}
+
+// clusterPod builds a pod carrying the cluster selector labels so listClusterPods
+// (and thus getOperationTargetPods) resolves it as an operation target.
+func clusterPod(clusterName, name string, phase corev1.PodPhase) *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "default",
+			Labels:    utils.SelectorLabelsForCluster(clusterName),
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{Name: podutil.AerospikeContainerName, Image: "aerospike:ce-8.1.1.1"},
+			},
+		},
+		Status: corev1.PodStatus{Phase: phase},
+	}
+}
+
+// TestReconcileOperations_BlockedByReadinessGate_DoesNotAdvance is the core
+// data-availability regression for Issue 1: on-demand operations must honor the
+// same readiness/migration guard the rolling-restart path uses (isBatchBlocked),
+// so a batched PodRestart cannot take a second node down while a previously
+// restarted node is still cold/migrating. Here a previously restarted pod has an
+// unsatisfied readiness gate. reconcileOperations must requeue (inProgress=true)
+// WITHOUT restarting any further pod or advancing CompletedPods.
+//
+// The readiness-gate path is the in-memory test seam (isReadinessGateEnabled +
+// anyPodGateUnsatisfied); it keeps isBatchBlocked off the network-bound
+// migration probe, mirroring how reconciler_restart_rolling_test.go exercises
+// the same guard.
+func TestReconcileOperations_BlockedByReadinessGate_DoesNotAdvance(t *testing.T) {
+	scheme := operationsScheme(t)
+	gateEnabled := true
+
+	cluster := &ackov1alpha1.AerospikeCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "demo", Namespace: "default"},
+		Spec: ackov1alpha1.AerospikeClusterSpec{
+			Size:    2,
+			PodSpec: &ackov1alpha1.AerospikePodSpec{ReadinessGateEnabled: &gateEnabled},
+			Operations: []ackov1alpha1.OperationSpec{
+				{
+					ID:   "op-rolling",
+					Kind: ackov1alpha1.OperationPodRestart,
+					// Empty PodList → operation targets every cluster pod.
+				},
+			},
+		},
+	}
+
+	// demo-0: already restarted, but its readiness gate is NOT yet satisfied
+	// (Running + gate condition False) → isBatchBlocked must hold the batch.
+	blockedPod := clusterPod("demo", "demo-0", corev1.PodRunning)
+	blockedPod.Spec.ReadinessGates = []corev1.PodReadinessGate{
+		{ConditionType: podutil.AerospikeReadinessGateConditionType},
+	}
+	blockedPod.Status.Conditions = []corev1.PodCondition{
+		{Type: podutil.AerospikeReadinessGateConditionType, Status: corev1.ConditionFalse},
+	}
+	// demo-1: the next pod the operation would restart if the guard were absent.
+	nextPod := clusterPod("demo", "demo-1", corev1.PodRunning)
+
+	reconciler := &AerospikeClusterReconciler{
+		Client: fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithStatusSubresource(&ackov1alpha1.AerospikeCluster{}).
+			WithObjects(cluster, blockedPod, nextPod).
+			Build(),
+		Scheme:   scheme,
+		Recorder: record.NewFakeRecorder(16),
+	}
+
+	inProgress, err := reconciler.reconcileOperations(context.Background(), cluster)
+	if err != nil {
+		t.Fatalf("reconcileOperations() error = %v", err)
+	}
+	if !inProgress {
+		t.Fatal("expected inProgress=true: a blocked batch must requeue, not complete")
+	}
+
+	// No pod should have been restarted: demo-1 must still exist.
+	if err := reconciler.Get(context.Background(),
+		types.NamespacedName{Name: "demo-1", Namespace: "default"}, &corev1.Pod{}); err != nil {
+		t.Fatalf("demo-1 should NOT have been restarted while the batch is blocked, Get err = %v", err)
+	}
+
+	// CompletedPods must not have advanced while blocked.
+	updated := &ackov1alpha1.AerospikeCluster{}
+	if err := reconciler.Get(context.Background(),
+		types.NamespacedName{Name: "demo", Namespace: "default"}, updated); err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if updated.Status.OperationStatus != nil && len(updated.Status.OperationStatus.CompletedPods) != 0 {
+		t.Errorf("CompletedPods = %v, want empty while batch is blocked",
+			updated.Status.OperationStatus.CompletedPods)
+	}
+}
+
+// TestReconcileOperations_NotBlocked_AdvancesOneBatch is the companion
+// regression: with nothing blocking (readiness gate enabled, no pod
+// gate-unsatisfied), reconcileOperations advances exactly one batch (batchSize
+// defaults to 1) — the targeted pod is cold-restarted (deleted) and marked
+// completed. This proves the new guard does not over-block the happy path.
+//
+// The target pod is Pending (not ready) so coldRestartPod skips the best-effort
+// quiesce network call, and a Pending pod is skipped by anyPodGateUnsatisfied so
+// it does not block itself.
+func TestReconcileOperations_NotBlocked_AdvancesOneBatch(t *testing.T) {
+	scheme := operationsScheme(t)
+	gateEnabled := true
+
+	cluster := &ackov1alpha1.AerospikeCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "demo", Namespace: "default"},
+		Spec: ackov1alpha1.AerospikeClusterSpec{
+			Size:    1,
+			PodSpec: &ackov1alpha1.AerospikePodSpec{ReadinessGateEnabled: &gateEnabled},
+			Operations: []ackov1alpha1.OperationSpec{
+				{
+					ID:      "op-single",
+					Kind:    ackov1alpha1.OperationPodRestart,
+					PodList: []string{"demo-0"},
+				},
+			},
+		},
+	}
+
+	target := clusterPod("demo", "demo-0", corev1.PodPending)
+
+	reconciler := &AerospikeClusterReconciler{
+		Client: fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithStatusSubresource(&ackov1alpha1.AerospikeCluster{}).
+			WithObjects(cluster, target).
+			Build(),
+		Scheme:   scheme,
+		Recorder: record.NewFakeRecorder(16),
+	}
+
+	_, err := reconciler.reconcileOperations(context.Background(), cluster)
+	if err != nil {
+		t.Fatalf("reconcileOperations() error = %v", err)
+	}
+
+	// Cold restart deletes the pod.
+	if err := reconciler.Get(context.Background(),
+		types.NamespacedName{Name: "demo-0", Namespace: "default"}, &corev1.Pod{}); err == nil {
+		t.Fatal("expected demo-0 to be deleted (cold restart) when the batch is not blocked")
+	}
+
+	updated := &ackov1alpha1.AerospikeCluster{}
+	if err := reconciler.Get(context.Background(),
+		types.NamespacedName{Name: "demo", Namespace: "default"}, updated); err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if updated.Status.OperationStatus == nil {
+		t.Fatal("expected OperationStatus to be set")
+	}
+	if len(updated.Status.OperationStatus.CompletedPods) != 1 ||
+		updated.Status.OperationStatus.CompletedPods[0] != "demo-0" {
+		t.Errorf("CompletedPods = %v, want [demo-0] (one batch advanced)",
+			updated.Status.OperationStatus.CompletedPods)
 	}
 }
