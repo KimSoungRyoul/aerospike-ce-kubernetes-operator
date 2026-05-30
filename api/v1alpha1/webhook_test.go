@@ -419,6 +419,54 @@ func TestValidate_MaxNamespaces(t *testing.T) {
 	}
 }
 
+func TestValidate_DuplicateNamespaceNamesRejected(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeConfig: &AerospikeConfigSpec{
+				Value: map[string]any{
+					"namespaces": []any{
+						map[string]any{"name": "test"},
+						map[string]any{"name": "test"},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("expected error for duplicate namespace names")
+	}
+	if !strings.Contains(err.Error(), "duplicate namespace name") {
+		t.Errorf("expected duplicate namespace name error, got: %v", err)
+	}
+}
+
+func TestValidate_DistinctNamespaceNamesAccepted(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeConfig: &AerospikeConfigSpec{
+				Value: map[string]any{
+					"namespaces": []any{
+						map[string]any{"name": "ns1"},
+						map[string]any{"name": "ns2"},
+					},
+				},
+			},
+		},
+	}
+
+	if _, err := v.validate(cluster); err != nil {
+		t.Errorf("expected no error for distinct namespace names, got: %v", err)
+	}
+}
+
 func TestValidate_DuplicateRackIDs(t *testing.T) {
 	v := &AerospikeClusterValidator{}
 	cluster := &AerospikeCluster{
