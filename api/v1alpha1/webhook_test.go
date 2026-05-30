@@ -3100,6 +3100,104 @@ func TestValidate_DuplicateRackLabels(t *testing.T) {
 	}
 }
 
+// TestValidate_RackAerospikeConfigEnterpriseBypass verifies that enterprise-only
+// stanzas and CE-constraint violations injected through a per-rack
+// aerospikeConfig override are rejected by the webhook. A rack's aerospikeConfig
+// is DeepMerged into the effective config and rendered into the rack's ConfigMap
+// (getEffectiveConfig), so without per-rack validation it was a silent CE bypass.
+func TestValidate_RackAerospikeConfigEnterpriseBypass(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+
+	cases := []struct {
+		name      string
+		rackCfg   map[string]any
+		wantInErr string
+	}{
+		{
+			name:      "xdr via rack override",
+			rackCfg:   map[string]any{"xdr": map[string]any{}},
+			wantInErr: "xdr",
+		},
+		{
+			name:      "tls via rack override",
+			rackCfg:   map[string]any{"tls": map[string]any{}},
+			wantInErr: "tls",
+		},
+		{
+			name: "exceeds CE namespace count via rack override",
+			rackCfg: map[string]any{
+				"namespaces": []any{
+					map[string]any{"name": "ns1"},
+					map[string]any{"name": "ns2"},
+					map[string]any{"name": "ns3"},
+				},
+			},
+			wantInErr: "exceeds CE maximum",
+		},
+		{
+			name: "multicast heartbeat via rack override",
+			rackCfg: map[string]any{
+				"network": map[string]any{
+					"heartbeat": map[string]any{"mode": "multicast"},
+				},
+			},
+			wantInErr: "mesh",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cluster := &AerospikeCluster{
+				Spec: AerospikeClusterSpec{
+					Size:  3,
+					Image: "aerospike:ce-8.1.1.1",
+					RackConfig: &RackConfig{
+						Racks: []Rack{
+							{ID: 1, AerospikeConfig: &AerospikeConfigSpec{Value: tc.rackCfg}},
+						},
+					},
+				},
+			}
+
+			_, err := v.validate(cluster)
+			if err == nil {
+				t.Fatalf("expected error for rack aerospikeConfig %q", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.wantInErr) {
+				t.Errorf("error should mention %q, got: %v", tc.wantInErr, err)
+			}
+			if !strings.Contains(err.Error(), "rackConfig.racks[id=1].aerospikeConfig") {
+				t.Errorf("error should be scoped to the rack, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestValidate_RackAerospikeConfigValidCEPasses ensures a legitimate CE rack
+// override is not rejected by the new per-rack validation.
+func TestValidate_RackAerospikeConfigValidCEPasses(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			RackConfig: &RackConfig{
+				Racks: []Rack{
+					{ID: 1, AerospikeConfig: &AerospikeConfigSpec{Value: map[string]any{
+						"namespaces": []any{
+							map[string]any{"name": "test", "replication-factor": 2},
+						},
+					}}},
+				},
+			},
+		},
+	}
+
+	if _, err := v.validate(cluster); err != nil {
+		t.Fatalf("valid CE rack aerospikeConfig should pass, got: %v", err)
+	}
+}
+
 // --- validateOperations gap tests ---
 
 func TestValidate_MultipleOperationsRejected(t *testing.T) {
