@@ -668,6 +668,15 @@ func (v *AerospikeClusterValidator) validateAerospikeConfig(config map[string]an
 			if len(ns) > maxCENamespaces {
 				errors = append(errors, fmt.Sprintf("aerospikeConfig.namespaces count %d exceeds CE maximum of %d", len(ns), maxCENamespaces))
 			}
+			// Track namespace names to reject duplicates. configgen
+			// (generateNamespaceSections) emits one `namespace <name> { ... }`
+			// block per entry without de-duplicating, so two entries that share a
+			// name produce two identical-named blocks. aerospikd rejects a
+			// duplicate namespace definition at startup, leaving the pod in a
+			// permanent CrashLoopBackOff. Reject it here so the user gets an
+			// actionable admission error instead of a runtime crash — same
+			// fail-fast philosophy as the map/scalar shape checks below.
+			seenNsNames := make(map[string]bool, len(ns))
 			// Validate each namespace's config
 			for i, nsEntry := range ns {
 				nsMap, ok := nsEntry.(map[string]any)
@@ -675,8 +684,14 @@ func (v *AerospikeClusterValidator) validateAerospikeConfig(config map[string]an
 					errors = append(errors, fmt.Sprintf("aerospikeConfig.namespaces[%d] must be a map, got %T", i, nsEntry))
 					continue
 				}
-				if _, hasName := nsMap["name"]; !hasName {
+				if nameVal, hasName := nsMap["name"]; !hasName {
 					errors = append(errors, fmt.Sprintf("aerospikeConfig.namespaces[%d] is missing required 'name' key", i))
+				} else if name, ok := nameVal.(string); ok && name != "" {
+					if seenNsNames[name] {
+						errors = append(errors, fmt.Sprintf(
+							"aerospikeConfig.namespaces[%d]: duplicate namespace name %q; each namespace must have a unique name", i, name))
+					}
+					seenNsNames[name] = true
 				}
 				nsErrors, nsWarnings := v.validateNamespaceConfig(nsMap, i)
 				errors = append(errors, nsErrors...)
