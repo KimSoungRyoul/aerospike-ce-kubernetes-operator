@@ -1103,10 +1103,12 @@ func parseMajorVersion(image string) (int, error) {
 			break
 		}
 	}
-	before, _, ok := strings.Cut(tag, ".")
-	if !ok {
-		return 0, fmt.Errorf("tag %q does not contain a version", tag)
-	}
+	// strings.Cut returns the full string as the first value when there is no
+	// separator, so this handles both multi-segment ("8.1.0.1") and
+	// single-segment ("8") tags. A genuinely unparseable tag (e.g. "latest" or
+	// an empty tag) still fails strconv.Atoi below and returns an error, so the
+	// caller keeps skipping such tags gracefully instead of false-rejecting.
+	before, _, _ := strings.Cut(tag, ".")
 	// Strip leading 'v' to handle tags like "v8.1.1" in addition to "8.1.1".
 	before = strings.TrimPrefix(before, "v")
 	return strconv.Atoi(before)

@@ -6264,7 +6264,7 @@ func TestValidate_CEImageVersionEnforcement(t *testing.T) {
 				if err == nil {
 					t.Fatalf("validate() with image %q: expected error, got none", tc.image)
 				}
-				if !strings.Contains(err.Error(), "below the minimum supported version") {
+				if !strings.Contains(err.Error(), "requires Aerospike CE") {
 					t.Errorf("validate() with image %q: expected CE-minimum error, got: %v", tc.image, err)
 				}
 				return
