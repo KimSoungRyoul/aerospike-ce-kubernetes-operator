@@ -1094,11 +1094,48 @@ func (v *AerospikeClusterValidator) validateAccessControl(acl *AerospikeAccessCo
 				errors = append(errors, fmt.Sprintf(
 					"role %q privilege %q: %q is a global-only privilege and cannot be scoped to a namespace or set (%q)",
 					role.Name, privStr, code, scope))
+				continue
+			}
+			// Validate the scope structure for scopable privileges. A scope is
+			// "<namespace>" or "<namespace>.<set>"; an empty component (e.g.
+			// "read.", "read..set") or a third component ("read.ns.set.extra")
+			// is accepted by the Kubernetes API server but rejected by Aerospike
+			// when the operator syncs the role, leaving the cluster in
+			// ACLSyncError. Catch the malformed scope at admission time with an
+			// actionable message instead — same fail-fast rationale as the
+			// global-only check above.
+			if scoped {
+				errors = append(errors, validatePrivilegeScope(role.Name, privStr, scope)...)
 			}
 		}
 	}
 
 	return errors
+}
+
+// validatePrivilegeScope checks the namespace/set scope of a scopable privilege.
+// scope is the substring after the first "." in the privilege string, i.e.
+// "<namespace>" or "<namespace>.<set>". An empty namespace or set component, or
+// more than two components, is rejected because Aerospike refuses such a
+// privilege at role-sync time and the cluster ends up in ACLSyncError. privStr
+// is the original full privilege string, included verbatim in the error message
+// so the user can locate the offending entry.
+func validatePrivilegeScope(roleName, privStr, scope string) []string {
+	parts := strings.Split(scope, ".")
+	if len(parts) > 2 {
+		return []string{fmt.Sprintf(
+			"role %q privilege %q: scope must be \"<namespace>\" or \"<namespace>.<set>\", got %d components",
+			roleName, privStr, len(parts))}
+	}
+	if parts[0] == "" {
+		return []string{fmt.Sprintf(
+			"role %q privilege %q: namespace scope must not be empty", roleName, privStr)}
+	}
+	if len(parts) == 2 && parts[1] == "" {
+		return []string{fmt.Sprintf(
+			"role %q privilege %q: set scope must not be empty", roleName, privStr)}
+	}
+	return nil
 }
 
 // validateSizeAndImage validates spec.size and spec.image, accounting for the fact that
