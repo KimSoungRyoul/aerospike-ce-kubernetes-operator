@@ -48,6 +48,35 @@ func (r *AerospikeClusterReconciler) reconcileOperations(
 		return false, err
 	}
 
+	// Guard against an operation that explicitly targets pods by name but
+	// resolves to none of them (typo, stale name, or pods deleted/renamed).
+	// Without this, finalizeOperationPhase would see zero outstanding pods and
+	// spuriously mark the operation Completed having done nothing — a silent
+	// no-op that misleads the operator. An explicit-but-empty target set is a
+	// terminal error: surface it as the Error phase plus a Warning event so the
+	// next reconcile short-circuits instead of re-reporting a false success.
+	if len(op.PodList) > 0 && len(pods) == 0 {
+		log.Info("Operation targets named pods but none matched; marking operation as failed",
+			"id", op.ID, "kind", op.Kind, "podList", op.PodList)
+		errStatus := &ackov1alpha1.OperationStatus{
+			ID:    op.ID,
+			Kind:  op.Kind,
+			Phase: ackov1alpha1.AerospikePhaseError,
+		}
+		r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventOperation,
+			"Operation %s (%s): none of the targeted pods %v exist in this cluster",
+			op.ID, op.Kind, op.PodList)
+		if err := r.persistOperationStatus(ctx, cluster, errStatus); err != nil {
+			// A conflict means a concurrent writer updated status first; requeue
+			// to retry. Other errors propagate to the caller.
+			if errors.IsConflict(err) {
+				return true, nil
+			}
+			return false, err
+		}
+		return false, nil
+	}
+
 	// Initialize or update operation status
 	opStatus := &ackov1alpha1.OperationStatus{
 		ID:    op.ID,
@@ -126,13 +155,7 @@ func (r *AerospikeClusterReconciler) reconcileOperations(
 	allDone := finalizeOperationPhase(opStatus, pods, completedSet, failedSet)
 
 	// Update operation status using Patch to avoid overwriting concurrent status changes.
-	latest, err := r.refetchCluster(ctx, types.NamespacedName{Name: cluster.Name, Namespace: cluster.Namespace})
-	if err != nil {
-		return !allDone, err
-	}
-	base := latest.DeepCopy()
-	latest.Status.OperationStatus = opStatus
-	if err := r.Status().Patch(ctx, latest, client.MergeFrom(base)); err != nil {
+	if err := r.persistOperationStatus(ctx, cluster, opStatus); err != nil {
 		if errors.IsConflict(err) {
 			log.V(1).Info("Conflict patching operation status, will requeue", "operation", op.ID)
 			return true, nil
@@ -144,6 +167,24 @@ func (r *AerospikeClusterReconciler) reconcileOperations(
 		"Operation %s (%s): %d/%d pods processed", op.ID, op.Kind, len(opStatus.CompletedPods), len(pods))
 
 	return !allDone, nil
+}
+
+// persistOperationStatus writes opStatus to cluster.Status.OperationStatus via a
+// MergeFrom patch against a freshly-refetched object, so a concurrent status
+// writer is not clobbered. A conflict error is returned to the caller, which
+// decides whether to requeue.
+func (r *AerospikeClusterReconciler) persistOperationStatus(
+	ctx context.Context,
+	cluster *ackov1alpha1.AerospikeCluster,
+	opStatus *ackov1alpha1.OperationStatus,
+) error {
+	latest, err := r.refetchCluster(ctx, types.NamespacedName{Name: cluster.Name, Namespace: cluster.Namespace})
+	if err != nil {
+		return err
+	}
+	base := latest.DeepCopy()
+	latest.Status.OperationStatus = opStatus
+	return r.Status().Patch(ctx, latest, client.MergeFrom(base))
 }
 
 // getOperationTargetPods returns the pods targeted by an operation.
