@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/validation"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -1694,6 +1695,28 @@ var aerospikeReservedPorts = map[int32]string{
 	3003: "info",
 }
 
+// validateLabels validates that every key/value in a user-supplied label map is
+// a legal Kubernetes label. The reconciler copies these maps verbatim onto the
+// ServiceMonitor/PrometheusRule via SetLabels (reconciler_monitoring.go), so an
+// invalid key (not a qualified name) or value (>63 chars, illegal characters)
+// passes the Kubernetes API server but is rejected by the Prometheus Operator
+// CRD when the object is applied, leaving monitoring silently un-reconciled.
+// We delegate to apimachinery's canonical label validators so the rules stay in
+// lockstep with what the API server enforces on metadata.labels. fieldPath is
+// the dotted CR path (e.g. "monitoring.serviceMonitor.labels") for clear errors.
+func validateLabels(labels map[string]string, fieldPath string) []string {
+	var errs []string
+	for k, val := range labels {
+		for _, msg := range validation.IsQualifiedName(k) {
+			errs = append(errs, fmt.Sprintf("%s key %q is not a valid Kubernetes label key: %s", fieldPath, k, msg))
+		}
+		for _, msg := range validation.IsValidLabelValue(val) {
+			errs = append(errs, fmt.Sprintf("%s[%q] value %q is not a valid Kubernetes label value: %s", fieldPath, k, val, msg))
+		}
+	}
+	return errs
+}
+
 // validateMonitoring validates the monitoring configuration.
 func (v *AerospikeClusterValidator) validateMonitoring(m *AerospikeMonitoringSpec) ([]string, admission.Warnings) {
 	var errors []string
@@ -1788,6 +1811,17 @@ func (v *AerospikeClusterValidator) validateMonitoring(m *AerospikeMonitoringSpe
 				errors = append(errors, fmt.Sprintf("monitoring.prometheusRule.customRules[%d]: field 'rules' must contain at least one rule", i))
 			}
 		}
+	}
+
+	// Validate user-supplied labels on the ServiceMonitor/PrometheusRule. The
+	// reconciler applies these verbatim via SetLabels; an invalid label is
+	// rejected by the Prometheus Operator CRD at apply time, not by the API
+	// server at admission, so check it here for an actionable up-front error.
+	if m.ServiceMonitor != nil {
+		errors = append(errors, validateLabels(m.ServiceMonitor.Labels, "monitoring.serviceMonitor.labels")...)
+	}
+	if m.PrometheusRule != nil {
+		errors = append(errors, validateLabels(m.PrometheusRule.Labels, "monitoring.prometheusRule.labels")...)
 	}
 
 	return errors, warnings
