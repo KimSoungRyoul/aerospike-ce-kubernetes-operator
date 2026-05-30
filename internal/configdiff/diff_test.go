@@ -140,6 +140,43 @@ func TestDiff_KeyRemoved(t *testing.T) {
 	}
 }
 
+// TestDiff_RemovedDynamicKeyForcesRestart is the regression test for the
+// removed-key <nil> bug: removing a dynamic key (e.g. service.proto-fd-max)
+// must NOT be classified as a dynamic change, because the dynamic-apply path
+// would build "set-config:context=service;proto-fd-max=<nil>" (fmt.Sprintf
+// "%v" of nil), which Aerospike rejects. A removed key reverts to the server
+// default and must force a restart (Static), like diffNamespaces.
+func TestDiff_RemovedDynamicKeyForcesRestart(t *testing.T) {
+	old := map[string]any{
+		"service": map[string]any{
+			"proto-fd-max": 15000,
+		},
+	}
+	new := map[string]any{
+		"service": map[string]any{},
+	}
+
+	result := Diff(old, new)
+
+	if len(result.Dynamic) != 0 {
+		t.Errorf("expected 0 dynamic changes, got %d (%+v)", len(result.Dynamic), result.Dynamic)
+	}
+	if len(result.Static) != 1 {
+		t.Fatalf("expected 1 static change, got %d (%+v)", len(result.Static), result.Static)
+	}
+
+	c := result.Static[0]
+	if c.Path != "service.proto-fd-max" {
+		t.Errorf("expected path service.proto-fd-max, got %s", c.Path)
+	}
+	if c.NewValue != nil {
+		t.Errorf("expected nil new value, got %v", c.NewValue)
+	}
+	if c.OldValue != 15000 {
+		t.Errorf("expected old value 15000, got %v", c.OldValue)
+	}
+}
+
 func TestDiff_NamespaceChange(t *testing.T) {
 	old := map[string]any{
 		"namespaces": []any{
