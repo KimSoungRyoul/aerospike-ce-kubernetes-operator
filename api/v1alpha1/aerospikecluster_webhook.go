@@ -539,8 +539,9 @@ func (v *AerospikeClusterValidator) validate(cluster *AerospikeCluster) (admissi
 
 	// Validate rack config
 	if cluster.Spec.RackConfig != nil {
-		rackErrors := v.validateRackConfig(cluster.Spec.RackConfig)
+		rackErrors, rackWarnings := v.validateRackConfig(cluster.Spec.RackConfig)
 		allErrors = append(allErrors, rackErrors...)
+		warnings = append(warnings, rackWarnings...)
 
 		// Reject more racks than pods. The reconciler distributes spec.size
 		// evenly across racks (getRackSize); when len(racks) > size at least
@@ -1404,8 +1405,9 @@ func (v *AerospikeClusterValidator) validateMaxUnavailable(cluster *AerospikeClu
 }
 
 // validateRackConfig validates the rack configuration.
-func (v *AerospikeClusterValidator) validateRackConfig(rackConfig *RackConfig) []string {
+func (v *AerospikeClusterValidator) validateRackConfig(rackConfig *RackConfig) ([]string, admission.Warnings) {
 	var errors []string
+	var warnings admission.Warnings
 
 	rackIDs := make(map[int]bool)
 	rackLabels := make(map[string]bool)
@@ -1424,6 +1426,22 @@ func (v *AerospikeClusterValidator) validateRackConfig(rackConfig *RackConfig) [
 				errors = append(errors, fmt.Sprintf("duplicate rackLabel %q in rackConfig; each rack must have a unique rackLabel", rack.RackLabel))
 			}
 			rackLabels[rack.RackLabel] = true
+		}
+
+		// Validate the per-rack aerospikeConfig override against the SAME CE
+		// constraints as the cluster-level config. A rack's aerospikeConfig is
+		// DeepMerged into the effective config and rendered into the rack's
+		// ConfigMap (getEffectiveConfig in reconciler_config.go), so without this
+		// check a user could inject enterprise-only stanzas (xdr/tls/security
+		// audit sub-keys), exceed the CE namespace count, or set multicast
+		// heartbeat through rack.aerospikeConfig and silently bypass the
+		// cluster-spec webhook — the same CE-bypass class fixed for spec.overrides.
+		if rack.AerospikeConfig != nil {
+			cfgErrors, cfgWarnings := v.validateAerospikeConfig(rack.AerospikeConfig.Value)
+			for _, e := range cfgErrors {
+				errors = append(errors, fmt.Sprintf("rackConfig.racks[id=%d].aerospikeConfig: %s", rack.ID, e))
+			}
+			warnings = append(warnings, cfgWarnings...)
 		}
 	}
 
@@ -1448,7 +1466,7 @@ func (v *AerospikeClusterValidator) validateRackConfig(rackConfig *RackConfig) [
 		}
 	}
 
-	return errors
+	return errors, warnings
 }
 
 // validateOperations validates the on-demand operations spec.
