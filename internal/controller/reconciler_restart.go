@@ -151,9 +151,12 @@ func (r *AerospikeClusterReconciler) reconcileRollingRestart(
 		batchSize, batchOldConfig, batchNewConfig, &aeroClient)
 
 	// Update PendingRestartPods to only include pods that were NOT successfully restarted.
+	var remaining []string
 	if len(failedPods) > 0 || restarted > 0 {
-		remaining := filterUnrestarted(pendingNames, failedPods, restarted, batchPods)
+		remaining = filterUnrestarted(pendingNames, failedPods, restarted, batchPods)
 		cluster.Status.PendingRestartPods = remaining
+	} else {
+		remaining = pendingNames
 	}
 
 	// If all attempted pods failed, return error to signal a full batch failure.
@@ -167,9 +170,14 @@ func (r *AerospikeClusterReconciler) reconcileRollingRestart(
 			"restarted", restarted, "failed", len(failedPods), "failedPods", strings.Join(failedPods, ", "))
 	}
 
-	if restarted >= int32(len(podsToRestart)) {
+	// Fire the completion event only when the restart queue is actually drained.
+	// `restarted` counts just the current batch (<= batchSize), so comparing it to
+	// len(podsToRestart) never fires for batched restarts (batchSize < pods).
+	// Keying off the recomputed pending queue handles both single-shot and
+	// multi-batch restarts correctly.
+	if len(remaining) == 0 && restarted > 0 {
 		r.Recorder.Eventf(cluster, corev1.EventTypeNormal, EventRollingRestartCompleted,
-			"Rolling restart completed for rack %d: all %d pods restarted", rack.ID, restarted)
+			"Rolling restart completed for rack %d: all %d pods restarted", rack.ID, len(podsToRestart))
 	}
 
 	return restarted > 0, nil

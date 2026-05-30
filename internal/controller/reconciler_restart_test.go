@@ -1,10 +1,17 @@
 package controller
 
 import (
+	"context"
+	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/record"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
 	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/podutil"
@@ -287,6 +294,164 @@ func TestFilterUnrestarted_EmptyInputs(t *testing.T) {
 	if len(result) != 0 {
 		t.Errorf("expected empty for nil inputs, got %v", result)
 	}
+}
+
+// drainRecorderEvents collects all currently-buffered events from a fake recorder
+// without blocking once the channel is empty.
+func drainRecorderEvents(rec *record.FakeRecorder) []string {
+	var events []string
+	for {
+		select {
+		case e := <-rec.Events:
+			events = append(events, e)
+		default:
+			return events
+		}
+	}
+}
+
+func containsEvent(events []string, substr string) bool {
+	for _, e := range events {
+		if strings.Contains(e, substr) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestReconcileRollingRestart_BatchedFiresCompletedOnFinalBatch is the regression
+// for the batched-restart completion-event bug: `restarted` counts only the current
+// batch (<= batchSize), so the old `restarted >= len(podsToRestart)` check never
+// fired the RollingRestartCompleted event when batchSize < total pods. The fix keys
+// the event off the recomputed pending queue draining to empty.
+//
+// Setup: 2 pods, batchSize=1, both need restart (stale config hash). With RestConfig
+// nil, shouldWarmRestart returns false so every restart is a cold restart (fake-client
+// pod delete). First reconcile restarts the high-ordinal pod and leaves one pending
+// (no completed event). Second reconcile restarts the last pod, draining the queue and
+// firing the completed event exactly once.
+func TestReconcileRollingRestart_BatchedFiresCompletedOnFinalBatch(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme(client-go) error = %v", err)
+	}
+	if err := ackov1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme(acko) error = %v", err)
+	}
+
+	const (
+		clusterName = "demo"
+		namespace   = "default"
+		rackID      = 0
+		desiredHash = "newhash"
+	)
+	stsName := utils.StatefulSetName(clusterName, rackID)
+	replicas := int32(3)
+	batchSizeOne := int32(1)
+
+	gateEnabled := true
+	cluster := &ackov1alpha1.AerospikeCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: clusterName, Namespace: namespace},
+		Spec: ackov1alpha1.AerospikeClusterSpec{
+			Size:                   replicas,
+			Image:                  "aerospike:ce-8.1.1.1",
+			RollingUpdateBatchSize: &batchSizeOne,
+			// Enable readiness gates so isBatchBlocked uses the gate check (in-memory)
+			// instead of a live Aerospike migration probe. Our pods have no Running
+			// phase, so the gate check finds nothing to block on and the batch proceeds
+			// immediately — keeping this test deterministic and fast.
+			PodSpec: &ackov1alpha1.AerospikePodSpec{
+				ReadinessGateEnabled: &gateEnabled,
+			},
+		},
+	}
+
+	sts := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      stsName,
+			Namespace: namespace,
+		},
+		Spec: appsv1.StatefulSetSpec{
+			Replicas: &replicas,
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{utils.ConfigHashAnnotation: desiredHash},
+				},
+			},
+		},
+	}
+
+	// Two pods with stale config hash → both need restart. Not ready so quiesce is
+	// skipped and shouldWarmRestart can't pick warm anyway (RestConfig nil).
+	makePod := func(ordinal int) *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        utils.StatefulSetName(clusterName, rackID) + "-" + itoa(ordinal),
+				Namespace:   namespace,
+				Labels:      utils.LabelsForRack(clusterName, rackID),
+				Annotations: map[string]string{utils.ConfigHashAnnotation: "oldhash"},
+			},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{Name: podutil.AerospikeContainerName, Image: "aerospike:ce-8.1.1.1"},
+				},
+			},
+		}
+	}
+
+	recorder := record.NewFakeRecorder(64)
+	r := &AerospikeClusterReconciler{
+		Client: fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithStatusSubresource(&ackov1alpha1.AerospikeCluster{}).
+			WithObjects(cluster, sts, makePod(0), makePod(1), makePod(2)).
+			Build(),
+		Scheme:   scheme,
+		Recorder: recorder,
+		// RestConfig left nil → cold restart path (pod delete via fake client).
+	}
+
+	rack := &ackov1alpha1.Rack{ID: rackID}
+
+	// 3 pods, batchSize=1 → 3 reconciles. The completed event must fire only on the
+	// final reconcile (when the pending queue drains), never on the intermediate
+	// batches. The pre-fix `restarted >= len(podsToRestart)` check compared the
+	// per-batch count (always 1) against the full list, so it never recognized
+	// the multi-batch case as complete on the intended boundary.
+	for i := 1; i <= 2; i++ {
+		if _, err := r.reconcileRollingRestart(context.Background(), cluster, rack); err != nil {
+			t.Fatalf("reconcileRollingRestart() batch %d error = %v", i, err)
+		}
+		events := drainRecorderEvents(recorder)
+		if containsEvent(events, EventRollingRestartCompleted) {
+			t.Fatalf("completed event fired too early on batch %d; events=%v", i, events)
+		}
+	}
+
+	// Final batch: restarts the last pod, queue drains → completed event fires.
+	if _, err := r.reconcileRollingRestart(context.Background(), cluster, rack); err != nil {
+		t.Fatalf("final reconcileRollingRestart() error = %v", err)
+	}
+	finalEvents := drainRecorderEvents(recorder)
+	if !containsEvent(finalEvents, EventRollingRestartCompleted) {
+		t.Errorf("expected %s event on final batch, got events=%v", EventRollingRestartCompleted, finalEvents)
+	}
+}
+
+// itoa is a tiny strconv.Itoa shim kept local to avoid widening imports for a
+// single conversion in test setup.
+func itoa(i int) string {
+	if i == 0 {
+		return "0"
+	}
+	var b [20]byte
+	pos := len(b)
+	for i > 0 {
+		pos--
+		b[pos] = byte('0' + i%10)
+		i /= 10
+	}
+	return string(b[pos:])
 }
 
 // TestFilterUnrestarted_BatchSubsetSemantics locks in the new contract: callers
