@@ -4379,6 +4379,75 @@ func TestValidate_ACLGlobalPrivilegeUnscopedAccepted(t *testing.T) {
 	}
 }
 
+// TestValidate_ACLScopedPrivilegeMalformedRejected covers scopable privileges
+// whose namespace/set scope is structurally invalid. Aerospike rejects these at
+// role-sync time (leaving the cluster in ACLSyncError), so the webhook must
+// reject them at admission with an actionable message instead.
+func TestValidate_ACLScopedPrivilegeMalformedRejected(t *testing.T) {
+	cases := []struct {
+		name    string
+		priv    string
+		wantMsg string
+	}{
+		{"trailing dot empty namespace", "read.", "namespace scope must not be empty"},
+		{"empty namespace before set", "read..myset", "namespace scope must not be empty"},
+		{"trailing dot empty set", "read.myns.", "set scope must not be empty"},
+		{"too many scope components", "read.myns.myset.extra", "scope must be"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			v := &AerospikeClusterValidator{}
+			cluster := &AerospikeCluster{
+				Spec: AerospikeClusterSpec{
+					Size:  3,
+					Image: "aerospike:ce-8.1.1.1",
+					AerospikeAccessControl: &AerospikeAccessControlSpec{
+						Roles: []AerospikeRoleSpec{
+							{Name: "bad-role", Privileges: []string{tc.priv}},
+						},
+						Users: []AerospikeUserSpec{
+							{Name: "admin", SecretName: "admin-secret", Roles: []string{"sys-admin", "user-admin"}},
+						},
+					},
+				},
+			}
+
+			_, err := v.validate(cluster)
+			if err == nil {
+				t.Fatalf("expected error for malformed scoped privilege %q", tc.priv)
+			}
+			if !strings.Contains(err.Error(), tc.wantMsg) {
+				t.Errorf("error should mention %q, got: %v", tc.wantMsg, err)
+			}
+		})
+	}
+}
+
+// TestValidate_ACLScopedSetPrivilegeAccepted confirms a well-formed
+// namespace.set scope on a scopable privilege is still accepted (guards against
+// the new structural check over-rejecting valid input).
+func TestValidate_ACLScopedSetPrivilegeAccepted(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeAccessControl: &AerospikeAccessControlSpec{
+				Roles: []AerospikeRoleSpec{
+					{Name: "set-reader", Privileges: []string{"read-write-udf.myns.myset"}},
+				},
+				Users: []AerospikeUserSpec{
+					{Name: "admin", SecretName: "admin-secret", Roles: []string{"sys-admin", "user-admin"}},
+				},
+			},
+		},
+	}
+
+	if _, err := v.validate(cluster); err != nil {
+		t.Fatalf("expected well-formed namespace.set scope to be accepted, got: %v", err)
+	}
+}
+
 // --- Defaulting idempotency test ---
 
 func TestDefault_IsIdempotent(t *testing.T) {
