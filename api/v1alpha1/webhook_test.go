@@ -4852,6 +4852,139 @@ func TestValidateUpdate_RackOnlyRemoveOK(t *testing.T) {
 	}
 }
 
+// Dropping rackConfig entirely from a cluster that had explicit racks is a
+// rename-like operation: the controller falls back to the default rack (ID 0),
+// tearing down every explicit-rack StatefulSet and creating a fresh rack-0 one.
+// It must be rejected just like an in-spec simultaneous add+remove.
+func TestValidateUpdate_RackConfigDroppedRejected(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	oldCluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  4,
+			Image: "aerospike:ce-8.1.1.1",
+			RackConfig: &RackConfig{
+				Racks: []Rack{
+					{ID: 1},
+					{ID: 2},
+				},
+			},
+		},
+	}
+	// rackConfig removed entirely -> effective rack set becomes {0}.
+	newCluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  4,
+			Image: "aerospike:ce-8.1.1.1",
+		},
+	}
+
+	_, err := v.ValidateUpdate(context.Background(), oldCluster, newCluster)
+	if err == nil {
+		t.Fatal("expected error when dropping rackConfig from a cluster with explicit racks")
+	}
+	if !strings.Contains(err.Error(), "cannot add new rack IDs") {
+		t.Errorf("error should mention 'cannot add new rack IDs', got: %v", err)
+	}
+	// The implicit default rack 0 is the added ID; explicit racks are removed.
+	if !strings.Contains(err.Error(), "[0]") {
+		t.Errorf("error should name the implicit default rack ID 0, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "[1 2]") {
+		t.Errorf("error should name the removed rack IDs [1 2] in sorted order, got: %v", err)
+	}
+}
+
+// An empty Racks slice resolves to the same default rack (ID 0) as a nil
+// rackConfig, so it must be rejected on the same data-loss grounds.
+func TestValidateUpdate_RackConfigEmptiedRejected(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	oldCluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  4,
+			Image: "aerospike:ce-8.1.1.1",
+			RackConfig: &RackConfig{
+				Racks: []Rack{{ID: 5}},
+			},
+		},
+	}
+	newCluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:       4,
+			Image:      "aerospike:ce-8.1.1.1",
+			RackConfig: &RackConfig{Racks: []Rack{}},
+		},
+	}
+
+	_, err := v.ValidateUpdate(context.Background(), oldCluster, newCluster)
+	if err == nil {
+		t.Fatal("expected error when emptying rackConfig.racks for a cluster with explicit racks")
+	}
+	if !strings.Contains(err.Error(), "cannot add new rack IDs") {
+		t.Errorf("error should mention 'cannot add new rack IDs', got: %v", err)
+	}
+}
+
+// Adding a first explicit rack to a default-rack (no rackConfig) cluster swaps
+// the implicit rack 0 for the new explicit rack — a rename-like transition that
+// must be rejected.
+func TestValidateUpdate_RackConfigAddedToDefaultRejected(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	oldCluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  4,
+			Image: "aerospike:ce-8.1.1.1",
+		},
+	}
+	newCluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  4,
+			Image: "aerospike:ce-8.1.1.1",
+			RackConfig: &RackConfig{
+				Racks: []Rack{{ID: 1}},
+			},
+		},
+	}
+
+	_, err := v.ValidateUpdate(context.Background(), oldCluster, newCluster)
+	if err == nil {
+		t.Fatal("expected error when adding the first explicit rack to a default-rack cluster")
+	}
+	if !strings.Contains(err.Error(), "cannot add new rack IDs") {
+		t.Errorf("error should mention 'cannot add new rack IDs', got: %v", err)
+	}
+}
+
+// Keeping the effective rack set unchanged across the nil<->empty default-rack
+// forms is a no-op for topology and must be allowed. (Rack ID 0 cannot be
+// specified explicitly — validateRackConfig reserves it — so only nil and the
+// empty slice are valid spellings of the default rack.)
+func TestValidateUpdate_RackConfigDefaultEquivalentForms_OK(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	base := AerospikeClusterSpec{Size: 4, Image: "aerospike:ce-8.1.1.1"}
+
+	cases := []struct {
+		name         string
+		oldRC, newRC *RackConfig
+	}{
+		{"nil to nil", nil, nil},
+		{"nil to empty", nil, &RackConfig{Racks: []Rack{}}},
+		{"empty to nil", &RackConfig{Racks: []Rack{}}, nil},
+		{"empty to empty", &RackConfig{Racks: []Rack{}}, &RackConfig{Racks: []Rack{}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			oldCluster := &AerospikeCluster{Spec: base}
+			oldCluster.Spec.RackConfig = tc.oldRC
+			newCluster := &AerospikeCluster{Spec: base}
+			newCluster.Spec.RackConfig = tc.newRC
+
+			if _, err := v.ValidateUpdate(context.Background(), oldCluster, newCluster); err != nil {
+				t.Errorf("unexpected error for topology-preserving update: %v", err)
+			}
+		})
+	}
+}
+
 func TestValidate_CE8ImageAccepted(t *testing.T) {
 	v := &AerospikeClusterValidator{}
 	cluster := &AerospikeCluster{
