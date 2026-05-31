@@ -78,6 +78,15 @@ const (
 	// longer interval serves only as a safety net for missed watch events.
 	podReadyPollInterval = 60 * time.Second
 
+	// aclRetryInterval is the requeue interval used when ACL sync failed. ACL
+	// failures (wrong password secret, a node briefly unavailable mid-restart)
+	// are treated as recoverable and are NOT routed through the circuit breaker,
+	// but they must still be retried promptly — and the cluster must not be
+	// reported as Completed/healthy in the meantime. Secret changes don't bump
+	// the CR generation, so without an explicit requeue an ACL failure would not
+	// be re-attempted until the next watch event or full resync.
+	aclRetryInterval = 30 * time.Second
+
 	// reconcileTimeout is the maximum duration for a single reconciliation loop.
 	// If the context deadline is exceeded, the reconcile will be retried with backoff.
 	reconcileTimeout = 5 * time.Minute
@@ -669,14 +678,53 @@ func (r *AerospikeClusterReconciler) reconcileCluster(
 	// cluster-level hash.
 	validConfigHashes := buildValidConfigHashes(rackInfos)
 
-	// Update status and set phase to Completed.
+	// Publish the terminal status and decide whether to requeue. Split into a
+	// helper so the end-of-reconcile status/requeue handling lives in one place
+	// and reconcileCluster stays under the cyclomatic-complexity budget.
+	return r.finalizeReconcile(ctx, namespacedName, cluster, aclErr, aclSynced, validConfigHashes)
+}
+
+// finalizeReconcile publishes the terminal status for a fully-reconciled cluster
+// and decides whether to requeue. It is split out of reconcileCluster to keep
+// that function's cyclomatic complexity in check and to group the
+// end-of-reconcile status/requeue decision in one place.
+//
+// ACL sync failures are deliberately not routed through
+// handleReconcileError/the circuit breaker (they are usually recoverable: a
+// wrong password Secret or a node briefly unavailable mid-restart). But the
+// cluster must NOT be reported as Completed/"healthy and stable" when ACL never
+// synced — that would mislead operators and any consumer keying on
+// phase=Completed, and it would stamp the unsynced spec into
+// Status.AppliedSpec (drift baseline) as if it had been fully applied. So on an
+// ACL failure terminalPhaseForACL publishes the ACLSync phase with the failure
+// reason and we requeue after aclRetryInterval to retry — a Secret change does
+// not bump the CR generation, so an explicit requeue is the only prompt retry.
+// On success we use a shorter fallback requeue while not all pods are Ready yet,
+// as a safety net for missed pod-Ready watch events.
+func (r *AerospikeClusterReconciler) finalizeReconcile(
+	ctx context.Context,
+	namespacedName types.NamespacedName,
+	cluster *ackov1alpha1.AerospikeCluster,
+	aclErr error,
+	aclSynced bool,
+	validConfigHashes map[string]bool,
+) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	phase, phaseReason := terminalPhaseForACL(aclErr)
 	statusOpts := StatusUpdateOpts{ACLErr: aclErr, ACLSynced: aclSynced, ValidConfigHashes: validConfigHashes}
-	if err := r.updateStatusAndPhase(ctx, namespacedName, ackov1alpha1.AerospikePhaseCompleted, "Cluster is healthy and stable", statusOpts); err != nil {
+	if err := r.updateStatusAndPhase(ctx, namespacedName, phase, phaseReason, statusOpts); err != nil {
 		if errors.IsConflict(err) {
 			return ctrl.Result{Requeue: true}, nil
 		}
 		metrics.ReconcileErrorsTotal.WithLabelValues(cluster.Namespace, cluster.Name, metrics.ReasonStatus).Inc()
 		return ctrl.Result{}, err
+	}
+
+	// Requeue to retry a failed ACL sync without tripping the circuit breaker.
+	if aclErr != nil {
+		log.Info("Reconciliation completed but ACL sync failed; requeuing to retry", "retryAfter", aclRetryInterval)
+		return ctrl.Result{RequeueAfter: aclRetryInterval}, nil
 	}
 
 	log.Info("Reconciliation completed successfully")
@@ -692,6 +740,25 @@ func (r *AerospikeClusterReconciler) reconcileCluster(
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// terminalPhaseForACL returns the phase and human-readable reason a reconcile
+// should publish at the end of reconcileCluster, given the (possibly nil) ACL
+// sync error.
+//
+// When ACL sync succeeded (or no ACL was configured), the cluster reaches the
+// healthy Completed phase. When ACL sync failed, the cluster must instead stay
+// in the ACLSync phase with the failure reason: reporting Completed/"healthy and
+// stable" on an ACL failure would both mislead consumers keying on
+// phase=Completed and (via updateStatusAndPhase) stamp the unsynced spec into
+// Status.AppliedSpec as if it had been applied. Extracted as a pure function so
+// the phase decision is unit-testable without a live ACL/Aerospike connection.
+func terminalPhaseForACL(aclErr error) (ackov1alpha1.AerospikePhase, string) {
+	if aclErr != nil {
+		return ackov1alpha1.AerospikePhaseACLSync,
+			fmt.Sprintf("ACL synchronization failed; will retry: %v", aclErr)
+	}
+	return ackov1alpha1.AerospikePhaseCompleted, "Cluster is healthy and stable"
 }
 
 // buildValidConfigHashes returns the set of acceptable effective per-rack
