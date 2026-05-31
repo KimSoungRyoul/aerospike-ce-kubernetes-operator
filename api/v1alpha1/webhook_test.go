@@ -339,6 +339,11 @@ func TestValidate_EnterpriseImageRejected(t *testing.T) {
 	}{
 		{"aerospike:ee-8.0.0.1_1"},
 		{"aerospike-enterprise:8.0.0"},
+		// Enterprise image pulled through a registry that includes a port: the
+		// host:port colon must not be mistaken for the tag separator, otherwise
+		// the ee-/ent- tag is not detected and the image bypasses the CE guard.
+		{"myregistry.io:5000/aerospike:ee-8.0.0.1_1"},
+		{"localhost:32000/aerospike:ent-8.1.0"},
 	}
 
 	for _, tc := range tests {
@@ -1842,12 +1847,51 @@ func TestIsEnterpriseTag(t *testing.T) {
 		{"myrepo/aerospike:ce-8.1.1.1", false},
 		{"myrepo/aerospike:ee-8.1.1.1", true},
 		{"myrepo/aerospike:ent-8.1.1.1", true},
+		// Registry references with a port: the host:port colon must NOT be read
+		// as the tag separator, otherwise an Enterprise image slips through.
+		{"myregistry.io:5000/aerospike:ce-8.1.1.1", false},
+		{"myregistry.io:5000/aerospike:ee-8.0.0.1_1", true},
+		{"localhost:32000/aerospike:ent-8.1.0", true},
+		// A ported registry reference with no tag is untagged (the only colon is
+		// the registry port), so it is not an enterprise tag.
+		{"myregistry.io:5000/aerospike", false},
 	}
 
 	for _, tc := range tests {
 		got := isEnterpriseTag(tc.image)
 		if got != tc.expected {
 			t.Errorf("isEnterpriseTag(%q) = %v, want %v", tc.image, got, tc.expected)
+		}
+	}
+}
+
+// --- imageTag tests ---
+
+// TestImageTag covers tag extraction including the registry-with-port case that
+// a naive SplitN(image, ":", 2) misparsed (reading the host:port colon as the
+// tag separator), which silently bypassed the CE version / enterprise guards.
+func TestImageTag(t *testing.T) {
+	tests := []struct {
+		image string
+		want  string
+	}{
+		{"aerospike:ce-8.1.1.1", "ce-8.1.1.1"},
+		{"aerospike", ""},
+		{"aerospike:", ""},
+		{"myrepo/aerospike:ce-8.1.1.1", "ce-8.1.1.1"},
+		// Registry with a port: tag is after the last colon, which follows the
+		// last '/'.
+		{"myregistry.io:5000/aerospike:ce-8.1.1.1", "ce-8.1.1.1"},
+		{"localhost:32000/aerospike:ent-8.1.0", "ent-8.1.0"},
+		// Ported registry, no tag: the only colon is the registry port, so the
+		// reference is untagged.
+		{"myregistry.io:5000/aerospike", ""},
+		{"localhost:32000/aerospike", ""},
+	}
+
+	for _, tc := range tests {
+		if got := imageTag(tc.image); got != tc.want {
+			t.Errorf("imageTag(%q) = %q, want %q", tc.image, got, tc.want)
 		}
 	}
 }
@@ -5074,6 +5118,11 @@ func TestValidate_CE7ImageRejected(t *testing.T) {
 	}{
 		{"ce-7 tag", "aerospike:ce-7.2.0.6"},
 		{"ce-7.0 tag", "aerospike:ce-7.0.0.0"},
+		// CE 7.x image pulled through a ported registry: the host:port colon must
+		// not be mistaken for the tag separator, otherwise parseMajorVersion fails
+		// and the minimum-version gate is silently skipped.
+		{"ported registry ce-7", "myregistry.io:5000/aerospike:ce-7.0.0.0"},
+		{"ported registry ce-7 localhost", "localhost:32000/aerospike:ce-7.2.0.6"},
 	}
 
 	for _, tc := range tests {
@@ -6839,6 +6888,13 @@ func TestParseMajorVersion(t *testing.T) {
 		{name: "plain dotless 7", image: "aerospike:7", want: 7, wantErr: false},
 		{name: "ce-prefixed dotless 8", image: "aerospike:ce-8", want: 8, wantErr: false},
 		{name: "v-prefixed dotless 8", image: "aerospike:v8", want: 8, wantErr: false},
+		// Registry with a port: the host:port colon must not be read as the tag
+		// separator, otherwise the major version is misparsed and the CE-version
+		// gate is silently skipped.
+		{name: "ported registry ce-7", image: "myregistry.io:5000/aerospike:ce-7.0.0.0", want: 7, wantErr: false},
+		{name: "ported registry ce-8", image: "localhost:32000/aerospike:ce-8.1.1.1", want: 8, wantErr: false},
+		// Ported registry with no tag must error so the caller skips it.
+		{name: "ported registry untagged", image: "myregistry.io:5000/aerospike", want: 0, wantErr: true},
 		// genuinely unparseable tags must still error so the caller skips gracefully.
 		{name: "unparseable latest", image: "aerospike:latest", want: 0, wantErr: true},
 		{name: "unparseable empty tag", image: "aerospike:", want: 0, wantErr: true},
