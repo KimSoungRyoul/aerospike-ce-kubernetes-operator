@@ -105,10 +105,45 @@ func parseMigrateStat(stats, key string) (int64, bool) {
 	return 0, false
 }
 
+// migrateUncertainSentinel is the migrate_partitions_remaining value recorded for
+// a node whose migration state could not be confirmed (the statistics command
+// errored, or its value was absent/unparseable). A positive sentinel makes the
+// node count as "migrating" downstream so a destructive scale-down or rolling
+// restart never proceeds on a value we could not verify as zero.
+const migrateUncertainSentinel int64 = 1
+
+// migrateRemainingForNode decides the migrate_partitions_remaining value to
+// record for a single node, given the raw statistics response and the error (if
+// any) from the statistics command. A failed command, an absent key, or an
+// unparseable value all resolve to migrateUncertainSentinel so the node is
+// reported as migrating rather than treated as complete. ok reports whether the
+// value was confirmed (true) or is the uncertainty sentinel (false); callers use
+// it for logging only.
+func migrateRemainingForNode(stats string, statsErr error) (remaining int64, confirmed bool) {
+	if statsErr != nil {
+		return migrateUncertainSentinel, false
+	}
+	n, ok := parseMigrateStat(stats, "migrate_partitions_remaining")
+	if !ok {
+		return migrateUncertainSentinel, false
+	}
+	return n, true
+}
+
 // migrateStatsPerNode returns the migrate_partitions_remaining count for each node
 // in the cluster. The map is keyed by the node's host IP address.
-// If a single node is unreachable, the error is logged and that node is skipped.
-// An error is returned only if ALL nodes fail.
+//
+// A node whose statistics command fails (or returns an absent/unparseable
+// migration stat) is recorded with a positive sentinel — NOT silently dropped —
+// so that an unreachable subset of nodes cannot make the cluster look like
+// migration is complete. Previously such nodes were skipped, so if every
+// reachable node happened to report 0 remaining partitions while one node was
+// unreachable, the status path (applyMigrationStats) would publish
+// MigrationComplete=True / RemainingPartitions=0 even though migration state was
+// unknown on that node — the same false-negative that isMigratingOnAnyNode
+// guards against. A node is only dropped when its host IP cannot be resolved (so
+// there is no map key to record it under); those drops are counted toward the
+// all-nodes-failed error below.
 func migrateStatsPerNode(log logr.Logger, client *aero.Client) (map[string]int64, error) {
 	nodes := client.GetNodes()
 	if len(nodes) == 0 {
@@ -116,35 +151,34 @@ func migrateStatsPerNode(log logr.Logger, client *aero.Client) (map[string]int64
 	}
 
 	result := make(map[string]int64, len(nodes))
-	var errCount int
+	var droppedCount int
 	for _, node := range nodes {
 		if node == nil {
 			continue
 		}
-		stats, err := asinfoCommandOnNode(node, "statistics")
-		if err != nil {
-			errCount++
-			log.V(1).Info("Skipping node: statistics command failed", "node", node.GetName(), "error", err)
+		host := node.GetHost()
+		if host == nil {
+			// No IP to key this node under; cannot record it. Count it so a
+			// cluster where every node lacks a host still surfaces an error.
+			droppedCount++
+			log.V(1).Info("Skipping node with no host info for migration stats", "node", node.GetName())
 			continue
 		}
-		remaining, ok := parseMigrateStat(stats, "migrate_partitions_remaining")
-		if !ok {
-			// Key absent or value unparseable: record a positive sentinel so
-			// the node is reported as migrating rather than silently dropped
-			// (which downstream would render as "migration complete").
-			log.V(1).Info("Could not parse migrate_partitions_remaining, reporting node as migrating",
-				"node", node.GetName())
-			remaining = 1
+
+		stats, err := asinfoCommandOnNode(node, "statistics")
+		remaining, confirmed := migrateRemainingForNode(stats, err)
+		if !confirmed {
+			log.V(1).Info("Migration state unconfirmed, reporting node as migrating",
+				"node", node.GetName(), "error", err)
 		}
-		host := node.GetHost()
-		if host != nil {
-			result[host.Name] = remaining
-		}
+		result[host.Name] = remaining
 	}
 
-	// If every node failed, return an error.
-	if errCount > 0 && len(result) == 0 {
-		return nil, fmt.Errorf("all %d node(s) failed to respond to statistics command", errCount)
+	// If no node could be recorded at all, surface an error so the caller keeps
+	// the previous (stale-but-safe) MigrationStatus instead of treating an empty
+	// map as "migration complete".
+	if droppedCount > 0 && len(result) == 0 {
+		return nil, fmt.Errorf("all %d node(s) lacked host info or were unreachable for statistics", droppedCount)
 	}
 	return result, nil
 }
