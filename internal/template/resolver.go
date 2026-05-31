@@ -69,16 +69,33 @@ var enterpriseOnlyNamespaceKeysCE = map[string]string{
 	"tomb-raider-period":       "tomb-raider is Enterprise-only",
 }
 
+// imageTag returns the tag portion of a container image reference, or "" when
+// the reference has no tag. A colon before the final '/' belongs to a registry
+// host:port (e.g. "myregistry.io:5000/aerospike:ee-8.0.0"), not the tag, so the
+// tag is taken from the last colon only when it follows the last '/'. A
+// digest-pinned ref's "@<algo>:<hex>" suffix is stripped first so the digest's
+// own colon is not misread as the tag separator. Mirrors
+// api/v1alpha1.imageTag — duplicated to avoid an import cycle.
+func imageTag(image string) string {
+	if at := strings.LastIndex(image, "@"); at >= 0 && at > strings.LastIndex(image, "/") {
+		image = image[:at]
+	}
+	lastColon := strings.LastIndex(image, ":")
+	if lastColon < 0 {
+		return ""
+	}
+	if slash := strings.LastIndex(image, "/"); slash > lastColon {
+		return ""
+	}
+	return image[lastColon+1:]
+}
+
 // isEnterpriseTag returns true for image tags that indicate an Enterprise
 // Edition build (e.g., "aerospike:ee-8.0.0.1_1", "aerospike:ent-8.0.0").
 // Mirrors api/v1alpha1.isEnterpriseTag — duplicated to avoid an import
 // cycle.
 func isEnterpriseTag(image string) bool {
-	parts := strings.SplitN(image, ":", 2)
-	if len(parts) != 2 {
-		return false
-	}
-	tagLower := strings.ToLower(parts[1])
+	tagLower := strings.ToLower(imageTag(image))
 	return strings.HasPrefix(tagLower, "ee-") || strings.HasPrefix(tagLower, "ent-")
 }
 

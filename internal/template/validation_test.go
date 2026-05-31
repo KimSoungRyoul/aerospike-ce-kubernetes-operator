@@ -86,6 +86,11 @@ func TestValidateTemplateSpec_V_T06_RejectsEnterpriseEditionTag(t *testing.T) {
 	for _, img := range []string{
 		"myregistry.io/aerospike:ee-8.0.0.1_1",
 		"myregistry.io/aerospike:ent-8.0.0",
+		// Registry references that include a port previously had their tag
+		// misparsed (the host:port colon was read as the tag separator), so an
+		// Enterprise image slipped through the CE guard. These must be rejected.
+		"myregistry.io:5000/aerospike:ee-8.0.0.1_1",
+		"localhost:32000/aerospike:ent-8.0.0",
 	} {
 		spec := &ackov1alpha1.AerospikeClusterTemplateSpec{Image: img}
 		errs, _ := ValidateTemplateSpec(spec)

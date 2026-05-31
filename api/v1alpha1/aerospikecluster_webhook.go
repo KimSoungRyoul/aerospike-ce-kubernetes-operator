@@ -1184,11 +1184,11 @@ func (v *AerospikeClusterValidator) validateSizeAndImage(cluster *AerospikeClust
 				"spec.image %q is an Enterprise Edition image; only Community Edition images are allowed",
 				cluster.Spec.Image))
 		}
-		if !strings.Contains(cluster.Spec.Image, ":") {
+		tag := imageTag(cluster.Spec.Image)
+		if tag == "" {
 			imageWarnings = append(imageWarnings, fmt.Sprintf("spec.image %q has no tag; use an explicit version tag (e.g., aerospike:ce-8.1.1.1) for reproducible deployments", cluster.Spec.Image))
 		} else {
-			parts := strings.SplitN(cluster.Spec.Image, ":", 2)
-			if parts[1] == "latest" {
+			if tag == "latest" {
 				imageWarnings = append(imageWarnings, "spec.image uses 'latest' tag; use an explicit version tag for reproducible deployments")
 			} else {
 				// Enforce minimum CE 8 version.
@@ -1204,15 +1204,47 @@ func (v *AerospikeClusterValidator) validateSizeAndImage(cluster *AerospikeClust
 	return sizeErrors, imageErrors, imageWarnings
 }
 
+// imageTag returns the tag portion of a container image reference, or "" when
+// the reference has no tag.
+//
+// A naive strings.SplitN(image, ":", 2) splits on the FIRST colon, which for a
+// registry that includes a port (e.g. "myregistry.io:5000/aerospike:ce-8.1.1.1"
+// or "localhost:32000/aerospike:ee-8.0.0") is the registry-port separator, not
+// the tag separator. That made parseMajorVersion and isEnterpriseTag misread the
+// tag and silently skip the CE version / enterprise-image guards for any image
+// pulled through a ported registry. Per the OCI/Docker reference grammar, the tag
+// colon is the LAST colon and must appear after the final '/'; a colon before the
+// last '/' belongs to the registry host:port and means the reference is untagged.
+//
+// A digest-pinned reference may carry an "@<algo>:<hex>" suffix (e.g.
+// "aerospike:ce-8.1.1.1@sha256:abc..."). That digest contains its own colon, so
+// it must be stripped before locating the tag colon; otherwise the digest's
+// colon is misread as the tag separator and parseMajorVersion / isEnterpriseTag
+// silently skip the CE-version / enterprise-image guards for any digest-pinned
+// image. The '@' separator always appears after the final '/'.
+func imageTag(image string) string {
+	if at := strings.LastIndex(image, "@"); at >= 0 && at > strings.LastIndex(image, "/") {
+		image = image[:at]
+	}
+	lastColon := strings.LastIndex(image, ":")
+	if lastColon < 0 {
+		return ""
+	}
+	// A colon that precedes the last '/' is a registry port, not a tag.
+	if slash := strings.LastIndex(image, "/"); slash > lastColon {
+		return ""
+	}
+	return image[lastColon+1:]
+}
+
 // parseMajorVersion extracts the major version number from a container image tag
 // such as "aerospike:ce-8.1.1.1" or "aerospike:8.1.0". Returns an error if the
 // version cannot be determined.
 func parseMajorVersion(image string) (int, error) {
-	parts := strings.SplitN(image, ":", 2)
-	if len(parts) != 2 {
+	tag := imageTag(image)
+	if tag == "" {
 		return 0, fmt.Errorf("image %q has no tag", image)
 	}
-	tag := parts[1]
 	for _, prefix := range []string{"ce-", "ee-", "ent-"} {
 		if after, found := strings.CutPrefix(tag, prefix); found {
 			tag = after
@@ -1233,12 +1265,7 @@ func parseMajorVersion(image string) (int, error) {
 // isEnterpriseTag returns true if the image tag indicates an Enterprise Edition image
 // (e.g., "aerospike:ee-8.0.0.1_1", "aerospike:ent-8.0.0").
 func isEnterpriseTag(image string) bool {
-	parts := strings.SplitN(image, ":", 2)
-	if len(parts) != 2 {
-		return false
-	}
-
-	tagLower := strings.ToLower(parts[1])
+	tagLower := strings.ToLower(imageTag(image))
 	return strings.HasPrefix(tagLower, "ee-") || strings.HasPrefix(tagLower, "ent-")
 }
 
@@ -1804,9 +1831,8 @@ func (v *AerospikeClusterValidator) validateMonitoring(m *AerospikeMonitoringSpe
 	}
 
 	// Warn about 'latest' tag on exporter image.
-	if strings.Contains(m.ExporterImage, ":") {
-		parts := strings.SplitN(m.ExporterImage, ":", 2)
-		if parts[1] == "latest" {
+	if exporterTag := imageTag(m.ExporterImage); exporterTag != "" {
+		if exporterTag == "latest" {
 			warnings = append(warnings, "monitoring.exporterImage uses 'latest' tag; use an explicit version tag for reproducible deployments")
 		}
 	} else if m.ExporterImage != "" {
