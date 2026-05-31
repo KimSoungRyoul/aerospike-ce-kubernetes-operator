@@ -141,7 +141,7 @@ func TestReconcileOperations_UnknownKind_GoesToError(t *testing.T) {
 		},
 	}
 
-	target := clusterPod("demo", "demo-0", corev1.PodPending)
+	target := clusterPod("demo-0", corev1.PodPending)
 
 	reconciler := &AerospikeClusterReconciler{
 		Client: fake.NewClientBuilder().
@@ -462,14 +462,15 @@ func operationsScheme(t *testing.T) *runtime.Scheme {
 	return scheme
 }
 
-// clusterPod builds a pod carrying the cluster selector labels so listClusterPods
-// (and thus getOperationTargetPods) resolves it as an operation target.
-func clusterPod(clusterName, name string, phase corev1.PodPhase) *corev1.Pod {
+// clusterPod builds a pod carrying the selector labels of the "demo" cluster
+// used throughout these tests so listClusterPods (and thus
+// getOperationTargetPods) resolves it as an operation target.
+func clusterPod(name string, phase corev1.PodPhase) *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
-			Labels:    utils.SelectorLabelsForCluster(clusterName),
+			Labels:    utils.SelectorLabelsForCluster("demo"),
 		},
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{
@@ -513,7 +514,7 @@ func TestReconcileOperations_BlockedByReadinessGate_DoesNotAdvance(t *testing.T)
 
 	// demo-0: already restarted, but its readiness gate is NOT yet satisfied
 	// (Running + gate condition False) → isBatchBlocked must hold the batch.
-	blockedPod := clusterPod("demo", "demo-0", corev1.PodRunning)
+	blockedPod := clusterPod("demo-0", corev1.PodRunning)
 	blockedPod.Spec.ReadinessGates = []corev1.PodReadinessGate{
 		{ConditionType: podutil.AerospikeReadinessGateConditionType},
 	}
@@ -521,7 +522,7 @@ func TestReconcileOperations_BlockedByReadinessGate_DoesNotAdvance(t *testing.T)
 		{Type: podutil.AerospikeReadinessGateConditionType, Status: corev1.ConditionFalse},
 	}
 	// demo-1: the next pod the operation would restart if the guard were absent.
-	nextPod := clusterPod("demo", "demo-1", corev1.PodRunning)
+	nextPod := clusterPod("demo-1", corev1.PodRunning)
 
 	reconciler := &AerospikeClusterReconciler{
 		Client: fake.NewClientBuilder().
@@ -587,7 +588,7 @@ func TestReconcileOperations_NotBlocked_AdvancesOneBatch(t *testing.T) {
 		},
 	}
 
-	target := clusterPod("demo", "demo-0", corev1.PodPending)
+	target := clusterPod("demo-0", corev1.PodPending)
 
 	reconciler := &AerospikeClusterReconciler{
 		Client: fake.NewClientBuilder().
