@@ -1887,6 +1887,14 @@ func TestImageTag(t *testing.T) {
 		// reference is untagged.
 		{"myregistry.io:5000/aerospike", ""},
 		{"localhost:32000/aerospike", ""},
+		// Digest-pinned refs: the "@sha256:..." suffix must be stripped before
+		// locating the tag colon, otherwise the digest hex is returned as the tag
+		// and the CE-version / enterprise guards are silently skipped.
+		{"aerospike:ce-8.1.1.1@sha256:abc123", "ce-8.1.1.1"},
+		{"myregistry.io:5000/aerospike:ce-8.1.1.1@sha256:abc123", "ce-8.1.1.1"},
+		// Digest only, no tag: still untagged after stripping the digest.
+		{"aerospike@sha256:abc123", ""},
+		{"myregistry.io:5000/aerospike@sha256:abc123", ""},
 	}
 
 	for _, tc := range tests {
@@ -4710,6 +4718,39 @@ func TestValidate_ImageWithDigestAccepted(t *testing.T) {
 	}
 }
 
+// TestValidate_DigestPinnedGuardsStillFire verifies that the CE-version and
+// enterprise-edition guards are NOT bypassed by a "@sha256:..." digest suffix.
+// Before the digest was stripped in imageTag, the digest's colon was misread as
+// the tag separator, parseMajorVersion/isEnterpriseTag failed, and these images
+// slipped through.
+func TestValidate_DigestPinnedGuardsStillFire(t *testing.T) {
+	tests := []struct {
+		name    string
+		image   string
+		wantSub string // expected substring in the rejection error
+	}{
+		{name: "ce-7 digest-pinned rejected", image: "aerospike:ce-7.0.0.0@sha256:abc123", wantSub: "requires Aerospike CE"},
+		{name: "ee digest-pinned rejected", image: "aerospike:ee-8.0.0.1@sha256:abc123", wantSub: "Enterprise Edition"},
+		{name: "ported registry ce-7 digest rejected", image: "myregistry.io:5000/aerospike:ce-7.0.0.0@sha256:abc123", wantSub: "requires Aerospike CE"},
+	}
+
+	v := &AerospikeClusterValidator{}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cluster := &AerospikeCluster{
+				Spec: AerospikeClusterSpec{Size: 1, Image: tc.image},
+			}
+			_, err := v.validate(cluster)
+			if err == nil {
+				t.Fatalf("validate() with image %q: expected error, got none", tc.image)
+			}
+			if !strings.Contains(err.Error(), tc.wantSub) {
+				t.Errorf("validate() with image %q: expected error containing %q, got: %v", tc.image, tc.wantSub, err)
+			}
+		})
+	}
+}
+
 func TestValidate_ImageEnterpriseEETag(t *testing.T) {
 	v := &AerospikeClusterValidator{}
 	cluster := &AerospikeCluster{
@@ -6893,6 +6934,14 @@ func TestParseMajorVersion(t *testing.T) {
 		// gate is silently skipped.
 		{name: "ported registry ce-7", image: "myregistry.io:5000/aerospike:ce-7.0.0.0", want: 7, wantErr: false},
 		{name: "ported registry ce-8", image: "localhost:32000/aerospike:ce-8.1.1.1", want: 8, wantErr: false},
+		// Digest-pinned refs: the digest suffix must be stripped so the real tag's
+		// major version is parsed, not the digest hex (which would error and skip
+		// the CE-version gate).
+		{name: "digest-pinned ce-7", image: "aerospike:ce-7.0.0.0@sha256:abc123", want: 7, wantErr: false},
+		{name: "digest-pinned ce-8", image: "aerospike:ce-8.1.1.1@sha256:abc123", want: 8, wantErr: false},
+		{name: "ported registry digest-pinned ce-8", image: "myregistry.io:5000/aerospike:ce-8.1.1.1@sha256:abc123", want: 8, wantErr: false},
+		// Digest only (no tag) must error so the caller skips it.
+		{name: "digest only untagged", image: "aerospike@sha256:abc123", want: 0, wantErr: true},
 		// Ported registry with no tag must error so the caller skips it.
 		{name: "ported registry untagged", image: "myregistry.io:5000/aerospike", want: 0, wantErr: true},
 		// genuinely unparseable tags must still error so the caller skips gracefully.

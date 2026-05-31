@@ -72,9 +72,14 @@ var enterpriseOnlyNamespaceKeysCE = map[string]string{
 // imageTag returns the tag portion of a container image reference, or "" when
 // the reference has no tag. A colon before the final '/' belongs to a registry
 // host:port (e.g. "myregistry.io:5000/aerospike:ee-8.0.0"), not the tag, so the
-// tag is taken from the last colon only when it follows the last '/'. Mirrors
+// tag is taken from the last colon only when it follows the last '/'. A
+// digest-pinned ref's "@<algo>:<hex>" suffix is stripped first so the digest's
+// own colon is not misread as the tag separator. Mirrors
 // api/v1alpha1.imageTag — duplicated to avoid an import cycle.
 func imageTag(image string) string {
+	if at := strings.LastIndex(image, "@"); at >= 0 && at > strings.LastIndex(image, "/") {
+		image = image[:at]
+	}
 	lastColon := strings.LastIndex(image, ":")
 	if lastColon < 0 {
 		return ""

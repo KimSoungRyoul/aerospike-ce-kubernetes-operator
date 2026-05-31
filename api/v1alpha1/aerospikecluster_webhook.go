@@ -1215,7 +1215,17 @@ func (v *AerospikeClusterValidator) validateSizeAndImage(cluster *AerospikeClust
 // pulled through a ported registry. Per the OCI/Docker reference grammar, the tag
 // colon is the LAST colon and must appear after the final '/'; a colon before the
 // last '/' belongs to the registry host:port and means the reference is untagged.
+//
+// A digest-pinned reference may carry an "@<algo>:<hex>" suffix (e.g.
+// "aerospike:ce-8.1.1.1@sha256:abc..."). That digest contains its own colon, so
+// it must be stripped before locating the tag colon; otherwise the digest's
+// colon is misread as the tag separator and parseMajorVersion / isEnterpriseTag
+// silently skip the CE-version / enterprise-image guards for any digest-pinned
+// image. The '@' separator always appears after the final '/'.
 func imageTag(image string) string {
+	if at := strings.LastIndex(image, "@"); at >= 0 && at > strings.LastIndex(image, "/") {
+		image = image[:at]
+	}
 	lastColon := strings.LastIndex(image, ":")
 	if lastColon < 0 {
 		return ""
