@@ -678,18 +678,40 @@ func (r *AerospikeClusterReconciler) reconcileCluster(
 	// cluster-level hash.
 	validConfigHashes := buildValidConfigHashes(rackInfos)
 
-	// Decide the terminal phase for this reconcile. ACL sync failures are
-	// deliberately not routed through handleReconcileError/the circuit breaker
-	// (they are usually recoverable: a wrong password Secret or a node briefly
-	// unavailable mid-restart). But the cluster must NOT be reported as
-	// Completed/"healthy and stable" when ACL never synced — that would mislead
-	// operators and any consumer keying on phase=Completed, and it would stamp
-	// the unsynced spec into Status.AppliedSpec (drift baseline) as if it had
-	// been fully applied. Surface the ACLSync phase with the failure reason and
-	// requeue so the next reconcile retries; the ACLSynced=False condition still
-	// carries the detailed error.
-	phase, phaseReason := terminalPhaseForACL(aclErr)
+	// Publish the terminal status and decide whether to requeue. Split into a
+	// helper so the end-of-reconcile status/requeue handling lives in one place
+	// and reconcileCluster stays under the cyclomatic-complexity budget.
+	return r.finalizeReconcile(ctx, namespacedName, cluster, aclErr, aclSynced, validConfigHashes)
+}
 
+// finalizeReconcile publishes the terminal status for a fully-reconciled cluster
+// and decides whether to requeue. It is split out of reconcileCluster to keep
+// that function's cyclomatic complexity in check and to group the
+// end-of-reconcile status/requeue decision in one place.
+//
+// ACL sync failures are deliberately not routed through
+// handleReconcileError/the circuit breaker (they are usually recoverable: a
+// wrong password Secret or a node briefly unavailable mid-restart). But the
+// cluster must NOT be reported as Completed/"healthy and stable" when ACL never
+// synced — that would mislead operators and any consumer keying on
+// phase=Completed, and it would stamp the unsynced spec into
+// Status.AppliedSpec (drift baseline) as if it had been fully applied. So on an
+// ACL failure terminalPhaseForACL publishes the ACLSync phase with the failure
+// reason and we requeue after aclRetryInterval to retry — a Secret change does
+// not bump the CR generation, so an explicit requeue is the only prompt retry.
+// On success we use a shorter fallback requeue while not all pods are Ready yet,
+// as a safety net for missed pod-Ready watch events.
+func (r *AerospikeClusterReconciler) finalizeReconcile(
+	ctx context.Context,
+	namespacedName types.NamespacedName,
+	cluster *ackov1alpha1.AerospikeCluster,
+	aclErr error,
+	aclSynced bool,
+	validConfigHashes map[string]bool,
+) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	phase, phaseReason := terminalPhaseForACL(aclErr)
 	statusOpts := StatusUpdateOpts{ACLErr: aclErr, ACLSynced: aclSynced, ValidConfigHashes: validConfigHashes}
 	if err := r.updateStatusAndPhase(ctx, namespacedName, phase, phaseReason, statusOpts); err != nil {
 		if errors.IsConflict(err) {
