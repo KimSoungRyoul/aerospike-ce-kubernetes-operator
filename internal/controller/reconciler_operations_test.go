@@ -110,6 +110,86 @@ func TestReconcileOperations_ExplicitPodListNoMatch_GoesToError(t *testing.T) {
 	}
 }
 
+// TestReconcileOperations_UnknownKind_GoesToError is the defense-in-depth
+// regression for the silent-no-op bug in the per-pod switch: an operation whose
+// Kind is neither WarmRestart nor PodRestart previously fell through the switch
+// with opErr=nil and restartReason="", so the pod was appended to CompletedPods
+// and the operation reported Completed having restarted nothing. The CRD enum
+// normally guards op.Kind at the API server, but if that validation is ever
+// bypassed the operator must surface the Error phase with the pod in FailedPods.
+func TestReconcileOperations_UnknownKind_GoesToError(t *testing.T) {
+	scheme := operationsScheme(t)
+	gateEnabled := true
+
+	cluster := &ackov1alpha1.AerospikeCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "demo", Namespace: "default"},
+		Spec: ackov1alpha1.AerospikeClusterSpec{
+			Size: 1,
+			// Enable the readiness gate so operationBatchBlocked stays on the
+			// in-memory gate path (anyPodGateUnsatisfied) instead of the
+			// network-bound migration probe; the Pending target pod is skipped
+			// by the gate check, so the batch is not blocked and the per-pod
+			// switch — the code under test — actually runs.
+			PodSpec: &ackov1alpha1.AerospikePodSpec{ReadinessGateEnabled: &gateEnabled},
+			Operations: []ackov1alpha1.OperationSpec{
+				{
+					ID:      "op-bogus",
+					Kind:    ackov1alpha1.OperationKind("Bogus"),
+					PodList: []string{"demo-0"},
+				},
+			},
+		},
+	}
+
+	target := clusterPod("demo", "demo-0", corev1.PodPending)
+
+	reconciler := &AerospikeClusterReconciler{
+		Client: fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithStatusSubresource(&ackov1alpha1.AerospikeCluster{}).
+			WithObjects(cluster, target).
+			Build(),
+		Scheme:   scheme,
+		Recorder: record.NewFakeRecorder(16),
+	}
+
+	inProgress, err := reconciler.reconcileOperations(context.Background(), cluster)
+	if err != nil {
+		t.Fatalf("reconcileOperations() error = %v", err)
+	}
+	if inProgress {
+		t.Fatal("expected inProgress=false: an unsupported-kind operation is terminal, not requeued")
+	}
+
+	// The pod must NOT have been touched (no warm/cold restart happened).
+	if err := reconciler.Get(context.Background(),
+		types.NamespacedName{Name: "demo-0", Namespace: "default"}, &corev1.Pod{}); err != nil {
+		t.Fatalf("demo-0 should NOT have been restarted for an unsupported kind, Get err = %v", err)
+	}
+
+	updated := &ackov1alpha1.AerospikeCluster{}
+	if err := reconciler.Get(context.Background(),
+		types.NamespacedName{Name: "demo", Namespace: "default"}, updated); err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if updated.Status.OperationStatus == nil {
+		t.Fatal("expected OperationStatus to be set")
+	}
+	if updated.Status.OperationStatus.Phase != ackov1alpha1.AerospikePhaseError {
+		t.Errorf("phase = %q, want %q (an unsupported kind must not be reported as Completed)",
+			updated.Status.OperationStatus.Phase, ackov1alpha1.AerospikePhaseError)
+	}
+	if len(updated.Status.OperationStatus.CompletedPods) != 0 {
+		t.Errorf("CompletedPods = %v, want empty (nothing was actually restarted)",
+			updated.Status.OperationStatus.CompletedPods)
+	}
+	if len(updated.Status.OperationStatus.FailedPods) != 1 ||
+		updated.Status.OperationStatus.FailedPods[0] != "demo-0" {
+		t.Errorf("FailedPods = %v, want [demo-0] (the unsupported-kind pod must fail)",
+			updated.Status.OperationStatus.FailedPods)
+	}
+}
+
 func TestFilterPodsByNames_EmptyNames_ReturnsAll(t *testing.T) {
 	pods := []corev1.Pod{
 		{ObjectMeta: metav1.ObjectMeta{Name: "pod-0"}},

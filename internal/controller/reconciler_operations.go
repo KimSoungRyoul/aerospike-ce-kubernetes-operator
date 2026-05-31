@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -144,6 +145,15 @@ func (r *AerospikeClusterReconciler) reconcileOperations(
 		case ackov1alpha1.OperationPodRestart:
 			opErr = r.coldRestartPod(ctx, cluster, pod)
 			restartReason = ackov1alpha1.RestartReasonManualRestart
+		default:
+			// An unrecognized operation kind must never be reported as a silent
+			// success. Today the CRD enum guards op.Kind at the API server, so
+			// this is defense-in-depth: if validation is ever bypassed (older
+			// CRD, direct status writer, future kind added without a handler),
+			// route the pod into the FailedPods path so finalizeOperationPhase
+			// drives the operation to the terminal Error phase instead of
+			// appending it to CompletedPods having restarted nothing.
+			opErr = fmt.Errorf("unsupported operation kind %q", op.Kind)
 		}
 
 		if opErr == nil && restartReason != "" {
