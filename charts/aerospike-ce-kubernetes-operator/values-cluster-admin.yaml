@@ -1,0 +1,65 @@
+# =============================================================================
+# Preset: "cluster-admin" (RBAC-only pre-install)
+# =============================================================================
+# Renders ONLY the operator's cluster-scoped RBAC — the "cluster admin" grant:
+#   - ClusterRole/ClusterRoleBinding  <release>-manager        (the operator's permissions)
+#   - ClusterRole/ClusterRoleBinding  <release>-metrics-auth
+#   - ClusterRole                     <release>-metrics-reader
+# NO CRDs, NO controller Deployment, NO webhook, NO UI. The namespaced
+# ServiceAccount and leader-election Role/RoleBinding are created with the
+# operator workload in step 2 below; the ClusterRoleBindings above already
+# reference that ServiceAccount by name (valid before it exists), so the two
+# steps own disjoint resources and never collide.
+#
+# Use this on restricted / multi-tenant clusters where a cluster-admin must
+# pre-provision the privileged cluster-scoped resources, while CRDs are managed
+# separately (GitOps / ArgoCD / Flux, or a one-off
+# `helm install aerospike-ce-kubernetes-operator-crds`) and the namespaced
+# operator workload is rolled out by an app team afterwards.
+#
+# Apply with (run by a cluster-admin, once):
+#   helm install acko . -f values-cluster-admin.yaml \
+#     -n aerospike-system --create-namespace
+#
+# Then bring up the operator workload as a follow-up — SAME release name so the
+# ServiceAccount/ClusterRoleBinding subjects line up and Helm keeps the RBAC it
+# already owns:
+#   helm upgrade acko . -n aerospike-system \
+#     --set operator.enabled=true \
+#     --set crds.install=false          # CRDs installed/managed separately
+#
+# (Alternatively keep them as two separate releases by aligning names via
+#  fullnameOverride and setting rbac.create=false on the operator release.)
+# =============================================================================
+
+# Only the cluster-scoped RBAC — no operator workload, no CRDs.
+operator:
+  enabled: false
+
+crds:
+  install: false
+
+rbac:
+  # Force-create the cluster-scoped RBAC even though operator.enabled=false.
+  create: true
+
+# No admission webhooks / serving certificate in an RBAC-only install.
+webhook:
+  enabled: false
+
+certManager:
+  enabled: false
+
+# AerospikeClusterTemplates need the CRDs, which this preset does not install.
+defaultTemplates:
+  enabled: false
+
+# No UI in an RBAC-only install.
+ui:
+  api:
+    enabled: false
+  web:
+    enabled: false
+
+multiCluster:
+  enabled: false

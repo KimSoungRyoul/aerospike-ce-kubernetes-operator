@@ -65,6 +65,42 @@ To see all available values:
 helm show values oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator
 ```
 
+### Cluster-admin pre-install (RBAC-only) {#cluster-admin-pre-install-rbac-only}
+
+On restricted / multi-tenant clusters, the privileged **cluster-scoped** resources — the operator's `ClusterRole`/`ClusterRoleBinding` (the "cluster admin" grant) — are often installed by a platform team, separately from the namespaced operator workload and from the CRDs (which may be GitOps-managed). The `rbac.create` value supports this split:
+
+- `rbac.create` defaults to `null`, which **tracks `operator.enabled`** — so existing installs are unaffected.
+- Set it explicitly to decouple the cluster-scoped RBAC from the operator workload.
+
+```bash
+# Step 1 (cluster-admin, once): install ONLY the cluster-scoped RBAC.
+#   No CRDs, no operator Deployment, no webhook, no UI.
+helm install aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  -n aerospike-operator --create-namespace \
+  --set operator.enabled=false \
+  --set crds.install=false \
+  --set rbac.create=true \
+  --set webhook.enabled=false --set certManager.enabled=false \
+  --set ui.api.enabled=false --set ui.web.enabled=false
+
+# Step 2 (app team): bring up the operator workload as a follow-up.
+#   Same release name keeps the RBAC and aligns the ServiceAccount subject.
+helm upgrade aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  -n aerospike-operator \
+  --set operator.enabled=true \
+  --set crds.install=false
+```
+
+When installing from the chart source, the ready-made preset `values-cluster-admin.yaml` bundles the step-1 overrides:
+
+```bash
+helm install aerospike-ce-kubernetes-operator ./charts/aerospike-ce-kubernetes-operator \
+  -f ./charts/aerospike-ce-kubernetes-operator/values-cluster-admin.yaml \
+  -n aerospike-operator --create-namespace
+```
+
+Step 1 renders **only** the manager + metrics `ClusterRole`/`ClusterRoleBinding`. The `ServiceAccount` those bindings reference (and the namespaced leader-election `Role`/`RoleBinding`) are created with the operator workload in step 2 — a `ClusterRoleBinding` referencing a not-yet-created `ServiceAccount` is valid in Kubernetes, and the two steps own disjoint resources. To keep them as **separate** releases (owned by different teams), align resource names via `fullnameOverride` and set `rbac.create=false` on the operator release.
+
 #### Pin a Cluster Manager UI release
 
 The Cluster Manager UI (`ui-api` and `ui-web` Deployments) is versioned independently from the operator. The chart defaults `ui.imageTag` to `latest` so a fresh install always picks up the newest `aerospike-cluster-manager` image (Deployment `imagePullPolicy` defaults to `Always` to match). For reproducible deployments, override it with a specific cluster-manager release:

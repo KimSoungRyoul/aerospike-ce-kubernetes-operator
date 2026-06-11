@@ -422,6 +422,44 @@ false
 {{- end -}}
 {{- end }}
 
+{{/*
+RBAC creation toggle.
+
+Gates ONLY the operator's cluster-scoped RBAC (the "cluster admin" grant:
+ClusterRole/ClusterRoleBinding for the manager + metrics) independently of the
+operator workload. The namespaced ServiceAccount and leader-election
+Role/RoleBinding stay gated on operator.enabled — they are created alongside
+the controller workload, and the cluster-scoped ClusterRoleBindings simply
+reference the ServiceAccount by name (valid even before it exists). This keeps
+the cluster-admin and operator releases owning disjoint resource sets, so a
+two-release split (names aligned via fullnameOverride) never collides on a
+shared ServiceAccount.
+
+Resolution:
+  - rbac.create is a real boolean (true/false, from a values file or a
+    type-coerced `--set rbac.create=true`) → use it verbatim.
+  - anything else (unset, YAML null, or a non-bool such as the string "null"
+    that `--set rbac.create=null` can produce) → track operator.enabled.
+
+Keying on `kindIs "bool"` (rather than hasKey + nil checks) makes the default
+robust: any non-boolean degrades to the backward-compatible "follow the
+operator" behaviour instead of being mis-compared as a string.
+
+This lets a cluster-admin pre-provision just the RBAC (operator.enabled=false,
+crds.install=false, rbac.create=true) on a restricted cluster, and lets a
+follow-up namespaced install skip re-creating it (rbac.create=false), without
+changing behaviour for any existing values file (where rbac is unset, RBAC
+follows the operator exactly as before).
+*/}}
+{{- define "aerospike-ce-kubernetes-operator.rbac.create" -}}
+{{- $rbac := .Values.rbac | default dict -}}
+{{- if kindIs "bool" $rbac.create -}}
+{{- $rbac.create -}}
+{{- else -}}
+{{- include "aerospike-ce-kubernetes-operator.operator.enabled" . -}}
+{{- end -}}
+{{- end }}
+
 {{- define "aerospike-ce-kubernetes-operator.api.oidc.enabled" -}}
 {{- $oidc := dig "api" "auth" "oidc" "enabled" false .Values.ui -}}
 {{- $oidc -}}

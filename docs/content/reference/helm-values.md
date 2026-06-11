@@ -21,10 +21,17 @@ This page documents all configurable values for the `aerospike-ce-kubernetes-ope
 | `crds.install` | bool | `true` | Install aerospike-ce-kubernetes-operator-crds as a subchart dependency. Set to `false` if CRDs are managed separately (e.g., via GitOps). |
 | `crds.keep` | bool | `true` | Retain CRDs on `helm uninstall`. Actual keep behavior is enforced by the `helm.sh/resource-policy: keep` annotation on each CRD template. |
 
+## RBAC Management
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `rbac.create` | bool | `null` | Create the operator's **cluster-scoped** RBAC (the "cluster admin" grant: the manager + metrics `ClusterRole`/`ClusterRoleBinding`). `null` tracks `operator.enabled`, so existing installs are unchanged. Set explicitly to decouple it: `operator.enabled=false, rbac.create=true` pre-installs **only** the cluster-scoped RBAC (cluster-admin / restricted-cluster split — see [Cluster-admin pre-install](../getting-started/install.md#cluster-admin-pre-install-rbac-only)); `operator.enabled=true, rbac.create=false` deploys the operator workload while the cluster-scoped RBAC is provided by another release. The namespaced `ServiceAccount` and leader-election `Role`/`RoleBinding` stay gated on `operator.enabled`. |
+
 ## Operator
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
+| `operator.enabled` | bool | `true` | Deploy the controller-manager (operator) and its supporting resources. Disable for UI-only / web-only installs, or combine with `rbac.create` for split installs. |
 | `replicaCount` | int | `1` | Number of operator replicas. Typically 1 is sufficient as leader election handles HA. |
 | `image.repository` | string | `ghcr.io/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator` | Operator container image repository. |
 | `image.tag` | string | `""` | Container image tag. Empty falls through to `.Chart.AppVersion`. |

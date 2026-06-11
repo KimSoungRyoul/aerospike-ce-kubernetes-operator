@@ -14,10 +14,17 @@ title: Helm Values 레퍼런스
 | `crds.install` | bool | `true` | aerospike-ce-kubernetes-operator-crds를 서브차트 의존성으로 설치. CRD를 별도로 관리하는 경우(예: GitOps) `false`로 설정. |
 | `crds.keep` | bool | `true` | `helm uninstall` 시 CRD 유지. 실제 유지 동작은 CRD 템플릿의 `helm.sh/resource-policy: keep` 어노테이션으로 적용됨. |
 
+## RBAC 관리
+
+| 키 | 타입 | 기본값 | 설명 |
+|-----|------|---------|-------------|
+| `rbac.create` | bool | `null` | 오퍼레이터의 **클러스터 범위(cluster-scoped)** RBAC("cluster admin" 권한: manager + metrics `ClusterRole`/`ClusterRoleBinding`) 생성 여부. `null`이면 `operator.enabled`를 따라가므로 기존 설치는 그대로 유지됨. 명시적으로 설정해 분리 가능: `operator.enabled=false, rbac.create=true`는 **클러스터 범위 RBAC만** 사전 설치(cluster-admin / 제한된 클러스터 분리 설치 — [Cluster-admin 사전 설치](../getting-started/install.md#cluster-admin-pre-install-rbac-only) 참고), `operator.enabled=true, rbac.create=false`는 클러스터 범위 RBAC를 다른 릴리스가 제공하는 상태로 오퍼레이터 워크로드만 배포. 네임스페이스 범위의 `ServiceAccount`와 리더 선출 `Role`/`RoleBinding`은 `operator.enabled`에 따라 생성됨. |
+
 ## 오퍼레이터
 
 | 키 | 타입 | 기본값 | 설명 |
 |-----|------|---------|-------------|
+| `operator.enabled` | bool | `true` | 컨트롤러 매니저(오퍼레이터)와 지원 리소스를 배포. UI 전용 / web 전용 설치 시 비활성화하거나, 분리 설치 시 `rbac.create`와 조합. |
 | `replicaCount` | int | `1` | 오퍼레이터 레플리카 수. 리더 선출이 HA를 처리하므로 일반적으로 1이면 충분. |
 | `image.repository` | string | `ghcr.io/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator` | 오퍼레이터 컨테이너 이미지 리포지토리. |
 | `image.tag` | string | `""` | 컨테이너 이미지 태그. 비어있으면 `Chart.appVersion` 사용. |
