@@ -346,6 +346,8 @@ helm-sync-crds: manifests ## Sync generated CRDs into aerospike-ce-kubernetes-op
 helm-lint: ## Lint both Helm charts (aerospike-ce-kubernetes-operator-crds and aerospike-ce-kubernetes-operator).
 	helm lint charts/aerospike-ce-kubernetes-operator-crds
 	helm lint charts/aerospike-ce-kubernetes-operator --set crds.install=false
+	# RBAC-only / cluster-admin split install (operator.enabled=false, rbac.create=true).
+	helm lint charts/aerospike-ce-kubernetes-operator -f charts/aerospike-ce-kubernetes-operator/values-cluster-admin.yaml
 
 .PHONY: helm-package
 helm-package: helm-sync-crds ## Package both Helm charts into dist/charts/.

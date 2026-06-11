@@ -422,6 +422,33 @@ false
 {{- end -}}
 {{- end }}
 
+{{/*
+RBAC creation toggle.
+
+Gates the operator's cluster-scoped RBAC (the "cluster admin" grant:
+ClusterRole/ClusterRoleBinding for the manager + metrics) independently of
+the operator workload, plus the namespaced ServiceAccount and leader-election
+Role/RoleBinding (see their templates for the combined operator-OR-rbac gate).
+
+Resolution:
+  - rbac.create explicitly set (true/false) → use it verbatim.
+  - rbac.create unset / null            → track operator.enabled (BC default).
+
+This lets a cluster-admin pre-provision just the RBAC (operator.enabled=false,
+crds.install=false, rbac.create=true) on a restricted cluster, and lets a
+follow-up namespaced install skip re-creating it (rbac.create=false), without
+changing behaviour for any existing values file (where rbac is unset, RBAC
+follows the operator exactly as before).
+*/}}
+{{- define "aerospike-ce-kubernetes-operator.rbac.create" -}}
+{{- $rbac := .Values.rbac | default dict -}}
+{{- if and (hasKey $rbac "create") (not (kindIs "invalid" $rbac.create)) -}}
+{{- $rbac.create -}}
+{{- else -}}
+{{- include "aerospike-ce-kubernetes-operator.operator.enabled" . -}}
+{{- end -}}
+{{- end }}
+
 {{- define "aerospike-ce-kubernetes-operator.api.oidc.enabled" -}}
 {{- $oidc := dig "api" "auth" "oidc" "enabled" false .Values.ui -}}
 {{- $oidc -}}

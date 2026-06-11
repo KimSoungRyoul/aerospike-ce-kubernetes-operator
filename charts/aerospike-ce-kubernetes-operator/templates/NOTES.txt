@@ -7,13 +7,28 @@ Aerospike CE Kubernetes Operator has been installed.
 ------------------------------------------------------------------------
 
 operator.enabled : {{ include "aerospike-ce-kubernetes-operator.operator.enabled" . }}
+rbac.create      : {{ include "aerospike-ce-kubernetes-operator.rbac.create" . }}
 ui.api.enabled   : {{ include "aerospike-ce-kubernetes-operator.ui.api.enabled" . }}
 ui.web.enabled   : {{ include "aerospike-ce-kubernetes-operator.ui.web.enabled" . }}
 multiCluster.enabled : {{ include "aerospike-ce-kubernetes-operator.multiCluster.enabled" . }}
 ui.api.auth.oidc.enabled : {{ include "aerospike-ce-kubernetes-operator.api.oidc.enabled" . }}
 ui.web.auth.oidc.enabled : {{ include "aerospike-ce-kubernetes-operator.web.oidc.enabled" . }}
 
-{{- if ne (include "aerospike-ce-kubernetes-operator.operator.enabled" .) "true" }}
+{{- if and (ne (include "aerospike-ce-kubernetes-operator.operator.enabled" .) "true") (eq (include "aerospike-ce-kubernetes-operator.rbac.create" .) "true") }}
+
+NOTE: operator.enabled=false, rbac.create=true — this is an RBAC-only
+("cluster admin") pre-install. Only the cluster-scoped ClusterRole/
+ClusterRoleBinding (+ ServiceAccount and leader-election Role) are rendered;
+the controller-manager, webhook, CRDs, and UI are NOT.
+
+Bring up the operator workload as a follow-up — SAME release name keeps the
+RBAC this release already owns and lines up the ServiceAccount subject:
+
+  helm upgrade {{ .Release.Name }} . -n {{ .Release.Namespace }} \
+    --set operator.enabled=true --set crds.install=false
+
+Preset: values-cluster-admin.yaml
+{{- else if ne (include "aerospike-ce-kubernetes-operator.operator.enabled" .) "true" }}
 
 NOTE: operator.enabled=false — the controller-manager, webhook, RBAC, and
 default AerospikeClusterTemplates are NOT rendered. Use this mode for the
@@ -21,6 +36,16 @@ default AerospikeClusterTemplates are NOT rendered. Use this mode for the
 the operator and the common cluster only serves the web UI.
 
 Recommended preset: values-common.yaml
+{{- end }}
+
+{{- if and (eq (include "aerospike-ce-kubernetes-operator.operator.enabled" .) "true") (ne (include "aerospike-ce-kubernetes-operator.rbac.create" .) "true") }}
+
+NOTE: operator.enabled=true, rbac.create=false — the operator Deployment and
+ServiceAccount are rendered, but its cluster-scoped RBAC is NOT. The operator
+will fail reconciles unless the manager ClusterRole and a ClusterRoleBinding to
+ServiceAccount "{{ include "aerospike-ce-kubernetes-operator.serviceAccountName" . }}" (namespace {{ .Release.Namespace }}) already
+exist — e.g. from a prior `-f values-cluster-admin.yaml` cluster-admin
+pre-install.
 {{- end }}
 
 {{- if eq (include "aerospike-ce-kubernetes-operator.multiCluster.enabled" .) "true" }}

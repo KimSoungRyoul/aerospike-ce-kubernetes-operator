@@ -72,6 +72,45 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kuber
   --namespace aerospike-operator --create-namespace
 ```
 
+### Method 3: Cluster-admin pre-install (RBAC-only, restricted clusters)
+
+On restricted / multi-tenant clusters the privileged, cluster-scoped resources
+(the operator's `ClusterRole`/`ClusterRoleBinding` — the "cluster admin" grant)
+are often installed by a platform team, separately from the namespaced operator
+workload and from CRDs (which may be GitOps-managed). The chart supports this
+split via the `rbac.create` toggle:
+
+- `rbac.create` defaults to **`null`**, which **tracks `operator.enabled`** — so
+  existing installs are unaffected.
+- Set it explicitly to decouple the cluster-scoped RBAC from the operator
+  workload.
+
+```bash
+# Step 1 (cluster-admin, once): install ONLY the cluster-scoped RBAC.
+#   - no CRDs (crds.install=false), no operator Deployment, no webhook, no UI
+#   - ready-made preset: values-cluster-admin.yaml
+helm install acko ./charts/aerospike-ce-kubernetes-operator \
+  -f ./charts/aerospike-ce-kubernetes-operator/values-cluster-admin.yaml \
+  --namespace aerospike-operator --create-namespace
+
+# Step 2 (app team): bring up the operator workload as a follow-up.
+#   Same release name keeps the RBAC the release already owns and lines up the
+#   ServiceAccount/ClusterRoleBinding subjects. CRDs stay externally managed.
+helm upgrade acko ./charts/aerospike-ce-kubernetes-operator \
+  --namespace aerospike-operator \
+  --set operator.enabled=true \
+  --set crds.install=false
+```
+
+To keep the two phases as **separate releases** (e.g. owned by different teams),
+align the resource names with `fullnameOverride` across both releases and set
+`rbac.create=false` on the operator release so it does not try to re-create the
+ClusterRole/ClusterRoleBinding the cluster-admin release already owns.
+
+`rbac.create=true` with `operator.enabled=false` renders the manager + metrics
+`ClusterRole`/`ClusterRoleBinding`, the `ServiceAccount`, and the
+leader-election `Role`/`RoleBinding` — nothing else.
+
 ### From Local Chart
 
 ```bash
@@ -594,6 +633,9 @@ See [values.yaml](values.yaml) for all available configuration options with desc
 
 | Section | Description |
 |---------|-------------|
+| `operator.enabled` | Render the controller-manager workload and its supporting resources |
+| `crds.install` | Install the CRDs subchart (set `false` when CRDs are managed separately) |
+| `rbac.create` | Create the operator's cluster-scoped RBAC ("cluster admin" grant). `null` tracks `operator.enabled`; set explicitly for an RBAC-only / split install (see Method 3) |
 | `certManager` | cert-manager integration for webhook TLS |
 | `serviceMonitor` | Prometheus ServiceMonitor |
 | `prometheusRule` | Prometheus alerting rules |

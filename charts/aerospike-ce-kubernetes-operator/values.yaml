@@ -15,6 +15,12 @@
 # Useful for the multi-cluster topology where one "common" cluster hosts only
 # the web frontend and dev/prod clusters host operator + api individually.
 # Default `true` preserves backwards compatibility for single-cluster installs.
+#
+# NOTE: the cluster-scoped RBAC follows operator.enabled by default but can be
+# decoupled via `rbac.create` (see the RBAC Management section) — e.g. to
+# pre-install only the "cluster admin" ClusterRole/ClusterRoleBinding on a
+# restricted cluster, or to skip re-creating it on a follow-up namespaced
+# install.
 operator:
   # -- Deploy the controller-manager (operator) and all of its supporting
   # resources. Disable to render UI-only / web-only installs.
@@ -76,6 +82,32 @@ crds:
   # The actual keep behavior is enforced by the helm.sh/resource-policy: keep
   # annotation on each CRD template in the aerospike-ce-kubernetes-operator-crds chart.
   keep: true
+
+# =============================================================================
+# RBAC Management
+# =============================================================================
+# Controls the operator's cluster-scoped RBAC — the "cluster admin" grant:
+# the manager ClusterRole/ClusterRoleBinding plus the metrics ClusterRoles.
+# The namespaced ServiceAccount and leader-election Role/RoleBinding render
+# whenever EITHER the operator workload OR this RBAC is enabled, so a
+# pre-provisioned RBAC bundle is self-contained.
+#
+# This is decoupled from `operator.enabled` so the cluster-scoped, privileged
+# resources (which require a cluster-admin to create) can be installed
+# separately from the namespaced operator workload — the standard
+# least-privilege / GitOps split on restricted clusters:
+#
+#   1. Cluster-admin pre-installs ONLY the RBAC (and lets CRDs be managed
+#      separately): operator.enabled=false, crds.install=false, rbac.create=true
+#      (ready-made preset: values-cluster-admin.yaml).
+#   2. A namespaced follow-up enables the operator without touching RBAC:
+#      operator.enabled=true, rbac.create=false.
+rbac:
+  # -- Create the operator's cluster-scoped RBAC (manager + metrics
+  # ClusterRole/ClusterRoleBinding).
+  # null (default) → tracks operator.enabled, preserving the original behaviour
+  # for every existing values file. Set true/false to control it explicitly.
+  create: null
 
 # -- Number of operator replicas. Typically 1 is sufficient as leader election
 # handles HA. Increase for faster failover.
