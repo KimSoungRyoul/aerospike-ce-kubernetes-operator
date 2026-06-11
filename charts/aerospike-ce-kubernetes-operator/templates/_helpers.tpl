@@ -431,8 +431,14 @@ the operator workload, plus the namespaced ServiceAccount and leader-election
 Role/RoleBinding (see their templates for the combined operator-OR-rbac gate).
 
 Resolution:
-  - rbac.create explicitly set (true/false) → use it verbatim.
-  - rbac.create unset / null            → track operator.enabled (BC default).
+  - rbac.create is a real boolean (true/false, from a values file or a
+    type-coerced `--set rbac.create=true`) → use it verbatim.
+  - anything else (unset, YAML null, or a non-bool such as the string "null"
+    that `--set rbac.create=null` can produce) → track operator.enabled.
+
+Keying on `kindIs "bool"` (rather than hasKey + nil checks) makes the default
+robust: any non-boolean degrades to the backward-compatible "follow the
+operator" behaviour instead of being mis-compared as a string.
 
 This lets a cluster-admin pre-provision just the RBAC (operator.enabled=false,
 crds.install=false, rbac.create=true) on a restricted cluster, and lets a
@@ -442,7 +448,7 @@ follows the operator exactly as before).
 */}}
 {{- define "aerospike-ce-kubernetes-operator.rbac.create" -}}
 {{- $rbac := .Values.rbac | default dict -}}
-{{- if and (hasKey $rbac "create") (not (kindIs "invalid" $rbac.create)) -}}
+{{- if kindIs "bool" $rbac.create -}}
 {{- $rbac.create -}}
 {{- else -}}
 {{- include "aerospike-ce-kubernetes-operator.operator.enabled" . -}}

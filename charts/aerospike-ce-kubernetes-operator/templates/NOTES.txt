@@ -41,11 +41,15 @@ Recommended preset: values-common.yaml
 {{- if and (eq (include "aerospike-ce-kubernetes-operator.operator.enabled" .) "true") (ne (include "aerospike-ce-kubernetes-operator.rbac.create" .) "true") }}
 
 NOTE: operator.enabled=true, rbac.create=false — the operator Deployment and
-ServiceAccount are rendered, but its cluster-scoped RBAC is NOT. The operator
-will fail reconciles unless the manager ClusterRole and a ClusterRoleBinding to
-ServiceAccount "{{ include "aerospike-ce-kubernetes-operator.serviceAccountName" . }}" (namespace {{ .Release.Namespace }}) already
-exist — e.g. from a prior `-f values-cluster-admin.yaml` cluster-admin
-pre-install.
+ServiceAccount are rendered, but its cluster-scoped RBAC is NOT. Both the
+manager ClusterRole (AerospikeCluster reconcile permissions) AND the
+metrics-auth ClusterRole (TokenReview/SubjectAccessReview for the authenticated
+/metrics endpoint) are suppressed, so the operator will fail reconciles and
+reject metrics scrapes unless those ClusterRoles — plus ClusterRoleBindings to
+ServiceAccount "{{ include "aerospike-ce-kubernetes-operator.serviceAccountName" . }}" (namespace {{ .Release.Namespace }}) —
+already exist. Provide them from a prior `-f values-cluster-admin.yaml`
+cluster-admin pre-install whose resource names match this release (align via
+fullnameOverride when they are separate releases).
 {{- end }}
 
 {{- if eq (include "aerospike-ce-kubernetes-operator.multiCluster.enabled" .) "true" }}
