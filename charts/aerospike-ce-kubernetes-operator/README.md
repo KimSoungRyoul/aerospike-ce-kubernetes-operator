@@ -471,7 +471,9 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kuber
 ```
 
 Shared extra environment variables can be passed to both UI containers via
-`ui.extraEnv`; API-only environment can be passed via `ui.api.extraEnv`:
+`ui.extraEnv`; API-only environment via `ui.api.extraEnv` /
+`ui.api.extraEnvFrom`; web-only environment via `ui.web.extraEnv` /
+`ui.web.extraEnvFrom`:
 
 ```yaml
 ui:
@@ -488,6 +490,31 @@ ui:
       - name: API_ONLY_SETTING
         value: enabled
 ```
+
+### ACKO Agent (embedded AI copilot)
+
+The web UI ships an optional, off-by-default AI assistant ("ACKO Agent",
+cluster-manager >= 0.31). Enable it by giving ONLY the web container an LLM
+model and the matching provider API key — use the web-scoped values so the
+key never reaches the api container:
+
+```bash
+kubectl -n aerospike-operator create secret generic acko-agent-secrets \
+  --from-literal=COPILOT_MODEL=anthropic/claude-sonnet-4-5 \
+  --from-literal=ANTHROPIC_API_KEY=<your-key>
+```
+
+```yaml
+ui:
+  web:
+    extraEnvFrom:
+      - secretRef:
+          name: acko-agent-secrets
+```
+
+Without the secret the UI renders unchanged and the agent stays disabled.
+See the cluster-manager README for the full COPILOT_* variable reference
+(COPILOT_REQUIRE_AUTH, COPILOT_OIDC_ISSUER_URL, ...).
 
 ### Full example
 

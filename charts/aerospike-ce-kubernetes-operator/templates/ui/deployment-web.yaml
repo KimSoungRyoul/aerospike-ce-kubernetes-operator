@@ -54,9 +54,17 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "aerospike-ce-kubernetes-operator.ui.fullname" . }}-config
-          {{- with .Values.ui.extraEnv }}
-          env:
+            {{- with .Values.ui.web.extraEnvFrom }}
             {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if or .Values.ui.web.extraEnv .Values.ui.extraEnv }}
+          env:
+            {{- with .Values.ui.web.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- with .Values.ui.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
           {{- with .Values.ui.securityContext }}
           securityContext:
