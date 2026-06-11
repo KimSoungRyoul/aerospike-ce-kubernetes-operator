@@ -65,6 +65,42 @@ helm install aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosyst
 helm show values oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator
 ```
 
+### Cluster-admin 사전 설치 (RBAC 전용) {#cluster-admin-pre-install-rbac-only}
+
+제한된(restricted) / 멀티테넌트 클러스터에서는 권한이 높은 **클러스터 범위(cluster-scoped)** 리소스 — 오퍼레이터의 `ClusterRole`/`ClusterRoleBinding`("cluster admin" 권한) — 를 플랫폼 팀이 네임스페이스 범위 워크로드 및 CRD(GitOps로 관리될 수 있음)와 분리해 설치하는 경우가 많습니다. `rbac.create` 값이 이 분리를 지원합니다.
+
+- `rbac.create`의 기본값은 `null`이며, 이는 **`operator.enabled`를 따라갑니다** — 따라서 기존 설치는 영향을 받지 않습니다.
+- 명시적으로 설정하면 클러스터 범위 RBAC를 오퍼레이터 워크로드에서 분리할 수 있습니다.
+
+```bash
+# Step 1 (cluster-admin, 한 번만): 클러스터 범위 RBAC만 설치.
+#   CRD 없음, 오퍼레이터 Deployment 없음, webhook 없음, UI 없음.
+helm install aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  -n aerospike-operator --create-namespace \
+  --set operator.enabled=false \
+  --set crds.install=false \
+  --set rbac.create=true \
+  --set webhook.enabled=false --set certManager.enabled=false \
+  --set ui.api.enabled=false --set ui.web.enabled=false
+
+# Step 2 (앱 팀): 오퍼레이터 워크로드를 후속으로 기동.
+#   동일 릴리스 이름을 사용하면 RBAC가 유지되고 ServiceAccount 주체가 일치함.
+helm upgrade aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
+  -n aerospike-operator \
+  --set operator.enabled=true \
+  --set crds.install=false
+```
+
+차트 소스에서 설치할 경우, 준비된 프리셋 `values-cluster-admin.yaml`이 Step 1 오버라이드를 묶어 제공합니다.
+
+```bash
+helm install aerospike-ce-kubernetes-operator ./charts/aerospike-ce-kubernetes-operator \
+  -f ./charts/aerospike-ce-kubernetes-operator/values-cluster-admin.yaml \
+  -n aerospike-operator --create-namespace
+```
+
+Step 1은 manager + metrics `ClusterRole`/`ClusterRoleBinding`**만** 렌더링합니다. 이 바인딩이 참조하는 `ServiceAccount`(및 네임스페이스 범위 리더 선출 `Role`/`RoleBinding`)는 Step 2에서 오퍼레이터 워크로드와 함께 생성됩니다 — 아직 생성되지 않은 `ServiceAccount`를 참조하는 `ClusterRoleBinding`은 Kubernetes에서 유효하며, 두 단계는 서로 겹치지 않는(disjoint) 리소스를 소유합니다. 이를 **별도** 릴리스(다른 팀 소유)로 유지하려면 `fullnameOverride`로 리소스 이름을 맞추고 오퍼레이터 릴리스에 `rbac.create=false`를 설정하세요.
+
 </TabItem>
 <TabItem value="helm-gitops" label="Helm + GitOps (ArgoCD / Flux)">
 
