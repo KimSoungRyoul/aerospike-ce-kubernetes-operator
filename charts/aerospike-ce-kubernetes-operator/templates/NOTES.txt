@@ -17,9 +17,10 @@ ui.web.auth.oidc.enabled : {{ include "aerospike-ce-kubernetes-operator.web.oidc
 {{- if and (ne (include "aerospike-ce-kubernetes-operator.operator.enabled" .) "true") (eq (include "aerospike-ce-kubernetes-operator.rbac.create" .) "true") }}
 
 NOTE: operator.enabled=false, rbac.create=true — this is an RBAC-only
-("cluster admin") pre-install. Only the cluster-scoped ClusterRole/
-ClusterRoleBinding (+ ServiceAccount and leader-election Role) are rendered;
-the controller-manager, webhook, CRDs, and UI are NOT.
+("cluster admin") pre-install. Only the cluster-scoped manager + metrics
+ClusterRole/ClusterRoleBinding are rendered; the controller-manager, webhook,
+CRDs, UI, and the namespaced ServiceAccount / leader-election Role are NOT
+(those are created with the operator workload below).
 
 Bring up the operator workload as a follow-up — SAME release name keeps the
 RBAC this release already owns and lines up the ServiceAccount subject:

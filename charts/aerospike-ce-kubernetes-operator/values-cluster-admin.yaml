@@ -5,8 +5,11 @@
 #   - ClusterRole/ClusterRoleBinding  <release>-manager        (the operator's permissions)
 #   - ClusterRole/ClusterRoleBinding  <release>-metrics-auth
 #   - ClusterRole                     <release>-metrics-reader
-# plus the namespaced ServiceAccount and leader-election Role/RoleBinding the
-# operator will bind to. NO CRDs, NO controller Deployment, NO webhook, NO UI.
+# NO CRDs, NO controller Deployment, NO webhook, NO UI. The namespaced
+# ServiceAccount and leader-election Role/RoleBinding are created with the
+# operator workload in step 2 below; the ClusterRoleBindings above already
+# reference that ServiceAccount by name (valid before it exists), so the two
+# steps own disjoint resources and never collide.
 #
 # Use this on restricted / multi-tenant clusters where a cluster-admin must
 # pre-provision the privileged cluster-scoped resources, while CRDs are managed

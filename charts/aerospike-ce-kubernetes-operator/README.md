@@ -105,11 +105,17 @@ helm upgrade acko ./charts/aerospike-ce-kubernetes-operator \
 To keep the two phases as **separate releases** (e.g. owned by different teams),
 align the resource names with `fullnameOverride` across both releases and set
 `rbac.create=false` on the operator release so it does not try to re-create the
-ClusterRole/ClusterRoleBinding the cluster-admin release already owns.
+`ClusterRole`/`ClusterRoleBinding` the cluster-admin release already owns. The
+two releases then own **disjoint** resources — the cluster-admin release owns
+only the cluster-scoped RBAC, the operator release owns the workload plus the
+namespaced `ServiceAccount` and leader-election `Role`/`RoleBinding` — so there
+is no `ServiceAccount` ownership conflict.
 
-`rbac.create=true` with `operator.enabled=false` renders the manager + metrics
-`ClusterRole`/`ClusterRoleBinding`, the `ServiceAccount`, and the
-leader-election `Role`/`RoleBinding` — nothing else.
+`rbac.create=true` with `operator.enabled=false` renders **only** the manager +
+metrics `ClusterRole`/`ClusterRoleBinding` — nothing else. The
+`ServiceAccount` those bindings reference (and the namespaced leader-election
+`Role`/`RoleBinding`) are created with the operator workload; a `ClusterRoleBinding`
+referencing a not-yet-created `ServiceAccount` is valid in Kubernetes.
 
 ### From Local Chart
 

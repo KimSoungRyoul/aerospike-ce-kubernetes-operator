@@ -1,4 +1,4 @@
-{{- if or (eq (include "aerospike-ce-kubernetes-operator.operator.enabled" .) "true") (eq (include "aerospike-ce-kubernetes-operator.rbac.create" .) "true") }}
+{{- if eq (include "aerospike-ce-kubernetes-operator.operator.enabled" .) "true" }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:

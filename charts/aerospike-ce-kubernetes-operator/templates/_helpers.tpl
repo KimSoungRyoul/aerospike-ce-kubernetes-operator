@@ -425,10 +425,15 @@ false
 {{/*
 RBAC creation toggle.
 
-Gates the operator's cluster-scoped RBAC (the "cluster admin" grant:
-ClusterRole/ClusterRoleBinding for the manager + metrics) independently of
-the operator workload, plus the namespaced ServiceAccount and leader-election
-Role/RoleBinding (see their templates for the combined operator-OR-rbac gate).
+Gates ONLY the operator's cluster-scoped RBAC (the "cluster admin" grant:
+ClusterRole/ClusterRoleBinding for the manager + metrics) independently of the
+operator workload. The namespaced ServiceAccount and leader-election
+Role/RoleBinding stay gated on operator.enabled — they are created alongside
+the controller workload, and the cluster-scoped ClusterRoleBindings simply
+reference the ServiceAccount by name (valid even before it exists). This keeps
+the cluster-admin and operator releases owning disjoint resource sets, so a
+two-release split (names aligned via fullnameOverride) never collides on a
+shared ServiceAccount.
 
 Resolution:
   - rbac.create is a real boolean (true/false, from a values file or a

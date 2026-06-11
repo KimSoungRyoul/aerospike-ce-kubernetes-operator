@@ -86,22 +86,25 @@ crds:
 # =============================================================================
 # RBAC Management
 # =============================================================================
-# Controls the operator's cluster-scoped RBAC — the "cluster admin" grant:
+# Controls ONLY the operator's cluster-scoped RBAC — the "cluster admin" grant:
 # the manager ClusterRole/ClusterRoleBinding plus the metrics ClusterRoles.
-# The namespaced ServiceAccount and leader-election Role/RoleBinding render
-# whenever EITHER the operator workload OR this RBAC is enabled, so a
-# pre-provisioned RBAC bundle is self-contained.
+# The namespaced ServiceAccount and leader-election Role/RoleBinding stay gated
+# on `operator.enabled` (they belong with the controller workload); the
+# cluster-scoped ClusterRoleBindings just reference the ServiceAccount by name,
+# which is valid even before it exists.
 #
 # This is decoupled from `operator.enabled` so the cluster-scoped, privileged
 # resources (which require a cluster-admin to create) can be installed
 # separately from the namespaced operator workload — the standard
 # least-privilege / GitOps split on restricted clusters:
 #
-#   1. Cluster-admin pre-installs ONLY the RBAC (and lets CRDs be managed
-#      separately): operator.enabled=false, crds.install=false, rbac.create=true
-#      (ready-made preset: values-cluster-admin.yaml).
-#   2. A namespaced follow-up enables the operator without touching RBAC:
-#      operator.enabled=true, rbac.create=false.
+#   1. Cluster-admin pre-installs ONLY the cluster-scoped RBAC (and lets CRDs be
+#      managed separately): operator.enabled=false, crds.install=false,
+#      rbac.create=true (ready-made preset: values-cluster-admin.yaml).
+#   2. A namespaced follow-up enables the operator without touching the
+#      cluster-scoped RBAC: operator.enabled=true, rbac.create=false. (Same
+#      release keeps it tracking; separate releases align names via
+#      fullnameOverride so the two own disjoint resource sets.)
 rbac:
   # -- Create the operator's cluster-scoped RBAC (manager + metrics
   # ClusterRole/ClusterRoleBinding).
