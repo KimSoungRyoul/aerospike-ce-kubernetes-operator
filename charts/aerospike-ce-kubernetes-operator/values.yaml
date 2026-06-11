@@ -806,6 +806,26 @@ ui:
       # instead of the in-cluster API Service. Required when
       # `ui.api.enabled=false` so the web frontend has somewhere to talk to.
       apiUrl: ""
+    # -- Extra env entries rendered ONLY into the web container (the shared
+    # `ui.extraEnv` renders into both api and web). Use this for the
+    # embedded ACKO Agent (AI copilot) so the LLM API key never reaches the
+    # api container. Example:
+    #   extraEnv:
+    #     - name: COPILOT_MODEL
+    #       value: "anthropic/claude-sonnet-4-5"
+    #     - name: ANTHROPIC_API_KEY
+    #       valueFrom:
+    #         secretKeyRef:
+    #           name: acko-agent-secrets
+    #           key: ANTHROPIC_API_KEY
+    extraEnv: []
+    # -- envFrom entries (configMapRef / secretRef) for the web container —
+    # bulk injection of an ACKO Agent secret holding COPILOT_MODEL +
+    # provider API keys. Example:
+    #   extraEnvFrom:
+    #     - secretRef:
+    #         name: acko-agent-secrets
+    extraEnvFrom: []
     resources:
       requests:
         cpu: 50m
