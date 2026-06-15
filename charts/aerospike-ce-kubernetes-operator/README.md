@@ -512,6 +512,23 @@ ui:
           name: acko-agent-secrets
 ```
 
+#### OpenAI-compatible gateway (e.g. NAVER MODEL CONNECT Open Models)
+
+To route the agent through an OpenAI-compatible gateway instead of the public
+OpenAI API, add `COPILOT_BASE_URL` and use an `openai/*` model id with
+`OPENAI_API_KEY`. For NAMC Open Models API (issue the key from the project's
+Open Models API tab in the MODEL CONNECT console):
+
+```bash
+kubectl -n aerospike-operator create secret generic acko-agent-secrets \
+  --from-literal=COPILOT_MODEL=openai/gpt-oss-120b \
+  --from-literal=COPILOT_BASE_URL=https://namc-aigw.io.naver.com \
+  --from-literal=OPENAI_API_KEY=<MODEL CONNECT Open Models API key>
+```
+
+Pick a model that supports function/tool calling so the agent's read tools
+work. The `ui.web.extraEnvFrom` snippet above is unchanged.
+
 Without the secret the UI renders unchanged and the agent stays disabled.
 See the cluster-manager README for the full COPILOT_* variable reference
 (COPILOT_REQUIRE_AUTH, COPILOT_OIDC_ISSUER_URL, ...).

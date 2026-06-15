@@ -818,6 +818,19 @@ ui:
     #         secretKeyRef:
     #           name: acko-agent-secrets
     #           key: ANTHROPIC_API_KEY
+    # To route the agent through an OpenAI-compatible gateway such as NAVER
+    # MODEL CONNECT Open Models API, set COPILOT_BASE_URL and use an
+    # openai/* model id with OPENAI_API_KEY:
+    #   extraEnv:
+    #     - name: COPILOT_MODEL
+    #       value: "openai/gpt-oss-120b"
+    #     - name: COPILOT_BASE_URL
+    #       value: "https://namc-aigw.io.naver.com"
+    #     - name: OPENAI_API_KEY
+    #       valueFrom:
+    #         secretKeyRef:
+    #           name: acko-agent-secrets
+    #           key: OPENAI_API_KEY
     extraEnv: []
     # -- envFrom entries (configMapRef / secretRef) for the web container —
     # bulk injection of an ACKO Agent secret holding COPILOT_MODEL +
