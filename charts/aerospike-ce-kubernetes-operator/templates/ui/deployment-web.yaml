@@ -54,6 +54,17 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "aerospike-ce-kubernetes-operator.ui.fullname" . }}-config
+            {{- if .Values.ui.web.copilot.enabled }}
+            {{- if .Values.ui.web.copilot.existingSecret }}
+            # ACKO Agent provider API key from a user-supplied Secret.
+            - secretRef:
+                name: {{ .Values.ui.web.copilot.existingSecret }}
+            {{- else if .Values.ui.web.copilot.apiKey }}
+            # ACKO Agent provider API key from the chart-managed Secret.
+            - secretRef:
+                name: {{ include "aerospike-ce-kubernetes-operator.ui.fullname" . }}-copilot
+            {{- end }}
+            {{- end }}
             {{- with .Values.ui.web.extraEnvFrom }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

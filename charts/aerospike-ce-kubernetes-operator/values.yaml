@@ -818,6 +818,19 @@ ui:
     #         secretKeyRef:
     #           name: acko-agent-secrets
     #           key: ANTHROPIC_API_KEY
+    # To route the agent through a self-hosted or enterprise OpenAI-compatible
+    # LLM gateway, set COPILOT_BASE_URL and use an openai/* model id with
+    # OPENAI_API_KEY:
+    #   extraEnv:
+    #     - name: COPILOT_MODEL
+    #       value: "openai/<model>"
+    #     - name: COPILOT_BASE_URL
+    #       value: "https://llm-gateway.example.com"
+    #     - name: OPENAI_API_KEY
+    #       valueFrom:
+    #         secretKeyRef:
+    #           name: acko-agent-secrets
+    #           key: OPENAI_API_KEY
     extraEnv: []
     # -- envFrom entries (configMapRef / secretRef) for the web container —
     # bulk injection of an ACKO Agent secret holding COPILOT_MODEL +
@@ -826,6 +839,31 @@ ui:
     #     - secretRef:
     #         name: acko-agent-secrets
     extraEnvFrom: []
+    # -- Embedded ACKO Agent (AI copilot) — first-class config. Set enabled +
+    # model + a key here and the chart wires the web container's COPILOT_* env
+    # and a Secret for the key automatically (no manual extraEnv/Secret needed;
+    # extraEnv above still works for advanced cases).
+    copilot:
+      # -- Turn the in-UI AI assistant on. Needs `model` and a key
+      # (`apiKey` or `existingSecret`).
+      enabled: false
+      # -- LLM model as "<provider>/<model>"; provider is `openai` or
+      # `anthropic`. e.g. "openai/gpt-4o", "anthropic/claude-sonnet-4-5".
+      model: ""
+      # -- Optional OpenAI/Anthropic-compatible gateway base URL (sets
+      # COPILOT_BASE_URL). Empty → the provider's public API.
+      # e.g. "https://llm-gateway.example.com".
+      baseUrl: ""
+      # -- API key (inline). Rendered into a chart-managed Secret, never a
+      # ConfigMap. For production prefer `existingSecret`. The chart picks the
+      # env var name from the provider (OPENAI_API_KEY / ANTHROPIC_API_KEY).
+      apiKey: ""
+      # -- Use a pre-created Secret for the key instead of `apiKey` (wins over
+      # it). Loaded with envFrom, so its keys must be env var names — at minimum
+      # the provider key (OPENAI_API_KEY or ANTHROPIC_API_KEY).
+      existingSecret: ""
+      # -- Require a Bearer token on /copilotkit (gates LLM spend).
+      requireAuth: false
     resources:
       requests:
         cpu: 50m

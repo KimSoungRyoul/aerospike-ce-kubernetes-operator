@@ -36,6 +36,17 @@ data:
   {{- end }}
   DEFAULT_AEROSPIKE_IMAGE: {{ .Values.aerospikeImages.aerospike | quote }}
   DEFAULT_EXPORTER_IMAGE: {{ .Values.aerospikeImages.exporter | quote }}
+  {{- if .Values.ui.web.copilot.enabled }}
+  # Embedded ACKO Agent (AI copilot) — non-secret config. The provider API key
+  # is injected separately via a Secret (templates/ui/copilot-secret.yaml) or
+  # the user's existingSecret.
+  COPILOT_ENABLED: "true"
+  COPILOT_MODEL: {{ .Values.ui.web.copilot.model | quote }}
+  {{- with .Values.ui.web.copilot.baseUrl }}
+  COPILOT_BASE_URL: {{ . | quote }}
+  {{- end }}
+  COPILOT_REQUIRE_AUTH: {{ .Values.ui.web.copilot.requireAuth | quote }}
+  {{- end }}
 {{- end }}
 {{- if eq (include "aerospike-ce-kubernetes-operator.multiCluster.enabled" .) "true" }}
 ---
