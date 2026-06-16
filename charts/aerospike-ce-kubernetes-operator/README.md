@@ -494,27 +494,49 @@ ui:
 ### ACKO Agent (embedded AI copilot)
 
 The web UI ships an optional, off-by-default AI assistant ("ACKO Agent",
-cluster-manager >= 0.31). Enable it by giving ONLY the web container an LLM
-model and the matching provider API key — use the web-scoped values so the
-key never reaches the api container:
+cluster-manager >= 0.31). Enable it from `ui.web.copilot` — set the model, an
+optional gateway base URL, and a key, and the chart wires the web container's
+`COPILOT_*` env and a Secret for the key automatically. The key only ever
+reaches the web container, never the api.
+
+#### Quickest — inline key (dev/test)
+
+```yaml
+ui:
+  web:
+    copilot:
+      enabled: true
+      model: openai/<model>                 # or anthropic/<model>
+      baseUrl: https://llm-gateway.example.com   # omit for the public OpenAI/Anthropic API
+      apiKey: <gateway API key>             # rendered into a chart-managed Secret
+```
+
+#### Production — bring your own Secret
+
+Avoid putting the key in values; reference a pre-created Secret instead. It is
+loaded with `envFrom`, so its keys must be env var names — at minimum the
+provider key (`OPENAI_API_KEY` or `ANTHROPIC_API_KEY`):
 
 ```bash
 kubectl -n aerospike-operator create secret generic acko-agent-secrets \
-  --from-literal=COPILOT_MODEL=anthropic/claude-sonnet-4-5 \
-  --from-literal=ANTHROPIC_API_KEY=<your-key>
+  --from-literal=OPENAI_API_KEY=<gateway API key>
 ```
 
 ```yaml
 ui:
   web:
-    extraEnvFrom:
-      - secretRef:
-          name: acko-agent-secrets
+    copilot:
+      enabled: true
+      model: openai/<model>
+      baseUrl: https://llm-gateway.example.com
+      existingSecret: acko-agent-secrets
 ```
 
-Without the secret the UI renders unchanged and the agent stays disabled.
-See the cluster-manager README for the full COPILOT_* variable reference
-(COPILOT_REQUIRE_AUTH, COPILOT_OIDC_ISSUER_URL, ...).
+Pick a model that supports function/tool calling so the agent's tools work.
+With `enabled: false` (default) the UI renders unchanged and the agent stays
+disabled. For advanced cases you can still inject `COPILOT_*` yourself via
+`ui.web.extraEnv` / `ui.web.extraEnvFrom`. Full variable reference
+(`COPILOT_REQUIRE_AUTH`, ...) is in the cluster-manager README.
 
 ### Full example
 
