@@ -17,10 +17,10 @@ import (
 
 	aero "github.com/aerospike/aerospike-client-go/v8"
 
-	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
-	ackoerrors "github.com/ksr/aerospike-ce-kubernetes-operator/internal/errors"
-	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/podutil"
-	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/utils"
+	ackov1alpha1 "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/api/v1alpha1"
+	ackoerrors "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/internal/errors"
+	"github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/internal/podutil"
+	"github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/internal/utils"
 )
 
 const (

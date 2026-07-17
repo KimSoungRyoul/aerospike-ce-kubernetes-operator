@@ -3,7 +3,7 @@ package utils
 import (
 	"testing"
 
-	v1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
+	v1alpha1 "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/api/v1alpha1"
 )
 
 func TestFindAdminUser(t *testing.T) {

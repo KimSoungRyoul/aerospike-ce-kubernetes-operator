@@ -5,7 +5,7 @@ import (
 
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
+	ackov1alpha1 "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/api/v1alpha1"
 )
 
 // isMigrationInProgress connects to the Aerospike cluster and checks whether

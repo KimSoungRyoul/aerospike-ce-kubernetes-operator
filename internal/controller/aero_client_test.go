@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
-	ackoerrors "github.com/ksr/aerospike-ce-kubernetes-operator/internal/errors"
+	ackov1alpha1 "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/api/v1alpha1"
+	ackoerrors "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/internal/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"

@@ -40,9 +40,9 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
-	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/controller"
-	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/telemetry"
+	ackov1alpha1 "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/api/v1alpha1"
+	"github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/internal/controller"
+	"github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/internal/telemetry"
 	// +kubebuilder:scaffold:imports
 )
 

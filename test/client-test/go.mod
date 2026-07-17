@@ -1,4 +1,4 @@
-module github.com/ksr/aerospike-ce-kubernetes-operator/test/client-test
+module github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/test/client-test
 
 go 1.25
 
