@@ -5,18 +5,18 @@ title: Access Control (ACL)
 
 # Access Control (ACL)
 
-This guide covers configuring authentication and authorization for Aerospike CE clusters using the operator.
+Configure Aerospike CE authentication and authorization through the operator's access-control spec.
 
 ## Overview
 
-Aerospike CE supports access control (ACL) to restrict who can connect to the cluster and what operations they can perform. When ACL is enabled:
+Aerospike CE access control (ACL) limits who can connect and what each user can do. When you enable ACL:
 
-- All client connections must authenticate with a username and password
-- Each user is assigned one or more **roles** that define their permissions
-- The operator manages role and user creation via the Aerospike admin API
+- Every client connection must authenticate with a username and password.
+- Each user receives one or more **roles** that define their permissions.
+- The operator creates and manages users and roles through the Aerospike admin API.
 
 :::warning
-Aerospike CE 8.x does not support the `security` stanza in `aerospike.conf`. ACL is managed entirely through the operator's `aerospikeAccessControl` spec, which uses the Aerospike admin API to configure users and roles at runtime.
+Aerospike CE 8.x does not support the `security` stanza in `aerospike.conf`. Configure ACL only through the operator's `aerospikeAccessControl` spec. The operator then uses the Aerospike admin API to apply users and roles at runtime.
 :::
 
 ## Prerequisites

@@ -5,18 +5,18 @@ title: 접근 제어 (ACL)
 
 # 접근 제어 (ACL)
 
-이 가이드는 오퍼레이터를 사용하여 Aerospike CE 클러스터의 인증 및 권한 부여를 설정하는 방법을 다룹니다.
+오퍼레이터의 접근 제어 스펙으로 Aerospike CE 인증과 권한을 설정합니다.
 
 ## 개요
 
-Aerospike CE는 클러스터에 접속하는 대상과 수행 가능한 작업을 제한하는 접근 제어(ACL)를 지원합니다. ACL을 활성화하면:
+Aerospike CE 접근 제어(ACL)는 접속할 수 있는 사용자와 각 사용자가 수행할 수 있는 작업을 제한합니다. ACL을 활성화하면 다음 규칙이 적용됩니다.
 
-- 모든 클라이언트 연결은 사용자명과 비밀번호로 인증해야 합니다.
-- 각 사용자는 권한을 정의하는 하나 이상의 **역할(role)** 을 부여받습니다.
-- 오퍼레이터는 Aerospike 관리 API를 통해 역할과 사용자 생성을 관리합니다.
+- 모든 클라이언트 연결은 사용자 이름과 비밀번호로 인증해야 합니다.
+- 각 사용자에게 권한을 정의하는 **role**을 하나 이상 부여합니다.
+- 오퍼레이터가 Aerospike 관리 API로 사용자와 role을 생성하고 관리합니다.
 
 :::warning
-Aerospike CE 8.x는 `aerospike.conf`의 `security` 스탠자를 지원하지 않습니다. ACL은 오퍼레이터의 `aerospikeAccessControl` 스펙을 통해서만 관리되며, 런타임에 Aerospike 관리 API를 사용하여 사용자와 역할을 구성합니다.
+Aerospike CE 8.x는 `aerospike.conf`의 `security` stanza를 지원하지 않습니다. ACL은 오퍼레이터의 `aerospikeAccessControl` 스펙에서만 설정하세요. 오퍼레이터는 이 스펙을 바탕으로 런타임에 Aerospike 관리 API를 호출해 사용자와 role을 적용합니다.
 :::
 
 ## 사전 준비
@@ -71,7 +71,7 @@ spec:
 
 ## 내장 역할
 
-Aerospike CE는 다음과 같은 사전 정의된 역할을 제공합니다. `roles` 목록에 별도로 정의하지 않고 사용자에게 직접 부여할 수 있습니다.
+Aerospike CE는 아래 role을 미리 정의합니다. `roles` 목록에 다시 정의하지 않고 사용자에게 바로 부여할 수 있습니다.
 
 | 역할 | 설명 |
 |------|------|

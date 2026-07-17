@@ -8,14 +8,14 @@ import TabItem from '@theme/TabItem';
 
 # Aerospike 클러스터 생성
 
-이 가이드는 `AerospikeCluster` CRD를 사용하여 Aerospike CE 클러스터를 배포하는 방법을 설명합니다.
+`AerospikeCluster` custom resource를 정의해 Aerospike CE 클러스터를 배포합니다.
 
 ## 샘플 설정
 
 <Tabs>
 <TabItem value="minimal" label="최소 (1노드)" default>
 
-가장 간단한 클러스터: 단일 노드 인메모리 배포입니다.
+개발이나 테스트에는 단일 노드 in-memory 클러스터로 시작하세요.
 
 ```yaml
 apiVersion: acko.io/v1alpha1

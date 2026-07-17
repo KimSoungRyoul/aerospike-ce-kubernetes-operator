@@ -6,7 +6,7 @@ title: Quick Start
 
 # Quick Start
 
-Deploy an Aerospike CE cluster with the Cluster Manager UI on a local Kind cluster.
+Follow this quick start to run an Aerospike CE cluster and the Cluster Manager UI on a local Kind cluster.
 
 ## Prerequisites
 

@@ -5,7 +5,7 @@ title: Manage Cluster
 
 # Manage an Aerospike Cluster
 
-This guide covers day-2 operations: scaling, updates, configuration changes, and troubleshooting.
+Use these day-2 procedures to scale clusters, roll out updates, change configuration, and diagnose failures.
 
 ## Scaling
 
@@ -15,7 +15,7 @@ Change `spec.size` to scale the cluster up or down.
 kubectl -n aerospike patch asc aerospike-3node --type merge -p '{"spec":{"size":5}}'
 ```
 
-The operator creates or removes pods to match the desired size. For multi-rack deployments, pods are distributed evenly across racks.
+The operator creates or removes pods until the cluster reaches the requested size. In a multi-rack deployment, it distributes pods evenly across racks.
 
 :::warning
 `spec.size` must not exceed 8 (CE limit). `replication-factor` must not exceed the new cluster size.
@@ -25,14 +25,14 @@ The operator creates or removes pods to match the desired size. For multi-rack d
 
 ### Image Update
 
-Change `spec.image` to trigger a rolling restart with the new image:
+Change `spec.image` to roll out a new image:
 
 ```yaml
 spec:
   image: aerospike:ce-8.1.1.1   # Change to new version
 ```
 
-The operator uses `OnDelete` update strategy — it deletes pods one at a time (or in batches) and waits for the new pod to become ready before proceeding.
+The operator uses the `OnDelete` update strategy. It deletes pods one at a time or in configured batches, then waits for replacements to become ready before continuing.
 
 ### Batch Size
 

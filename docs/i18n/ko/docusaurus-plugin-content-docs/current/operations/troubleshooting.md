@@ -5,7 +5,7 @@ title: 트러블슈팅
 
 # 트러블슈팅
 
-이 가이드는 Aerospike CE Kubernetes Operator의 일반적인 문제, 디버깅 기법, 진단에 필요한 참조 정보를 다룹니다.
+먼저 증상별 표에서 원인을 좁힌 뒤 아래 점검 절차로 ACKO 장애를 진단하고 해결하세요.
 
 ## 증상별 진단
 
@@ -24,7 +24,7 @@ title: 트러블슈팅
 
 ### 클러스터가 InProgress에서 멈춤
 
-클러스터 phase가 `InProgress`에 머물러 `Completed`로 전환되지 않는 경우입니다.
+클러스터가 `InProgress` phase에 머물고 `Completed`로 진행하지 않습니다.
 
 **가능한 원인:**
 

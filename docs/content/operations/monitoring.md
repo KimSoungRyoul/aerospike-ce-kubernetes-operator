@@ -5,7 +5,7 @@ title: Monitoring
 
 # Monitoring
 
-This guide covers per-cluster Prometheus monitoring: the exporter sidecar, ServiceMonitor, PrometheusRule with built-in and custom alert rules, and metric labels.
+Enable per-cluster Prometheus monitoring with the exporter sidecar, `ServiceMonitor`, `PrometheusRule`, and custom metric labels.
 
 For **operator-level** monitoring (ServiceMonitor, PrometheusRule, and Grafana dashboard for the operator itself), see the [Install — Monitoring](../getting-started/install.md#monitoring-optional) section.
 
@@ -22,9 +22,10 @@ spec:
 ```
 
 The operator automatically:
-1. Adds the exporter container to the StatefulSet pod template
-2. Exposes the metrics port on each pod
-3. Shares the Aerospike network namespace so the exporter can scrape `localhost:3000`
+
+1. Adds the exporter container to the StatefulSet pod template.
+2. Exposes the metrics port on each pod.
+3. Shares the Aerospike network namespace so the exporter can scrape `localhost:3000`.
 
 ### Exporter Configuration
 

@@ -5,14 +5,14 @@ title: Glossary
 
 # Terminology Glossary
 
-Terms that have specific meanings in Aerospike, Kubernetes, and ACKO — or that are easily confused across these layers.
+Use this glossary to distinguish terms that have different meanings in Aerospike, Kubernetes, and ACKO.
 
 ## Operator & CRD Concepts
 
 | Term | Definition |
 |------|-----------|
-| **ACKO** | **A**eropike **C**ommunity Edition **K**ubernetes **O**perator. Manages `AerospikeCluster` and `AerospikeClusterTemplate` resources via the `acko.io` API group. |
-| **AerospikeCluster** | The primary Custom Resource (CRD Kind) representing an Aerospike CE cluster deployment. `apiVersion: acko.io/v1alpha1`. Short name: `asc`. |
+| **ACKO** | **A**erospike **C**ommunity Edition **K**ubernetes **O**perator. It manages `AerospikeCluster` and `AerospikeClusterTemplate` resources in the `acko.io` API group. |
+| **AerospikeCluster** | The primary Custom Resource kind for an Aerospike CE deployment. API version: `acko.io/v1alpha1`. Short name: `asc`. |
 | **AerospikeClusterTemplate** | A CRD providing reusable configuration profiles for clusters. Referenced by `spec.templateRef`. Short name: `asct`. |
 | **Rack** | A logical failure domain within an Aerospike cluster. In ACKO, each rack maps to one StatefulSet and one ConfigMap (`<clusterName>-<rackID>` pattern). Rack IDs are user-assigned positive integers; ID 0 is reserved internally. |
 | **CR / Custom Resource** | An instance of a CRD. For example, a specific `AerospikeCluster` object in a namespace is a CR. |

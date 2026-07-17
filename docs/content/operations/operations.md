@@ -5,20 +5,20 @@ title: Operations
 
 # Operations
 
-The operator supports on-demand operations that let you trigger pod restarts declaratively through the `spec.operations` field. This guide covers the available operation types, how to trigger and track them, and best practices for production use.
+Declare controlled pod restarts in `spec.operations`. The operator sequences each operation, reports its status, and emits Kubernetes events.
 
 ---
 
 ## Overview
 
-On-demand operations provide a controlled way to restart Aerospike pods without manually deleting them. Instead of using `kubectl delete pod`, you declare the desired operation in the cluster spec, and the operator executes it with proper sequencing, status tracking, and event emission.
+Use an on-demand operation instead of deleting Aerospike pods manually. Add the operation to the cluster spec, and the operator handles ordering, status tracking, and event emission.
 
 **Key constraints:**
 
-- Only **one operation** can be active at a time
-- The operation `id` must be unique and between 1--20 characters
-- Operations cannot be modified while `InProgress`
-- Remove the operation from the spec after it completes
+- Only **one operation** can be active at a time.
+- The operation `id` must be unique and contain 1--20 characters.
+- You cannot modify an operation while it is `InProgress`.
+- Remove the operation from the spec after it completes.
 
 ---
 

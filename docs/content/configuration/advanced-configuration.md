@@ -5,15 +5,15 @@ title: Advanced Configuration
 
 # Advanced Configuration
 
-This guide covers advanced operator features for fine-tuning Aerospike cluster behavior, pod scheduling, rack-level overrides, and validation policies.
+Use these advanced settings to control Aerospike behavior, pod scheduling, rack-level overrides, and validation policies.
 
 ---
 
 ## EnableRackIDOverride
 
-By default, the operator assigns rack IDs to pods based on the StatefulSet ordinal and the rack definition. When `enableRackIDOverride` is enabled, the operator allows dynamic rack ID assignment via pod annotations, giving you manual control over which rack a pod belongs to.
+By default, the operator derives each pod's rack ID from its StatefulSet ordinal and rack definition. Enable `enableRackIDOverride` to assign rack IDs dynamically with pod annotations.
 
-This is useful when you need to migrate pods between racks without scaling down and back up, or when integrating with external orchestration tools that manage rack placement.
+Use this option to move pods between racks without scaling down and back up, or to let an external orchestration tool manage rack placement.
 
 ```yaml
 apiVersion: acko.io/v1alpha1
@@ -301,7 +301,7 @@ spec:
 
 ## Pod Customization
 
-The `spec.podSpec` field provides access to several Kubernetes pod-level features beyond scheduling. This section covers sidecar containers, init containers, security contexts, service accounts, and image pull secrets.
+Beyond scheduling, `spec.podSpec` configures sidecar and init containers, security contexts, service accounts, and image pull secrets.
 
 ### Custom Sidecars
 

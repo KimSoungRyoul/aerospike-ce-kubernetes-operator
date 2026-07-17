@@ -5,21 +5,20 @@ title: Cluster Manager UI
 
 # Aerospike Cluster Manager UI
 
-[Aerospike Cluster Manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager) is a web-based GUI for managing Aerospike CE clusters. It is included in the Operator Helm chart and can be deployed optionally.
+[Aerospike Cluster Manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager) provides a web interface for managing Aerospike CE clusters. The operator Helm chart includes the UI and lets you disable it when you do not need it.
 
 ---
 
 ## Installation
 
-The Cluster Manager UI (api + web Deployments) is enabled by default in
-chart 0.4.0+. A plain install brings everything up:
+Chart 0.4.0 and later enable both Cluster Manager Deployments (`api` and `web`) by default. A standard install starts both components:
 
 ```bash
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
   --namespace aerospike-operator --create-namespace
 ```
 
-To skip the UI entirely, set both component toggles to false:
+To omit the UI, set both component toggles to `false`:
 `--set ui.api.enabled=false --set ui.web.enabled=false`.
 
 :::note RBAC permissions
@@ -64,7 +63,7 @@ Start the cluster creation wizard from the sidebar **Create Cluster** button or 
 - **Dynamic Config** — Apply configuration changes without restarting
 - **Network Access** — Client access method (Pod IP, Host Internal/External, Configured IP). When `configuredIP` is selected, a custom network names input field appears.
 - **Kubernetes NetworkPolicy** — Auto-generate K8s NetworkPolicy (standard or Cilium)
-- **Seeds Finder LoadBalancer** — Create a LoadBalancer service for external seed discovery. The following fields can be configured in the UI:
+- **Seeds Finder LoadBalancer** — Create a LoadBalancer service for external seed discovery. Configure these fields in the UI:
 
 | Field | Description |
 |-------|-------------|
@@ -123,7 +122,7 @@ The Edit dialog uses diff-based patching to apply only the changed fields. Suppo
 
 ### Rack Topology Editing
 
-The **Rack Config** tab in the Edit dialog allows you to modify the rack topology even after cluster creation. Supported operations:
+Use the **Rack Config** tab in the Edit dialog to change rack topology after cluster creation. You can:
 
 - **Add rack** — Add a new rack by specifying a new rack ID along with zone, region, and nodeName.
 - **Remove rack** — Remove an existing rack. Pods in that rack are scaled down sequentially.
@@ -151,7 +150,7 @@ This configuration maps to `spec.podSpec.nodeBlockList`, and Aerospike Pods will
 
 ### Container Security Context
 
-In the **Security Context** tab of the Edit dialog, you can configure container-level security via the **Container Security Context** section in addition to Pod-level security context. The following fields are available:
+The **Security Context** tab separates Pod-level settings from the **Container Security Context** settings below:
 
 | Field | Description |
 |-------|-------------|
@@ -396,7 +395,7 @@ The cluster detail page lets you manage HorizontalPodAutoscaler (HPA) resources 
 
 ### Creating an HPA
 
-Select **Manage HPA** from the action menu on the cluster detail page to create a new HPA. The following items can be configured:
+To create an HPA, select **Manage HPA** from the action menu on the cluster detail page and configure:
 
 - **Min Replicas** — Minimum number of Pods to maintain during autoscaling
 - **Max Replicas** — Maximum number of Pods allowed

@@ -5,7 +5,7 @@ title: Troubleshooting
 
 # Troubleshooting
 
-This guide covers common issues, debugging techniques, and reference information for diagnosing problems with the Aerospike CE Kubernetes Operator.
+Start with the symptom table, then use the focused checks below to find and fix common ACKO failures.
 
 ## Symptom-Based Diagnosis
 
@@ -24,7 +24,7 @@ This guide covers common issues, debugging techniques, and reference information
 
 ### Cluster Stuck in InProgress
 
-The cluster phase stays at `InProgress` and does not transition to `Completed`.
+The cluster remains in the `InProgress` phase instead of moving to `Completed`.
 
 **Possible causes:**
 
@@ -306,7 +306,7 @@ The webhook validates CE constraints when creating or updating an AerospikeClust
 
 ### Enterprise-Only Namespace Keys
 
-The following keys are not allowed in CE namespace configuration:
+CE namespace configuration does not allow these keys:
 
 `compression`, `compression-level`, `durable-delete`, `fast-restart`, `index-type`, `sindex-type`, `rack-id`, `strong-consistency`, `tomb-raider-eligible-age`, `tomb-raider-period`
 

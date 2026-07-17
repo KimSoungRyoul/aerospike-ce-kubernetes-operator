@@ -5,7 +5,7 @@ title: AerospikeClusterTemplate
 
 # Template Management
 
-The `AerospikeClusterTemplate` CRD enables reusable, organization-wide configuration profiles for Aerospike clusters. This guide covers the full template lifecycle: creation, usage, overrides, sync behavior, and best practices.
+Use the `AerospikeClusterTemplate` CRD to share Aerospike cluster defaults across an organization. This page explains how to create, apply, override, and resync templates.
 
 For the CRD field reference, see [AerospikeClusterTemplate API Reference](../reference/api-reference/aerospikeclustertemplate.md).
 
@@ -13,12 +13,12 @@ For the CRD field reference, see [AerospikeClusterTemplate API Reference](../ref
 
 ## How Templates Work
 
-Templates follow a **snapshot model**:
+Templates use a **snapshot model**:
 
-1. You create an `AerospikeClusterTemplate` with shared defaults (image, size, resources, scheduling, storage, monitoring, network policy, Aerospike config).
-2. An `AerospikeCluster` references the template via `spec.templateRef.name`.
-3. At cluster creation, the operator resolves the template and stores the full spec in `status.templateSnapshot`.
-4. The cluster operates independently from that point. Template changes are **not** automatically propagated.
+1. Create an `AerospikeClusterTemplate` with shared defaults such as image, size, resources, scheduling, storage, monitoring, network policy, and Aerospike configuration.
+2. Reference the template from an `AerospikeCluster` with `spec.templateRef.name`.
+3. When it creates the cluster, the operator resolves the template and stores the resulting spec in `status.templateSnapshot`.
+4. The cluster then operates independently. Later template changes do **not** propagate automatically.
 
 ```
 ┌─────────────────────┐       templateRef        ┌─────────────────────┐

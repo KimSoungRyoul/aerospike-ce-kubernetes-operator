@@ -5,7 +5,7 @@ title: 클러스터 관리
 
 # Aerospike 클러스터 관리
 
-이 가이드는 Day-2 운영을 다룹니다: 스케일링, 업데이트, 설정 변경, 트러블슈팅.
+이 Day-2 절차로 클러스터 크기 조정, 업데이트 배포, 설정 변경, 장애 진단을 수행합니다.
 
 ## 스케일링
 
@@ -15,7 +15,7 @@ title: 클러스터 관리
 kubectl -n aerospike patch asc aerospike-3node --type merge -p '{"spec":{"size":5}}'
 ```
 
-오퍼레이터가 원하는 크기에 맞게 파드를 생성하거나 제거합니다. 멀티랙 배포의 경우, 파드가 랙 간에 균등하게 분배됩니다.
+오퍼레이터는 클러스터가 요청한 크기에 도달할 때까지 파드를 만들거나 제거합니다. Multi-rack 배포에서는 파드를 랙마다 고르게 배치합니다.
 
 :::warning
 `spec.size`는 8을 초과할 수 없습니다 (CE 제한). `replication-factor`는 새 클러스터 크기를 초과할 수 없습니다.
@@ -25,7 +25,7 @@ kubectl -n aerospike patch asc aerospike-3node --type merge -p '{"spec":{"size":
 
 ### 이미지 업데이트
 
-`spec.image`를 변경하여 새 이미지로 롤링 재시작을 트리거합니다:
+`spec.image`를 변경해 새 이미지를 rolling update합니다.
 
 ```yaml
 spec:
@@ -43,7 +43,7 @@ spec:
   rollingUpdateBatchSize: 2   # 한 번에 2개 파드 재시작 (기본값: 1)
 ```
 
-랙 인식 배포의 경우, `rackConfig`에서 랙별 배치 크기를 설정할 수 있습니다. 이 값은 `spec.rollingUpdateBatchSize`보다 우선합니다:
+Rack-aware 배포에서는 `rackConfig`에 랙별 batch size를 지정합니다. 이 값이 `spec.rollingUpdateBatchSize`보다 우선합니다.
 
 ```yaml
 spec:
@@ -94,7 +94,7 @@ spec:
 
 ### 무시 가능한 파드 수
 
-일부 파드가 Pending/Failed 상태일 때도 재조정을 계속 진행할 수 있습니다:
+일부 파드가 Pending 또는 Failed 상태여도 reconciliation을 계속하려면 다음 값을 설정합니다.
 
 ```yaml
 spec:
@@ -148,7 +148,7 @@ spec:
 2. 롤백은 최선 노력(best-effort)입니다 — 롤백 명령도 실패하면 로그에 기록하지만 진행을 차단하지 않습니다
 3. 롤백 후 올바른 설정을 원자적으로 적용하기 위해 **콜드 리스타트**로 폴백합니다
 
-이를 통해 부분적으로 적용된 설정으로 클러스터가 실행되는 것을 방지합니다. 오퍼레이터 로그에서 롤백 활동을 확인할 수 있습니다:
+이 롤백은 일부 설정만 적용된 채 클러스터가 실행되는 상황을 막습니다. 오퍼레이터 로그에서 동작을 확인합니다.
 
 ```bash
 kubectl -n aerospike-operator logs -l control-plane=controller-manager | grep -i "rollback\|dynamic config"
@@ -303,11 +303,11 @@ deriv(acko_cluster_migrating_partitions[10m]) >= 0
 
 ## 클러스터 상태 및 Conditions
 
-오퍼레이터는 `status` 서브리소스를 통해 상세한 상태 정보를 제공합니다. 이 필드들을 이해하면 모니터링과 트러블슈팅에 도움이 됩니다.
+오퍼레이터는 `status` subresource에 상세 상태를 기록합니다. 모니터링과 트러블슈팅에서는 아래 필드를 먼저 확인하세요.
 
 ### Phase
 
-`status.phase` 필드는 오퍼레이터가 수행 중인 작업에 대한 높은 수준의 뷰를 제공합니다:
+`status.phase`는 오퍼레이터가 수행 중인 작업을 요약합니다.
 
 ```bash
 kubectl -n aerospike get asc
@@ -326,11 +326,11 @@ kubectl -n aerospike get asc
 | `Deleting` | 클러스터 해체 진행 중 |
 | `Error` | 복구 불가능한 오류; `status.lastReconcileError` 확인 |
 
-`status.phaseReason` 필드는 추가 컨텍스트를 제공합니다 (예: "Rolling restart in progress for rack 1").
+`status.phaseReason`은 원인을 더 구체적으로 설명합니다(예: "Rolling restart in progress for rack 1").
 
 ### Health
 
-`status.health` 필드는 "준비됨/전체" 형태의 빠른 요약을 제공합니다:
+`status.health`는 "준비됨/전체" 형식으로 상태를 요약합니다.
 
 ```bash
 kubectl -n aerospike get asc aerospike-3node -o jsonpath='{.status.health}'
@@ -394,7 +394,7 @@ kubectl -n aerospike get asc aerospike-3node \
 
 오퍼레이터는 `aerospikeAccessControl.users[*].secretName`으로 참조되는 Kubernetes Secret을 감시합니다. Secret의 데이터가 변경되면(예: 비밀번호 교체) AerospikeCluster CR에 대한 변경 없이 오퍼레이터가 자동으로 재조정을 트리거하여 업데이트된 비밀번호를 Aerospike에 동기화합니다.
 
-이를 통해 제로 터치 비밀번호 교체 워크플로우를 구현할 수 있습니다:
+다음과 같이 별도 조작 없이 비밀번호를 교체할 수 있습니다.
 
 ```bash
 # Secret 업데이트로 사용자 비밀번호 교체
@@ -403,7 +403,7 @@ kubectl -n aerospike create secret generic app-secret \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-오퍼레이터가 Secret 데이터 변경을 감지하고 Aerospike에서 사용자 비밀번호를 업데이트하는 ACL 동기화를 실행합니다. 이벤트로 동기화를 확인할 수 있습니다:
+오퍼레이터는 Secret 변경을 감지해 ACL을 동기화하고 Aerospike 사용자 비밀번호를 갱신합니다. 이벤트로 결과를 확인합니다.
 
 ```bash
 kubectl get events --field-selector reason=ACLSyncStarted -n aerospike
@@ -416,7 +416,7 @@ AerospikeCluster의 ACL 설정에서 실제로 참조하는 Secret만 재조정�
 
 ## 재조정 일시 중지 및 재개
 
-`spec.paused: true`를 설정하여 오퍼레이터가 클러스터를 재조정하지 않도록 임시로 중지할 수 있습니다. 일시 중지된 동안 스케일링, 롤링 리스타트, 설정 변경, ACL 동기화 등 모든 재조정이 수행되지 않습니다. 클러스터 phase가 `Paused`로 변경되고 `ReconciliationPaused` 조건이 `True`로 설정됩니다.
+`spec.paused: true`를 설정하면 오퍼레이터가 클러스터 reconciliation을 잠시 멈춥니다. 이 상태에서는 scaling, rolling restart, 설정 변경, ACL sync를 수행하지 않습니다. 클러스터 phase는 `Paused`, `ReconciliationPaused` condition은 `True`가 됩니다.
 
 **일시 중지가 필요한 경우:**
 
@@ -612,7 +612,7 @@ Deferring PVC cleanup: scaled-down pods still terminating
 
 모든 스케일 다운된 파드가 종료 확인되면 오퍼레이터는 `cascadeDelete: true`인 볼륨의 PVC만 삭제합니다. 비 cascade PVC는 항상 보존됩니다.
 
-이벤트로 PVC 정리 활동을 모니터링할 수 있습니다:
+PVC 정리 과정은 이벤트로 확인합니다.
 
 ```bash
 # 성공적인 정리
@@ -705,7 +705,7 @@ storage:
 - **고아 PVC** -- PersistentVolume에 바인딩되어 있지만 실행 중인 파드에 마운트되지 않은 PVC (스케일 다운 또는 파드 재스케줄링 후 발생 가능)
 - **용량 및 StorageClass** -- 프로비저닝된 스토리지 크기와 사용된 StorageClass
 
-kubectl로도 PVC 상태를 확인할 수 있습니다:
+`kubectl`로 PVC 상태를 확인합니다.
 
 ```bash
 # 클러스터의 모든 PVC 조회
@@ -1078,7 +1078,7 @@ kubectl -n aerospike get asc aerospike-3node \
 ## Kubernetes 이벤트
 
 오퍼레이터는 모든 중요한 라이프사이클 전환에 대해 Kubernetes Event를 발생시킵니다.
-`kubectl get events`를 사용하여 클러스터 활동을 실시간으로 관찰할 수 있습니다:
+`kubectl get events`로 클러스터 활동을 실시간 확인합니다.
 
 ```bash
 # 특정 클러스터의 이벤트 감시

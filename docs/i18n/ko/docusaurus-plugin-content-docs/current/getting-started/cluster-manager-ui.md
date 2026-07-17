@@ -5,23 +5,22 @@ title: 클러스터 매니저 UI
 
 # Aerospike 클러스터 매니저 UI
 
-[Aerospike Cluster Manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager)는 Aerospike CE 클러스터를 관리하기 위한 웹 기반 GUI입니다. 오퍼레이터 Helm 차트에 번들로 포함되어 있으며, 오퍼레이터와 함께 선택적 컴포넌트로 배포할 수 있습니다.
+[Aerospike Cluster Manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager)는 Aerospike CE 클러스터를 관리하는 웹 UI입니다. 오퍼레이터 Helm 차트에 포함되어 있으며, 필요하지 않으면 비활성화할 수 있습니다.
 
-UI는 클러스터 연결 프로파일을 데이터베이스에 저장합니다. 기본 백엔드는 api 컨테이너에 내장된 SQLite 파일(PVC에 영속 저장)이며, `postgresql`로 전환하면 차트가 직접 띄우는 PostgreSQL Deployment 또는 직접 운영하는 외부 PostgreSQL 인스턴스를 사용할 수 있습니다.
+UI는 클러스터 연결 프로필을 데이터베이스에 저장합니다. 기본 백엔드는 `api` 컨테이너의 SQLite 파일이며 PVC에 영속화됩니다. `postgresql`을 선택하면 차트가 배포한 PostgreSQL Deployment나 직접 운영하는 외부 PostgreSQL에 연결합니다.
 
 ---
 
 ## 설치
 
-차트 0.4.0+에서는 Cluster Manager UI(api + web Deployment)가 기본으로
-배포됩니다. 별도 플래그 없이 설치하면 모두 함께 올라옵니다.
+차트 0.4.0 이상에서는 Cluster Manager의 `api`와 `web` Deployment를 기본으로 활성화합니다. 일반 설치 명령은 두 component를 모두 시작합니다.
 
 ```bash
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
   --namespace aerospike-operator --create-namespace
 ```
 
-UI를 완전히 끄려면 두 컴포넌트 토글을 모두 false로 설정합니다:
+UI를 설치하지 않으려면 두 component toggle을 모두 `false`로 설정합니다.
 `--set ui.api.enabled=false --set ui.web.enabled=false`.
 
 :::note RBAC 권한
@@ -40,7 +39,7 @@ kubectl -n aerospike-operator get pods -l app.kubernetes.io/component=ui
 
 ### 포트 포워딩 (개발용)
 
-웹 프론트엔드는 3100 포트로 서비스됩니다.
+웹 frontend Service는 3100 포트를 노출합니다.
 
 ```bash
 kubectl -n aerospike-operator port-forward svc/acko-aerospike-ce-kubernetes-operator-ui-web 3100:3100
@@ -105,7 +104,7 @@ helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kuber
 외부 OpenTelemetry Collector로 로그를 라우팅하는 설정(`fileMirror` + OTLP-forwarder 사이드카)은 아래의 [로깅](#로깅) 섹션을 참고하세요.
 
 :::tip
-프로브, 보안 컨텍스트, 톨러레이션, 어피니티, 오토스케일링 등 전체 설정 옵션 목록은 다음 명령으로 확인할 수 있습니다.
+Probe, security context, toleration, affinity, autoscaling을 포함한 전체 설정은 다음 명령으로 확인합니다.
 ```bash
 helm show values oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator | grep -A 500 "^ui:"
 ```
@@ -205,15 +204,15 @@ ui:
 
 ### 연결 관리
 
-색상 코드가 있는 프로파일로 여러 Aerospike 클러스터 연결을 관리합니다. 각 연결은 호스트, 포트, 선택적 인증 정보를 저장하며, 프로파일은 데이터베이스(기본값 내장 SQLite, 또는 외부 PostgreSQL)에 영속 저장됩니다.
+색상으로 구분한 프로필에서 여러 Aerospike 클러스터 연결을 관리합니다. 각 프로필은 host, port, 선택적 인증 정보를 데이터베이스에 저장합니다. 기본 데이터베이스는 내장 SQLite이며 외부 PostgreSQL로 바꿀 수 있습니다.
 
 ### 클러스터 모니터링
 
-TPS, 클라이언트 연결 수, 성공률을 보여주는 실시간 대시보드입니다. 네임스페이스 사용량, 스토리지 활용도, 클러스터 상태를 한눈에 확인할 수 있습니다.
+실시간 dashboard에서 TPS, 클라이언트 연결 수, 성공률, 네임스페이스 사용량, 스토리지 활용도, 클러스터 상태를 함께 확인합니다.
 
 ### 레코드 브라우저
 
-페이지네이션을 지원하여 레코드를 탐색, 생성, 수정, 삭제합니다. 네임스페이스와 셋을 탐색하고, 전체 메타데이터와 함께 개별 레코드를 검사할 수 있습니다.
+Pagination으로 레코드를 탐색하고 생성, 수정, 삭제합니다. 네임스페이스와 set을 이동하며 각 레코드의 metadata를 확인합니다.
 
 ### 쿼리 빌더
 
@@ -221,9 +220,9 @@ TPS, 클라이언트 연결 수, 성공률을 보여주는 실시간 대시보�
 
 ### HPA (Horizontal Pod Autoscaler) 관리
 
-클러스터 상세 페이지에서 AerospikeCluster 리소스를 대상으로 하는 HorizontalPodAutoscaler(HPA)를 관리할 수 있습니다. HPA는 CPU 또는 메모리 사용량에 따라 클러스터 크기를 자동으로 조정합니다.
+클러스터 상세 페이지에서 `AerospikeCluster`용 HorizontalPodAutoscaler(HPA)를 관리합니다. HPA는 CPU 또는 memory 사용량에 따라 클러스터 크기를 자동으로 조정합니다.
 
-**HPA 생성**: 클러스터 상세 페이지의 작업 메뉴에서 **HPA 관리**를 선택하여 새 HPA를 생성합니다. 다음 항목을 설정할 수 있습니다:
+**HPA 생성**: 클러스터 상세 페이지의 작업 메뉴에서 **HPA 관리**를 선택하고 다음 값을 설정합니다.
 
 - **최소 레플리카(Min Replicas)** — 자동 스케일링 시 유지할 최소 Pod 수
 - **최대 레플리카(Max Replicas)** — 허용할 최대 Pod 수
@@ -232,9 +231,9 @@ TPS, 클라이언트 연결 수, 성공률을 보여주는 실시간 대시보�
 
 생성된 HPA는 해당 AerospikeCluster를 `scaleTargetRef`로 참조합니다.
 
-**HPA 조회**: 클러스터에 연결된 HPA가 존재하면 현재 레플리카 수, 목표 메트릭, 현재 메트릭 값을 확인할 수 있습니다.
+**HPA 조회**: 연결된 HPA에서 현재 replica 수, target metric, current metric을 확인합니다.
 
-**HPA 삭제**: 더 이상 자동 스케일링이 필요하지 않은 경우 UI에서 HPA를 삭제할 수 있습니다. 삭제 후에는 수동 스케일링으로 전환됩니다.
+**HPA 삭제**: Autoscaling이 더 이상 필요하지 않으면 UI에서 HPA를 삭제합니다. 이후에는 수동 scaling을 사용합니다.
 
 :::note
 HPA 관리 기능을 사용하려면 UI의 ClusterRole에 `autoscaling` API 그룹에 대한 권한이 필요합니다. `ui.rbac.create=true`(기본값)일 때 자동으로 설정됩니다.
@@ -242,7 +241,7 @@ HPA 관리 기능을 사용하려면 UI의 ClusterRole에 `autoscaling` API 그�
 
 ### K8s 클러스터 관리
 
-`ui.k8s.enabled=true`(기본값)인 경우 UI는 Kubernetes 네이티브 클러스터 관리 기능을 제공합니다.
+`ui.k8s.enabled=true`(기본값)이면 UI에서 다음 Kubernetes-native 클러스터 관리 기능을 사용할 수 있습니다.
 
 - **클러스터 생성** — 안내형 마법사로 새 AerospikeCluster CR 배포
 - **클러스터 편집** — 편집 다이얼로그를 통해 실행 중인 클러스터 설정 수정 (이미지, 크기, 동적 설정, Aerospike 설정)
@@ -292,10 +291,10 @@ K8s 클러스터 관리 기능은 UI 서비스 어카운트가 AerospikeCluster 
 
 ### 마이그레이션 상태 표시
 
-클러스터가 스케일링이나 설정 변경 등으로 파티션 마이그레이션이 진행 중일 때, Overview 페이지에서 실시간 마이그레이션 상태를 확인할 수 있습니다.
+Scaling이나 설정 변경으로 partition migration이 진행되면 Overview 페이지에 상태가 실시간으로 표시됩니다.
 
 - **실시간 진행률** — 남은 파티션 수와 프로그레스 바로 마이그레이션 진행 상황을 표시합니다.
-- **Pod별 마이그레이션 분석** — 각 Pod가 마이그레이션하고 있는 파티션 수를 Pod 테이블에서 확인할 수 있습니다.
+- **Pod별 마이그레이션 분석** — Pod table에 각 Pod가 migration 중인 partition 수를 표시합니다.
 - **자동 새로고침** — 마이그레이션이 활성화된 동안 5초 간격으로 자동 갱신됩니다.
 - **시각적 표시** — 프로그레스 바와 상태 배지로 마이그레이션 상태를 직관적으로 표현합니다.
 - **랙 토폴로지 통합** — 랙 토폴로지 뷰에서 마이그레이션 중인 Pod가 하이라이트됩니다.
@@ -312,14 +311,14 @@ Overview 페이지에서 클러스터의 split-brain 상태를 자동으로 감�
 
 ### Pod 볼륨 상태 표시
 
-Pod 테이블에서 각 Pod의 볼륨 상태를 시각적으로 확인할 수 있습니다:
+Pod table은 각 Pod의 volume 상태를 다음과 같이 표시합니다.
 
 - **Dirty Volumes** — `status.pods[].dirtyVolumes`에 값이 있으면 경고 아이콘과 함께 초기화가 필요한 볼륨 이름을 표시합니다.
 - **Initialized Volumes** — `status.pods[].initializedVolumes`에 기록된 초기화 완료 볼륨 목록을 표시합니다.
 
 ### 클러스터 복제
 
-클러스터 상세 페이지의 작업 메뉴에서 **Clone**을 선택하여 기존 클러스터의 설정을 복제한 새 클러스터를 생성할 수 있습니다. 복제 시 클러스터 이름과 네임스페이스를 변경하며, 나머지 설정(이미지, 크기, Aerospike 설정, 스토리지, 모니터링 등)은 원본 클러스터에서 가져옵니다.
+클러스터 상세 페이지의 작업 메뉴에서 **Clone**을 선택하면 기존 설정을 복사한 새 클러스터를 만듭니다. 이름과 네임스페이스를 새로 지정하고, 이미지, 크기, Aerospike 설정, 스토리지, 모니터링은 원본에서 가져옵니다.
 
 :::warning
 복제된 클러스터는 원본 클러스터의 데이터를 포함하지 않습니다. 설정만 복제되며, 데이터는 새로 초기화됩니다.
@@ -334,7 +333,7 @@ Pod 테이블에서 각 Pod의 볼륨 상태를 시각적으로 확인할 수 �
 
 ### 서킷 브레이커 리셋
 
-Reconciliation Health 카드에서 서킷 브레이커가 활성화된 경우 **Reset** 버튼을 클릭하여 수동으로 리셋할 수 있습니다. 실패 원인을 해결한 후 이 버튼을 클릭하면 `failedReconcileCount`가 0으로 초기화되고 즉시 재조정이 시작됩니다.
+Reconciliation Health 카드에 circuit breaker가 활성화되면 실패 원인을 먼저 해결한 뒤 **Reset**을 누릅니다. UI가 `failedReconcileCount`를 0으로 초기화하고 즉시 reconciliation을 시작합니다.
 
 ### 랙 설정
 
@@ -358,7 +357,7 @@ Reconciliation Health 카드에서 서킷 브레이커가 활성화된 경우 **
 
 ### 컨테이너 보안 컨텍스트
 
-편집 다이얼로그의 **Security Context** 탭에서 Pod 수준 보안 컨텍스트 외에 **Container Security Context** 섹션을 통해 컨테이너 수준 보안을 설정할 수 있습니다. 다음 필드를 구성합니다:
+편집 dialog의 **Security Context** 탭은 Pod 설정과 **Container Security Context** 설정을 구분합니다. Container에는 다음 필드를 지정합니다.
 
 | Field | Description |
 |-------|-------------|
@@ -388,7 +387,7 @@ Aerospike CE 공식 이미지는 root로 실행됩니다. `runAsNonRoot: true`�
 
 ### 사용자/역할 관리 (ACL)
 
-UI를 통해 Aerospike 사용자와 역할을 관리합니다. 커맨드라인 도구 없이 사용자 생성, 역할 부여, 비밀번호 변경이 가능합니다.
+UI에서 Aerospike 사용자를 만들고 role을 부여하며 비밀번호를 변경합니다. 별도 command-line 도구는 필요하지 않습니다.
 
 ### UDF 관리
 
@@ -400,7 +399,7 @@ Aerospike 클러스터에 등록된 사용자 정의 함수(Lua 모듈)를 업�
 
 ### 라이트/다크 테마
 
-취향에 맞게 라이트 테마와 다크 테마 간 전환할 수 있습니다.
+Light theme와 dark theme 중 원하는 화면을 선택합니다.
 
 ---
 

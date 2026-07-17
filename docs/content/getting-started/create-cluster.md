@@ -8,14 +8,14 @@ import TabItem from '@theme/TabItem';
 
 # Create an Aerospike Cluster
 
-This guide explains how to deploy Aerospike CE clusters using the `AerospikeCluster` CRD.
+Define an `AerospikeCluster` custom resource to deploy an Aerospike CE cluster.
 
 ## Sample Configurations
 
 <Tabs>
 <TabItem value="minimal" label="Minimal (1-Node)" default>
 
-The simplest cluster: a single-node in-memory deployment.
+Start with a single-node, in-memory cluster for development or testing.
 
 ```yaml
 apiVersion: acko.io/v1alpha1
@@ -35,7 +35,7 @@ spec:
           data-size: 1073741824   # 1 GiB
 ```
 
-**Use case:** Development, testing, quick prototyping.
+**Use case:** Development, testing, and quick prototypes.
 
 ```bash
 kubectl create namespace aerospike
@@ -293,7 +293,7 @@ The validating webhook enforces Community Edition constraints:
 
 ### Enterprise-Only Namespace Keys
 
-The following namespace configuration keys are blocked for CE:
+ACKO rejects these namespace configuration keys for CE:
 
 | Key | Reason |
 |---|---|

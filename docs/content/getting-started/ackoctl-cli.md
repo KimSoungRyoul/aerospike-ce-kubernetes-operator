@@ -8,9 +8,9 @@ import TabItem from '@theme/TabItem';
 
 # ackoctl — Command-line interface
 
-[ackoctl](https://github.com/aerospike-ce-ecosystem/ackoctl) is the CLI counterpart to the [Cluster Manager UI](./cluster-manager-ui.md). Both talk to the same `aerospike-cluster-manager` REST API (`/api/v1/*`) — anything you can do in the UI you can do from the terminal or a CI pipeline.
+[ackoctl](https://github.com/aerospike-ce-ecosystem/ackoctl) provides terminal and CI access to the same operations as the [Cluster Manager UI](./cluster-manager-ui.md). Both call the `aerospike-cluster-manager` REST API at `/api/v1/*`.
 
-It is written in Go and follows the `kubectl` / `gh` command grammar (`ackoctl <noun> <verb>`). It does **not** talk to Kubernetes or Aerospike directly; the cluster-manager UI deployment is the contact point.
+The Go CLI follows the `kubectl` and `gh` command pattern: `ackoctl <noun> <verb>`. It does **not** connect directly to Kubernetes or Aerospike; it connects to the cluster-manager API deployment.
 
 ---
 
