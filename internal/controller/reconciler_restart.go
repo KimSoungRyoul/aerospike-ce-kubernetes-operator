@@ -789,7 +789,7 @@ func (r *AerospikeClusterReconciler) isBatchBlocked(
 	}
 	if migrating {
 		log.Info("Data migration in progress, delaying next restart batch", "rack", rackID)
-		r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventRollingRestartStarted,
+		r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventRollingRestartDeferred,
 			"Rolling restart paused for rack %d: data migration in progress", rackID)
 		return true
 	}

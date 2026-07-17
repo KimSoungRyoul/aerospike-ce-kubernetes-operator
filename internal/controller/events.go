@@ -5,6 +5,7 @@ package controller
 const (
 	// Rolling restart lifecycle
 	EventRollingRestartStarted   = "RollingRestartStarted"
+	EventRollingRestartDeferred  = "RollingRestartDeferred"
 	EventRollingRestartCompleted = "RollingRestartCompleted"
 	EventRestartFailed           = "RestartFailed"
 	EventPodWarmRestarted        = "PodWarmRestarted"

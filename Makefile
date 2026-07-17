@@ -267,8 +267,12 @@ build: manifests generate fmt vet ## Build manager binary.
 	go build -ldflags "$(LDFLAGS)" -o bin/manager cmd/main.go
 
 .PHONY: run
+# --leader-elect=false: the binary defaults to leader election ON (in-cluster
+# safety), but out-of-cluster runs have no namespace to host the election
+# Lease, so local dev must opt out. Do not run two local instances against the
+# same cluster — without leader election they will reconcile concurrently.
 run: manifests generate fmt vet ## Run a controller from your host.
-	go run -ldflags "$(LDFLAGS)" ./cmd/main.go
+	go run -ldflags "$(LDFLAGS)" ./cmd/main.go --leader-elect=false
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.

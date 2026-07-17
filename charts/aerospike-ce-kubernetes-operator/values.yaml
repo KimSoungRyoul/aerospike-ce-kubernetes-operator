@@ -871,6 +871,15 @@ ui:
       limits:
         cpu: 150m
         memory: 384Mi
+    # -- Web probes hit `/` because the Next.js standalone server exposes no
+    # dedicated health route today. `/` is a weak liveness signal (Next.js can
+    # return 200 for pages whose SSR errored), but it is the best endpoint
+    # available: do NOT point these at `/api/health` — the web container's
+    # proxy (proxy.js) forwards `/api/*` to the API backend, so that probe
+    # would measure API availability and restart healthy web pods whenever the
+    # API is down. A dedicated web health route (e.g. `/healthz` served by
+    # proxy.js itself) belongs in aerospike-cluster-manager; switch these
+    # paths over once it exists.
     livenessProbe:
       httpGet:
         path: /
@@ -885,6 +894,17 @@ ui:
       initialDelaySeconds: 5
       periodSeconds: 10
       timeoutSeconds: 5
+    # -- Gates liveness/readiness until the Next.js standalone server inside
+    # the proxy has come up (mirrors the api pod's startupProbe pattern:
+    # 5s x 30 failures = 150s budget), so slow cold starts are not killed by
+    # the liveness probe.
+    startupProbe:
+      httpGet:
+        path: /
+        port: web
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 30
 
     # =============================================================================
     # OIDC (web SPA — Authorization Code + PKCE)

@@ -124,7 +124,9 @@ in project-hub for `acko-realm.json`).
 {{- if not .Values.crds.install }}
 
 NOTE: CRD installation is disabled (crds.install=false).
-Ensure acko-crds is installed separately before creating AerospikeCluster resources:
+Ensure the aerospike-ce-kubernetes-operator-crds chart is installed separately
+(release name "acko-crds" below is just a suggestion) before creating
+AerospikeCluster resources:
   helm install acko-crds oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator-crds --version {{ .Chart.Version }}
 {{- end }}
 

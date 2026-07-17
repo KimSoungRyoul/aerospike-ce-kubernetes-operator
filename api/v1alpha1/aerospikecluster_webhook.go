@@ -951,8 +951,11 @@ func (v *AerospikeClusterValidator) validateNamespaceConfig(nsMap map[string]any
 
 	// Validate replication-factor: single-node clusters should use 1.
 	// Accept every integer type a decoder can plausibly produce (int, int32,
-	// int64, float64, json.Number); an unhandled type would otherwise silently
-	// skip the range check.
+	// int64, float64, json.Number). Any other type — most commonly a string
+	// from YAML quoting, e.g. replication-factor: "2" — is rejected explicitly:
+	// an unhandled type would otherwise silently skip the range check here
+	// while validateReplicationFactor reports the type error, leaving the two
+	// paths inconsistent.
 	if rf, ok := nsMap["replication-factor"]; ok {
 		switch v := rf.(type) {
 		case int:
@@ -972,9 +975,13 @@ func (v *AerospikeClusterValidator) validateNamespaceConfig(nsMap map[string]any
 				errors = append(errors, fmt.Sprintf("namespace[%d] %q: replication-factor must be between 1 and 4 (got %v)", index, nsName, v))
 			}
 		case json.Number:
-			if n, err := v.Int64(); err == nil && (n < 1 || n > 4) {
+			if n, err := v.Int64(); err != nil {
+				errors = append(errors, fmt.Sprintf("namespace[%d] %q: replication-factor must be an integer, got %s", index, nsName, v.String()))
+			} else if n < 1 || n > 4 {
 				errors = append(errors, fmt.Sprintf("namespace[%d] %q: replication-factor must be between 1 and 4 (got %s)", index, nsName, v.String()))
 			}
+		default:
+			errors = append(errors, fmt.Sprintf("namespace[%d] %q: replication-factor must be an integer, got %T (%v)", index, nsName, rf, rf))
 		}
 	}
 
