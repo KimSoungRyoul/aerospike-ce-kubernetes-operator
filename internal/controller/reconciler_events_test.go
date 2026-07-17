@@ -13,6 +13,7 @@ func TestEventConstants(t *testing.T) {
 	}{
 		// Rolling restart lifecycle
 		{"RollingRestartStarted", EventRollingRestartStarted, "RollingRestartStarted"},
+		{"RollingRestartDeferred", EventRollingRestartDeferred, "RollingRestartDeferred"},
 		{"RollingRestartCompleted", EventRollingRestartCompleted, "RollingRestartCompleted"},
 		{"RestartFailed", EventRestartFailed, "RestartFailed"},
 		{"PodWarmRestarted", EventPodWarmRestarted, "PodWarmRestarted"},
