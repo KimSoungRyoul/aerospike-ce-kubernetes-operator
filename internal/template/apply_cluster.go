@@ -17,7 +17,7 @@ limitations under the License.
 package template
 
 import (
-	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
+	ackov1alpha1 "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/api/v1alpha1"
 )
 
 // applyImage applies the template image default to the cluster.

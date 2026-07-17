@@ -1,4 +1,4 @@
-module github.com/ksr/aerospike-ce-kubernetes-operator
+module github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator
 
 go 1.25.3
 

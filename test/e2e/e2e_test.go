@@ -26,13 +26,13 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	corev1 "k8s.io/api/core/v1"
 	authv1 "k8s.io/api/authentication/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/ksr/aerospike-ce-kubernetes-operator/test/utils"
+	"github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/test/utils"
 )
 
 // namespace where the project is deployed in

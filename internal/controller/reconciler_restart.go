@@ -18,11 +18,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
-	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/metrics"
-	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/podutil"
-	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/storage"
-	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/utils"
+	ackov1alpha1 "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/api/v1alpha1"
+	"github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/internal/metrics"
+	"github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/internal/podutil"
+	"github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/internal/storage"
+	"github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/internal/utils"
 )
 
 // maxPodUnstableDuration is the threshold after which a pod stuck in a non-ready

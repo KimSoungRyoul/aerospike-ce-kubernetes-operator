@@ -227,7 +227,7 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 ##@ Build
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "unknown")
-LDFLAGS = -X github.com/ksr/aerospike-ce-kubernetes-operator/internal/version.Version=$(VERSION)
+LDFLAGS = -X github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/internal/version.Version=$(VERSION)
 
 # Cluster Manager image (single image; helm `ui.api` deployment)
 CLUSTER_MANAGER_API_IMG ?= ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-api

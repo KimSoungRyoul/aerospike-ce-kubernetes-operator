@@ -6,7 +6,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	v1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
+	v1alpha1 "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/api/v1alpha1"
 )
 
 func TestBuildVolumes_NilSpec(t *testing.T) {

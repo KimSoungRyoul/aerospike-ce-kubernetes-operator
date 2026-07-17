@@ -27,8 +27,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
-	"github.com/ksr/aerospike-ce-kubernetes-operator/test/utils"
+	ackov1alpha1 "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/api/v1alpha1"
+	"github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/test/utils"
 )
 
 // aerospikeNS, defaultTimeout, multiNodeTimeout are defined in helpers_test.go

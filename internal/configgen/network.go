@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	v1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
+	v1alpha1 "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/api/v1alpha1"
 )
 
 // generateNetworkSection generates the network stanza with mesh seeds injected

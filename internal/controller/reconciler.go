@@ -35,18 +35,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
-	ackoerrors "github.com/ksr/aerospike-ce-kubernetes-operator/internal/errors"
-	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/metrics"
-	aerotmpl "github.com/ksr/aerospike-ce-kubernetes-operator/internal/template"
-	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/utils"
+	ackov1alpha1 "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/api/v1alpha1"
+	ackoerrors "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/internal/errors"
+	"github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/internal/metrics"
+	aerotmpl "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/internal/template"
+	"github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/internal/utils"
 )
 
 // tracer is the OpenTelemetry tracer for the controller. It is bound to the
 // global (delegating) tracer provider, so its spans become real once
 // telemetry.Setup installs the SDK provider and stay NoOp — at near-zero
 // cost — when telemetry is disabled.
-var tracer = otel.Tracer("github.com/ksr/aerospike-ce-kubernetes-operator/internal/controller")
+var tracer = otel.Tracer("github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/internal/controller")
 
 // endSpan records err on span when it is non-nil, then ends the span. It is
 // designed for `defer endSpan(span, &retErr)` with a named error return so the

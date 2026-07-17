@@ -8,9 +8,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 
-	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
-	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/podutil"
-	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/utils"
+	ackov1alpha1 "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/api/v1alpha1"
+	"github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/internal/podutil"
+	"github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/internal/utils"
 )
 
 const testImage = "aerospike:ce-8.1.1.1"

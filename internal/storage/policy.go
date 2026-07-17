@@ -3,7 +3,7 @@ package storage
 import (
 	corev1 "k8s.io/api/core/v1"
 
-	v1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
+	v1alpha1 "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/api/v1alpha1"
 )
 
 // ResolveInitMethod returns the effective init method for a volume.

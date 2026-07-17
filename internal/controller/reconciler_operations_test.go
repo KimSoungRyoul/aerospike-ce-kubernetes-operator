@@ -11,9 +11,9 @@ import (
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	ackov1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
-	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/podutil"
-	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/utils"
+	ackov1alpha1 "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/api/v1alpha1"
+	"github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/internal/podutil"
+	"github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/internal/utils"
 )
 
 // TestReconcileOperations_ExplicitPodListNoMatch_GoesToError is the regression

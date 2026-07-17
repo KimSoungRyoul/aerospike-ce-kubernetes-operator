@@ -1,7 +1,7 @@
 package utils
 
 import (
-	v1alpha1 "github.com/ksr/aerospike-ce-kubernetes-operator/api/v1alpha1"
+	v1alpha1 "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/api/v1alpha1"
 )
 
 // FindAdminUser returns the first user that has both "sys-admin" and "user-admin"

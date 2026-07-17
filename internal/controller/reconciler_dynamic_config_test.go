@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/internal/configdiff"
 	"github.com/go-logr/logr"
-	"github.com/ksr/aerospike-ce-kubernetes-operator/internal/configdiff"
 )
 
 // --- buildSetConfigCommand tests ---
