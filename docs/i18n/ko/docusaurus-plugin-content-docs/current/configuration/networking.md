@@ -5,22 +5,22 @@ title: 네트워킹
 
 # 네트워킹
 
-이 가이드에서는 오퍼레이터의 네트워킹 기능을 다룹니다: Aerospike 네트워크 접근 정책, 자동 Kubernetes NetworkPolicy 생성, CNI 대역폭 쉐이핑, LoadBalancer를 통한 외부 시드 디스커버리, 커스텀 서비스 메타데이터.
+Aerospike 노드가 광고할 주소, 트래픽 제한, CNI 대역폭, 외부 seed 노출 방식, 오퍼레이터 관리 Service의 metadata를 설정합니다.
 
 ## AerospikeNetworkPolicy
 
-`spec.aerospikeNetworkPolicy`는 Aerospike가 클라이언트 및 피어 노드에 자신의 주소를 어떻게 알리는지를 제어합니다. 클라이언트가 Kubernetes 클러스터 외부에서 접속하는 하이브리드 환경에서 중요합니다.
+`spec.aerospikeNetworkPolicy`는 Aerospike가 클라이언트와 peer node에 어떤 주소를 광고할지 정합니다. Kubernetes 클러스터 외부에서 접속하는 클라이언트가 있다면 이 값을 명시하세요.
 
 ### 접근 타입
 
-각 필드는 다음 네 가지 값 중 하나를 허용합니다:
+각 필드에는 다음 네 값 중 하나를 지정할 수 있습니다.
 
 | 값 | 설명 |
 |---|---|
-| `pod` | Pod IP를 사용합니다 (기본값). 클러스터 내부 클라이언트에 적합합니다. |
-| `hostInternal` | Kubernetes 노드의 내부 IP를 사용합니다. 동일 사설 네트워크의 클라이언트용입니다. |
-| `hostExternal` | Kubernetes 노드의 외부 IP를 사용합니다. 클라우드 VPC 외부의 클라이언트용입니다. |
-| `configuredIP` | 파드 어노테이션에서 커스텀 IP를 사용합니다. 고급 멀티 네트워크 구성(예: Multus)용입니다. |
+| `pod` | 클러스터 내부 클라이언트에 Pod IP를 광고합니다(기본값). |
+| `hostInternal` | 같은 사설 네트워크의 클라이언트에 Kubernetes 노드 내부 IP를 광고합니다. |
+| `hostExternal` | cloud VPC 외부의 클라이언트에 Kubernetes 노드 외부 IP를 광고합니다. |
+| `configuredIP` | Multus 같은 다중 네트워크 환경에서 Pod annotation의 custom IP를 광고합니다. |
 
 ### 필드
 

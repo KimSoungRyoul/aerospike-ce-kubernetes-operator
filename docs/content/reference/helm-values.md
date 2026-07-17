@@ -5,7 +5,7 @@ title: Helm Values Reference
 
 # Helm Values Reference
 
-This page documents all configurable values for the `aerospike-ce-kubernetes-operator` Helm chart.
+Use these values to configure the `aerospike-ce-kubernetes-operator` Helm chart.
 
 ## Aerospike Images
 

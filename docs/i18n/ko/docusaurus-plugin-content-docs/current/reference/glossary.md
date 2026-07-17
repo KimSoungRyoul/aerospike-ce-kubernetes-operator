@@ -5,13 +5,13 @@ title: 용어 사전
 
 # 용어 사전
 
-Aerospike, Kubernetes, ACKO에서 특정 의미를 갖거나 혼동하기 쉬운 용어들을 정리합니다.
+Aerospike, Kubernetes, ACKO에서 서로 다른 의미로 쓰이는 용어를 이 표에서 구분합니다.
 
 ## 오퍼레이터 & CRD 개념
 
 | 용어 | 정의 |
 |------|------|
-| **ACKO** | **A**eropike **C**ommunity Edition **K**ubernetes **O**perator. `acko.io` API 그룹을 통해 `AerospikeCluster`와 `AerospikeClusterTemplate` 리소스를 관리합니다. |
+| **ACKO** | **A**erospike **C**ommunity Edition **K**ubernetes **O**perator. `acko.io` API 그룹의 `AerospikeCluster`와 `AerospikeClusterTemplate` 리소스를 관리합니다. |
 | **AerospikeCluster** | Aerospike CE 클러스터 배포를 나타내는 주요 Custom Resource (CRD Kind). `apiVersion: acko.io/v1alpha1`. 단축 이름: `asc`. |
 | **AerospikeClusterTemplate** | 클러스터를 위한 재사용 가능한 설정 프로필을 제공하는 CRD. `spec.templateRef`로 참조합니다. 단축 이름: `asct`. |
 | **Rack** | Aerospike 클러스터 내의 논리적 장애 도메인. ACKO에서 각 랙은 하나의 StatefulSet과 하나의 ConfigMap (`<clusterName>-<rackID>` 패턴)에 매핑됩니다. Rack ID는 사용자가 지정하는 양의 정수이며, ID 0은 내부적으로 예약되어 있습니다. |

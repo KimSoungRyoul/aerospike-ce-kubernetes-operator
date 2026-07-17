@@ -5,13 +5,13 @@ title: Storage Configuration
 
 # Storage Configuration
 
-Aerospike clusters use persistent storage for namespace data, secondary indexes, and logs. The `spec.storage` field controls how volumes are provisioned, initialized, and cleaned up.
+Use `spec.storage` to provision, initialize, and clean up volumes for namespace data, secondary indexes, and logs.
 
 ---
 
 ## Global Volume Policies
 
-Global policies apply to all volumes unless overridden at the individual volume level.
+Global policies apply to every volume unless that volume overrides them.
 
 ### filesystemVolumePolicy
 
@@ -31,7 +31,7 @@ Same fields as `filesystemVolumePolicy`. The recommended `initMethod` for block 
 
 ### cleanupThreads
 
-Controls the maximum number of concurrent threads used during volume initialization (`initMethod`) and wipe (`wipeMethod`) operations. Higher values speed up volume preparation at the cost of increased I/O load.
+`cleanupThreads` limits concurrent volume initialization (`initMethod`) and wipe (`wipeMethod`) work. Higher values prepare volumes faster but increase I/O load.
 
 | Value | Behavior |
 |-------|----------|
@@ -198,7 +198,7 @@ volumes:
 
 ## Complete Example
 
-The following example (`config/samples/aerospike-cluster-storage-advanced.yaml`) demonstrates all volume types and policy options in a single cluster:
+`config/samples/aerospike-cluster-storage-advanced.yaml` combines every volume type and policy option in one cluster:
 
 ```yaml
 apiVersion: acko.io/v1alpha1

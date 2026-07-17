@@ -8,9 +8,9 @@ import TabItem from '@theme/TabItem';
 
 # ackoctl — 커맨드라인 인터페이스
 
-[ackoctl](https://github.com/aerospike-ce-ecosystem/ackoctl)은 [클러스터 매니저 UI](./cluster-manager-ui.md)의 CLI 대응 도구입니다. 둘 다 동일한 `aerospike-cluster-manager` REST API(`/api/v1/*`)를 호출합니다 — UI에서 가능한 모든 작업을 터미널이나 CI 파이프라인에서도 수행할 수 있습니다.
+[ackoctl](https://github.com/aerospike-ce-ecosystem/ackoctl)을 사용하면 [Cluster Manager UI](./cluster-manager-ui.md)의 작업을 terminal이나 CI에서 실행할 수 있습니다. 두 도구 모두 `/api/v1/*`의 `aerospike-cluster-manager` REST API를 호출합니다.
 
-Go로 작성되었으며 `kubectl` / `gh` 스타일의 명령 문법(`ackoctl <noun> <verb>`)을 따릅니다. Kubernetes나 Aerospike에 직접 접근하지 않고, 항상 cluster-manager의 UI Deployment를 통해 동작합니다.
+Go로 작성된 이 CLI는 `kubectl`과 `gh`처럼 `ackoctl <noun> <verb>` 형식으로 명령을 구성합니다. Kubernetes나 Aerospike에 직접 연결하지 않고 cluster-manager API Deployment에 연결합니다.
 
 ---
 

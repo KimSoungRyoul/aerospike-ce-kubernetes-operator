@@ -12,9 +12,9 @@
 
 # Aerospike CE Kubernetes Operator (ACKO)
 
-Kubernetes Operator for managing [Aerospike Community Edition](https://aerospike.com/) clusters. Built with [Kubebuilder](https://book.kubebuilder.io/) and [controller-runtime](https://github.com/kubernetes-sigs/controller-runtime).
+ACKO manages [Aerospike Community Edition](https://aerospike.com/) clusters on Kubernetes through the `AerospikeCluster` CRD. Use it to deploy, scale, configure, and roll out updates declaratively.
 
-Deploy, scale, and perform rolling updates of Aerospike CE clusters via a custom `AerospikeCluster` CRD.
+The operator is built with [Kubebuilder](https://book.kubebuilder.io/) and [controller-runtime](https://github.com/kubernetes-sigs/controller-runtime).
 
 ## Features
 
@@ -26,7 +26,7 @@ Deploy, scale, and perform rolling updates of Aerospike CE clusters via a custom
 - Pod Disruption Budget for safe maintenance
 - Mesh heartbeat auto-configuration
 - Rack-node selection with zone/region affinity and rackLabel scheduling
-- Optional web UI (Aerospike Cluster Manager) deployable via Helm (enabled by default; toggled via `ui.api.enabled` / `ui.web.enabled`)
+- Optional Aerospike Cluster Manager web UI, installed by Helm by default and controlled with `ui.api.enabled` and `ui.web.enabled`
 
 ### CE Limitations
 

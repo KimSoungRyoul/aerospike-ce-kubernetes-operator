@@ -5,7 +5,7 @@ title: AerospikeClusterTemplate
 
 # 템플릿 관리
 
-`AerospikeClusterTemplate` CRD를 사용하면 조직 전체에서 재사용 가능한 Aerospike 클러스터 설정 프로필을 정의할 수 있습니다. 이 가이드에서는 템플릿의 전체 라이프사이클(생성, 사용, 오버라이드, 동기화 동작, 모범 사례)을 다룹니다.
+`AerospikeClusterTemplate` CRD로 조직 전체에서 공유할 Aerospike 클러스터 기본값을 정의합니다. 여기서는 템플릿 생성, 적용, override, resync 방법을 설명합니다.
 
 CRD 필드 레퍼런스는 [AerospikeClusterTemplate API Reference](../reference/api-reference/aerospikeclustertemplate.md)를 참조하세요.
 
@@ -13,12 +13,12 @@ CRD 필드 레퍼런스는 [AerospikeClusterTemplate API Reference](../reference
 
 ## 템플릿 동작 원리
 
-템플릿은 **스냅샷 모델**을 따릅니다:
+템플릿은 **snapshot model**로 동작합니다.
 
-1. 공유 기본값(이미지, 크기, 리소스, 스케줄링, 스토리지, 모니터링, 네트워크 정책, Aerospike 설정)을 포함하는 `AerospikeClusterTemplate`을 생성합니다.
-2. `AerospikeCluster`에서 `spec.templateRef.name`으로 템플릿을 참조합니다.
-3. 클러스터 생성 시 오퍼레이터가 템플릿을 해석하고 전체 스펙을 `status.templateSnapshot`에 저장합니다.
-4. 이후 클러스터는 독립적으로 운영됩니다. 템플릿 변경은 **자동으로 전파되지 않습니다**.
+1. 이미지, 크기, 리소스, 스케줄링, 스토리지, 모니터링, network policy, Aerospike 설정 등 공유 기본값을 담은 `AerospikeClusterTemplate`을 만듭니다.
+2. `AerospikeCluster`의 `spec.templateRef.name`에서 템플릿을 참조합니다.
+3. 클러스터를 만들 때 오퍼레이터가 템플릿을 해석하고 결과 스펙을 `status.templateSnapshot`에 저장합니다.
+4. 그 뒤 클러스터는 독립적으로 동작합니다. 이후 템플릿 변경은 **자동으로 전파되지 않습니다**.
 
 ```
 ┌─────────────────────┐       templateRef        ┌─────────────────────┐

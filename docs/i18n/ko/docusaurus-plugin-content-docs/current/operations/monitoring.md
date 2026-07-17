@@ -5,7 +5,7 @@ title: 모니터링
 
 # 모니터링
 
-이 가이드에서는 클러스터별 Prometheus 모니터링 설정을 다룹니다: exporter 사이드카, ServiceMonitor, 기본 및 커스텀 알림 규칙이 포함된 PrometheusRule, 메트릭 라벨.
+Exporter sidecar, `ServiceMonitor`, `PrometheusRule`, custom metric label을 사용해 클러스터별 Prometheus 모니터링을 활성화합니다.
 
 **오퍼레이터 수준**의 모니터링(오퍼레이터 자체를 위한 ServiceMonitor, PrometheusRule, Grafana 대시보드)은 [설치 — 모니터링](../getting-started/install.md#모니터링-선택사항) 섹션을 참조하세요.
 
@@ -21,10 +21,11 @@ spec:
     enabled: true
 ```
 
-오퍼레이터는 자동으로:
-1. StatefulSet Pod 템플릿에 exporter 컨테이너를 추가합니다
-2. 각 Pod에서 메트릭 포트를 노출합니다
-3. Aerospike 네트워크 네임스페이스를 공유하여 exporter가 `localhost:3000`을 스크레이핑할 수 있도록 합니다
+오퍼레이터는 다음 작업을 자동으로 수행합니다.
+
+1. StatefulSet Pod template에 exporter container를 추가합니다.
+2. 각 Pod에 metric port를 노출합니다.
+3. Aerospike network namespace를 공유해 exporter가 `localhost:3000`을 scrape하도록 합니다.
 
 ### Exporter 설정
 

@@ -1,6 +1,6 @@
 # Multi-Cluster Topology with Keycloak OIDC
 
-This guide describes how to install ACKO in a **multi-cluster topology**: one **common cluster** that hosts only the web UI (cluster-manager SPA) and one or more **operator clusters** (typically `dev` and `prod`) that each run the API + operator and manage their own local Aerospike clusters. Authentication is delegated to an **external Keycloak realm**, and FastAPI verifies access tokens natively via JWKS.
+Deploy ACKO across multiple Kubernetes clusters when each environment must manage its own Aerospike clusters. A **common cluster** hosts only the cluster-manager SPA, while one or more **operator clusters** (typically `dev` and `prod`) run the API and operator for their local Aerospike clusters. An **external Keycloak realm** authenticates users, and FastAPI verifies access tokens through JWKS.
 
 This is the production topology behind ADR-0040.
 
@@ -316,7 +316,7 @@ Long-term, this exposure is tracked as a follow-up ADR (per-stream signed nonce 
 
 ## Open Items (Future Work)
 
-This guide covers stage 1 only. The following items are tracked in ADR-0040 as future work:
+This deployment covers stage 1 only. ADR-0040 tracks these later stages:
 
 - **Defense in depth via ingress oauth2-proxy / Keycloak gatekeeper** — currently FastAPI does the JWT verification by itself; an ingress-level proxy can be added in front later without breaking this flow.
 - **Realm/client provisioning automation** — Terraform Keycloak provider HCL above is the recommended starting point.

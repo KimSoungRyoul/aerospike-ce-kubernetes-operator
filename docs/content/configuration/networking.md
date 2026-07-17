@@ -5,22 +5,22 @@ title: Networking
 
 # Networking
 
-This guide covers the operator's networking features: Aerospike network access policies, automatic Kubernetes NetworkPolicy generation, CNI bandwidth shaping, external seed discovery via LoadBalancer, and custom service metadata.
+Configure how Aerospike nodes advertise addresses, restrict traffic, shape bandwidth, expose external seeds, and label operator-managed services.
 
 ## AerospikeNetworkPolicy
 
-`spec.aerospikeNetworkPolicy` controls how Aerospike advertises its addresses to clients and peer nodes. This is critical for hybrid environments where clients connect from outside the Kubernetes cluster.
+`spec.aerospikeNetworkPolicy` controls which addresses Aerospike advertises to clients and peer nodes. Set it explicitly when clients connect from outside the Kubernetes cluster.
 
 ### Access Types
 
-Each field accepts one of four values:
+Each field accepts one of these four values:
 
 | Value | Description |
 |---|---|
-| `pod` | Use the Pod IP (default). Best for in-cluster clients. |
-| `hostInternal` | Use the Kubernetes node's internal IP. For clients on the same private network. |
-| `hostExternal` | Use the Kubernetes node's external IP. For clients outside the cloud VPC. |
-| `configuredIP` | Use a custom IP from pod annotations. For advanced multi-network setups (e.g., Multus). |
+| `pod` | Advertise the Pod IP (default) to in-cluster clients. |
+| `hostInternal` | Advertise the Kubernetes node's internal IP to clients on the same private network. |
+| `hostExternal` | Advertise the Kubernetes node's external IP to clients outside the cloud VPC. |
+| `configuredIP` | Advertise a custom IP from pod annotations for multi-network setups such as Multus. |
 
 ### Fields
 
@@ -203,7 +203,7 @@ spec:
 
 ## HeadlessService
 
-`spec.headlessService` allows you to attach custom annotations and labels to the headless service that the operator creates for each cluster. The headless service (named `<cluster-name>-headless`) enables DNS-based pod discovery and is always created.
+Use `spec.headlessService` to add custom annotations and labels to the headless service for a cluster. The operator always creates this service as `<cluster-name>-headless` for DNS-based pod discovery.
 
 ### Example
 

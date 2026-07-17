@@ -8,17 +8,17 @@ import TabItem from '@theme/TabItem';
 
 # 설치
 
-이 가이드는 ACKO 오퍼레이터를 설치하는 두 가지 방법을 다룹니다.
+Helm OCI 차트 또는 local chart checkout에서 ACKO를 설치합니다.
 
 ## 사전 준비
 
 - Kubernetes 클러스터 v1.26+
-- 클러스터에 접근 가능하도록 설정된 kubectl
-- [cert-manager](https://cert-manager.io/) 설치 완료 (웹훅 TLS에 필요)
+- 대상 클러스터에 연결하도록 설정한 `kubectl`
+- webhook TLS를 위한 [cert-manager](https://cert-manager.io/)
 
 ### cert-manager
 
-cert-manager는 웹훅 TLS에 필요합니다. 오퍼레이터 설치 전에 먼저 설치하세요:
+Admission webhook이 TLS를 사용할 수 있도록 ACKO보다 cert-manager를 먼저 설치합니다.
 
 ```bash
 helm repo add jetstack https://charts.jetstack.io
@@ -29,7 +29,7 @@ helm install cert-manager jetstack/cert-manager \
   --set crds.enabled=true
 ```
 
-cert-manager 준비 대기:
+cert-manager가 준비될 때까지 기다립니다.
 
 ```bash
 kubectl -n cert-manager wait --for=condition=Available deployment/cert-manager --timeout=60s
@@ -50,7 +50,7 @@ helm install aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosyst
 
 ### Helm 값 커스터마이징
 
-기본값을 재정의할 수 있습니다:
+필요하면 기본값을 재정의합니다.
 
 ```bash
 helm install aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
@@ -70,7 +70,7 @@ helm show values oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubern
 제한된(restricted) / 멀티테넌트 클러스터에서는 권한이 높은 **클러스터 범위(cluster-scoped)** 리소스 — 오퍼레이터의 `ClusterRole`/`ClusterRoleBinding`("cluster admin" 권한) — 를 플랫폼 팀이 네임스페이스 범위 워크로드 및 CRD(GitOps로 관리될 수 있음)와 분리해 설치하는 경우가 많습니다. `rbac.create` 값이 이 분리를 지원합니다.
 
 - `rbac.create`의 기본값은 `null`이며, 이는 **`operator.enabled`를 따라갑니다** — 따라서 기존 설치는 영향을 받지 않습니다.
-- 명시적으로 설정하면 클러스터 범위 RBAC를 오퍼레이터 워크로드에서 분리할 수 있습니다.
+- 값을 명시하면 클러스터 범위 RBAC와 오퍼레이터 워크로드를 분리할 수 있습니다.
 
 ```bash
 # Step 1 (cluster-admin, 한 번만): 클러스터 범위 RBAC만 설치.
@@ -91,7 +91,7 @@ helm upgrade aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosyst
   --set crds.install=false
 ```
 
-차트 소스에서 설치할 경우, 준비된 프리셋 `values-cluster-admin.yaml`이 Step 1 오버라이드를 묶어 제공합니다.
+차트 소스에서 설치한다면 `values-cluster-admin.yaml` preset에 Step 1의 override가 모두 들어 있습니다.
 
 ```bash
 helm install aerospike-ce-kubernetes-operator ./charts/aerospike-ce-kubernetes-operator \
@@ -104,7 +104,7 @@ Step 1은 manager + metrics `ClusterRole`/`ClusterRoleBinding`**만** 렌더링�
 </TabItem>
 <TabItem value="helm-gitops" label="Helm + GitOps (ArgoCD / Flux)">
 
-GitOps 환경에서는 오퍼레이터 라이프사이클과 독립적으로 관리할 수 있도록 CRD를 별도로 설치합니다.
+GitOps 환경에서는 CRD와 오퍼레이터 라이프사이클을 독립적으로 관리하도록 CRD를 따로 설치합니다.
 
 **Step 1: 클러스터당 한 번 CRD 설치**
 
@@ -259,7 +259,7 @@ helm install aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosyst
 ```
 
 :::tip
-`additionalLabels.release=prometheus` 라벨은 Prometheus Operator의 `serviceMonitorSelector`와 일치해야 합니다. 다음 명령으로 확인할 수 있습니다:
+`additionalLabels.release=prometheus` label은 Prometheus Operator의 `serviceMonitorSelector`와 일치해야 합니다. 다음 명령으로 값을 확인합니다.
 ```bash
 kubectl get prometheus -A -o jsonpath='{.items[*].spec.serviceMonitorSelector}'
 ```
@@ -358,7 +358,7 @@ helm install grafana grafana/grafana \
 ```
 
 :::info
-`sidecar.dashboards.searchNamespace=ALL`을 설정하면 sidecar가 `aerospike-operator` 네임스페이스를 포함한 **모든 네임스페이스**에서 대시보드 ConfigMap을 발견할 수 있습니다. 이 설정이 없으면 sidecar는 자신이 속한 네임스페이스만 감시합니다.
+`sidecar.dashboards.searchNamespace=ALL`을 설정하면 sidecar가 `aerospike-operator`를 포함한 **모든 네임스페이스**에서 dashboard ConfigMap을 찾습니다. 설정하지 않으면 sidecar는 자신이 속한 네임스페이스만 감시합니다.
 :::
 
 **3. 대시보드를 활성화하여 오퍼레이터 설치 (또는 업그레이드):**
@@ -410,20 +410,20 @@ helm install aerospike-ce-kubernetes-operator oci://ghcr.io/aerospike-ce-ecosyst
 
 ## Cluster Manager UI (선택사항)
 
-[Aerospike Cluster Manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager)는 Aerospike CE 클러스터를 관리하기 위한 웹 기반 GUI입니다 -- 레코드 탐색, 쿼리 빌더, 인덱스 관리, K8s 클러스터 라이프사이클 등을 제공합니다.
+[Aerospike Cluster Manager](https://github.com/aerospike-ce-ecosystem/aerospike-cluster-manager)는 Aerospike CE를 관리하는 웹 UI입니다. 레코드 탐색, 쿼리 빌더, 인덱스 관리, K8s 클러스터 라이프사이클 작업을 지원합니다.
 
 ### 오퍼레이터와 클러스터 매니저의 관계
 
 Aerospike CE Kubernetes Operator와 Aerospike Cluster Manager는 함께 동작하는 두 개의 별도 컴포넌트입니다:
 
-- **오퍼레이터** (`aerospike-ce-kubernetes-operator`): `AerospikeCluster`와 `AerospikeClusterTemplate` 커스텀 리소스를 감시하고 원하는 상태를 조정하는 Kubernetes 컨트롤러입니다 -- StatefulSet, Service, ConfigMap을 생성하고 롤링 업데이트, 스케일링, 랙 관리를 수행합니다.
+- **오퍼레이터** (`aerospike-ce-kubernetes-operator`): `AerospikeCluster`와 `AerospikeClusterTemplate` custom resource를 감시하고 desired state를 조정하는 Kubernetes controller입니다. StatefulSet, Service, ConfigMap을 만들고 rolling update, scaling, 랙 관리를 처리합니다.
 - **클러스터 매니저** (`aerospike-cluster-manager`): Aerospike 클러스터(데이터 작업, 모니터링)와 Kubernetes API(CRD를 통한 클러스터 라이프사이클)를 모두 다루는 GUI를 제공하는 웹 애플리케이션(Next.js 프론트엔드 + FastAPI 백엔드)입니다.
 
 Helm 차트 0.4.0+에서는 클러스터 매니저가 기본으로 오퍼레이터와 동일한 네임스페이스에 별도 Deployment로 배포됩니다 (`ui.api.enabled` / `ui.web.enabled`로 개별 토글 가능). 클러스터 매니저는 다음과 통신합니다:
 1. **Aerospike 클러스터** — 데이터 작업(레코드 탐색, AQL, 인덱스 관리, UDF 관리)을 위해 Aerospike 와이어 프로토콜로 직접 통신
 2. **Kubernetes API** — 클러스터 라이프사이클 작업(`AerospikeCluster` CR의 생성, 스케일, 편집, 삭제)을 위해 통신하며, 이후 오퍼레이터가 조정
 
-오퍼레이터는 클러스터 매니저와 독립적으로 동작합니다 -- `kubectl`과 YAML 매니페스트만으로도 클러스터를 완전히 관리할 수 있습니다. 클러스터 매니저는 단순히 편리한 GUI 레이어를 제공합니다.
+오퍼레이터는 Cluster Manager와 독립적으로 동작합니다. `kubectl`과 YAML manifest만으로도 클러스터를 모두 관리할 수 있으며, Cluster Manager는 같은 작업을 위한 GUI를 제공합니다.
 
 ### UI 활성화
 
@@ -438,13 +438,13 @@ UI를 끄려면 `--set ui.api.enabled=false --set ui.web.enabled=false`.
 
 ### Port-Forward로 접근
 
-웹 프론트엔드는 3100 포트로 서비스됩니다.
+웹 frontend Service는 3100 포트를 노출합니다.
 
 ```bash
 kubectl -n aerospike-operator port-forward svc/aerospike-ce-kubernetes-operator-ui-web 3100:3100
 ```
 
-브라우저에서 [http://localhost:3100](http://localhost:3100)을 열면 UI에 접근할 수 있습니다.
+브라우저에서 [http://localhost:3100](http://localhost:3100)을 엽니다.
 
 :::tip
 웹 서비스 이름은 `<release>-aerospike-ce-kubernetes-operator-ui-web` 형식입니다. 릴리스 이름을 커스텀으로 지정한 경우 아래와 같이 조정하세요:

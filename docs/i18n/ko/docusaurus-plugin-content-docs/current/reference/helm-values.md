@@ -5,7 +5,7 @@ title: Helm Values 레퍼런스
 
 # Helm Values 레퍼런스
 
-이 페이지는 `aerospike-ce-kubernetes-operator` Helm 차트의 모든 설정 가능한 값을 문서화합니다.
+아래 값으로 `aerospike-ce-kubernetes-operator` Helm 차트를 설정합니다.
 
 ## CRD 관리
 

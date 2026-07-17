@@ -8,17 +8,17 @@ import TabItem from '@theme/TabItem';
 
 # Installation
 
-This guide covers two methods to install the ACKO operator.
+Install ACKO from the Helm OCI chart or from a local chart checkout.
 
 ## Prerequisites
 
 - Kubernetes cluster v1.26+
-- kubectl configured to access the cluster
-- [cert-manager](https://cert-manager.io/) installed (required for webhook TLS)
+- `kubectl` configured for the target cluster
+- [cert-manager](https://cert-manager.io/) for webhook TLS
 
 ### cert-manager
 
-cert-manager is required for webhook TLS. Install it before the operator:
+Install cert-manager before ACKO so the admission webhook can use TLS:
 
 ```bash
 helm repo add jetstack https://charts.jetstack.io
@@ -29,7 +29,7 @@ helm install cert-manager jetstack/cert-manager \
   --set crds.enabled=true
 ```
 
-Wait for cert-manager to be ready:
+Wait until cert-manager is ready:
 
 ```bash
 kubectl -n cert-manager wait --for=condition=Available deployment/cert-manager --timeout=60s

@@ -6,7 +6,7 @@ title: 빠른 시작
 
 # 빠른 시작
 
-로컬 Kind 클러스터에 Aerospike CE 클러스터와 클러스터 매니저 UI를 배포합니다.
+이 빠른 시작에서는 로컬 Kind 클러스터에 Aerospike CE와 Cluster Manager UI를 실행합니다.
 
 ## 사전 준비
 
