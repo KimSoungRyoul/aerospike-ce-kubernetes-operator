@@ -85,9 +85,17 @@ func run() error {
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
-	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
+	// Leader election defaults to true so that a bare in-cluster deployment
+	// (one that omits the flag) can never end up with two active managers
+	// reconciling — and racing pod deletions on — the same AerospikeCluster.
+	// The Helm chart and config/manager/manager.yaml pass --leader-elect
+	// explicitly; local out-of-cluster runs must pass --leader-elect=false
+	// (make run does) because there is no in-cluster namespace to host the
+	// election Lease.
+	flag.BoolVar(&enableLeaderElection, "leader-elect", true,
 		"Enable leader election for controller manager. "+
-			"Enabling this will ensure there is only one active controller manager.")
+			"Enabling this will ensure there is only one active controller manager. "+
+			"Set --leader-elect=false for local out-of-cluster runs (e.g. make run).")
 	flag.BoolVar(&secureMetrics, "metrics-secure", true,
 		"If set, the metrics endpoint is served securely via HTTPS. Use --metrics-secure=false to use HTTP instead.")
 	flag.StringVar(&webhookCertPath, "webhook-cert-path", "", "The directory that contains the webhook certificate.")

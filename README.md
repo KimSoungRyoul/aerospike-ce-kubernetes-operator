@@ -315,6 +315,15 @@ make lint           # Run golangci-lint
 make run            # Run controller locally against current kubeconfig
 ```
 
+> **Leader election**: the manager defaults to `--leader-elect=true` so an
+> in-cluster deployment that omits the flag can never end up with two active
+> managers reconciling the same `AerospikeCluster`. `make run` passes
+> `--leader-elect=false` because an out-of-cluster process has no in-cluster
+> namespace to host the election Lease. If you invoke `go run ./cmd/main.go`
+> directly, pass `--leader-elect=false` yourself — and never run two local
+> instances against the same cluster, since without leader election they
+> reconcile (and delete pods) concurrently.
+
 ### Local deployment with Kind
 
 When deploying to a Kind cluster after a local build:
