@@ -83,7 +83,8 @@ func (r *AerospikeClusterReconciler) getAerospikeClient(
 }
 
 // getAerospikeClientWithRetry wraps getAerospikeClient with retry logic using
-// exponential backoff (2s, 4s, 8s). This is useful during initial deployment
+// exponential backoff (2s, 4s, 8s) — up to 4 attempts in total (the initial
+// attempt plus maxRetries retries). This is useful during initial deployment
 // when DNS may not yet be resolving for the headless service.
 //
 // Permanent validation errors (e.g. a missing admin Secret or a Secret without
@@ -125,7 +126,8 @@ func (r *AerospikeClusterReconciler) getAerospikeClientWithRetry(
 		}
 	}
 
-	return nil, fmt.Errorf("failed after %d retries: %w", maxRetries, lastErr)
+	// maxRetries+1: the loop runs the initial attempt plus maxRetries retries.
+	return nil, fmt.Errorf("failed after %d attempts: %w", maxRetries+1, lastErr)
 }
 
 // closeAerospikeClient safely closes an Aerospike client.
