@@ -39,11 +39,16 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install the latest version of kind
-        run: |
-          curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-$(go env GOARCH)
-          chmod +x ./kind
-          sudo mv ./kind /usr/local/bin/kind
+      - name: Install kind
+        # Pinned install via helm/kind-action. The previous unpinned
+        # `curl https://kind.sigs.k8s.io/dl/latest/...` failed intermittently
+        # with `curl: (6) Could not resolve host: kind.sigs.k8s.io` on GitHub
+        # runners (#257). The action downloads the binary from GitHub
+        # releases, which is always resolvable from GitHub-hosted runners.
+        uses: helm/kind-action@v1
+        with:
+          version: v0.32.0
+          install_only: true
 
       - name: Verify kind installation
         run: kind version
