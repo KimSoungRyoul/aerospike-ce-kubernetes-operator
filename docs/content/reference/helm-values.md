@@ -338,7 +338,7 @@ The api and web Deployments have independent resource settings.
 
 ### Probes
 
-The api Deployment has liveness / readiness / startup probes; the web Deployment has liveness / readiness probes.
+Both the api and web Deployments have liveness / readiness / startup probes.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -357,7 +357,7 @@ The api Deployment has liveness / readiness / startup probes; the web Deployment
 | `ui.api.startupProbe.periodSeconds` | int | `5` | Check period. |
 | `ui.api.startupProbe.timeoutSeconds` | int | `3` | Timeout. |
 | `ui.api.startupProbe.failureThreshold` | int | `30` | Max failures before giving up (allows 150s startup). |
-| `ui.web.livenessProbe.httpGet.path` | string | `/` | Web liveness probe path. |
+| `ui.web.livenessProbe.httpGet.path` | string | `/` | Web liveness probe path. The web app exposes no dedicated health route yet; do not point this at `/api/health` — the web proxy forwards `/api/*` to the API backend, so that would measure the wrong component. |
 | `ui.web.livenessProbe.httpGet.port` | string | `web` | Web liveness probe port. |
 | `ui.web.livenessProbe.initialDelaySeconds` | int | `15` | Initial delay. |
 | `ui.web.livenessProbe.periodSeconds` | int | `20` | Check period. |
@@ -367,6 +367,11 @@ The api Deployment has liveness / readiness / startup probes; the web Deployment
 | `ui.web.readinessProbe.initialDelaySeconds` | int | `5` | Initial delay. |
 | `ui.web.readinessProbe.periodSeconds` | int | `10` | Check period. |
 | `ui.web.readinessProbe.timeoutSeconds` | int | `5` | Timeout. |
+| `ui.web.startupProbe.httpGet.path` | string | `/` | Web startup probe path. |
+| `ui.web.startupProbe.httpGet.port` | string | `web` | Web startup probe port. |
+| `ui.web.startupProbe.periodSeconds` | int | `5` | Check period. |
+| `ui.web.startupProbe.timeoutSeconds` | int | `3` | Timeout. |
+| `ui.web.startupProbe.failureThreshold` | int | `30` | Max failures before giving up (allows 150s startup). |
 
 ### Environment
 
