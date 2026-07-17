@@ -6,6 +6,7 @@ import {themes as prismThemes} from 'prism-react-renderer';
 const config = {
   title: 'ACKO',
   tagline: 'Aerospike CE Kubernetes Operator',
+  favicon: 'img/favicon.ico',
   url: process.env.DOCS_URL || 'https://aerospike-ce-ecosystem.github.io',
   baseUrl: '/aerospike-ce-kubernetes-operator/',
 
@@ -47,11 +48,15 @@ const config = {
   themeConfig:
     /** @type {import('@docusaurus/preset-classic').ThemeConfig} */
     ({
+      image: 'img/social-preview.png',
       colorMode: {
         respectPrefersColorScheme: true,
       },
       navbar: {
-        title: 'ACKO',
+        logo: {
+          alt: 'ACKO — Aerospike CE Kubernetes Operator',
+          src: 'img/logo.svg',
+        },
         items: [
           {
             type: 'docSidebar',

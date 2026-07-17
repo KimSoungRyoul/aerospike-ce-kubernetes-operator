@@ -1,3 +1,15 @@
+<p align="center">
+  <img src="docs/static/img/logo.svg" alt="ACKO — Aerospike CE Kubernetes Operator" width="500">
+</p>
+
+<p align="center">
+  <a href="https://github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator"><img alt="GitHub repository" src="https://img.shields.io/badge/GitHub-ACKO-0B1F33?style=flat-square&amp;logo=github&amp;logoColor=FFC72C"></a>
+  <a href="https://github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/actions/workflows/test.yml"><img alt="Tests" src="https://img.shields.io/github/actions/workflow/status/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/test.yml?branch=main&amp;style=flat-square&amp;logo=githubactions&amp;logoColor=FFC72C&amp;label=tests&amp;labelColor=0B1F33"></a>
+  <a href="https://go.dev/"><img alt="Go 1.25" src="https://img.shields.io/badge/Go-1.25-647283?style=flat-square&amp;logo=go&amp;logoColor=FFC72C&amp;labelColor=0B1F33"></a>
+  <a href="https://kubernetes.io/"><img alt="Kubernetes 1.26+" src="https://img.shields.io/badge/Kubernetes-1.26%2B-647283?style=flat-square&amp;logo=kubernetes&amp;logoColor=FFC72C&amp;labelColor=0B1F33"></a>
+  <a href="LICENSE"><img alt="Apache 2.0 license" src="https://img.shields.io/badge/License-Apache--2.0-647283?style=flat-square&amp;logo=apache&amp;logoColor=FFC72C&amp;labelColor=0B1F33"></a>
+</p>
+
 # Aerospike CE Kubernetes Operator (ACKO)
 
 Kubernetes Operator for managing [Aerospike Community Edition](https://aerospike.com/) clusters. Built with [Kubebuilder](https://book.kubebuilder.io/) and [controller-runtime](https://github.com/kubernetes-sigs/controller-runtime).

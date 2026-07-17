@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 256" role="img" aria-labelledby="title">
+  <title id="title">ACKO</title>
+  <style>.wordmark{fill:#0B1F33}@media(prefers-color-scheme:dark){.wordmark{fill:#FFFFFF}}</style>
+  <g transform="translate(16 16) scale(.875)">
+    <rect x="6" y="6" width="244" height="244" rx="52" fill="#FFC72C"/>
+    <path d="M54 190L100 66l46 124M75 135h49" fill="none" stroke="#0B1F33" stroke-width="19" stroke-linecap="square" stroke-linejoin="miter"/>
+    <path d="M146 66v124M146 129l58-58M146 129l58 58" fill="none" stroke="#0B1F33" stroke-width="19" stroke-linecap="square" stroke-linejoin="miter"/>
+    <rect x="194" y="61" width="20" height="20" fill="#FFFFFF"/>
+    <rect x="194" y="177" width="20" height="20" fill="#FFFFFF"/>
+    <rect x="136" y="119" width="20" height="20" fill="#FFFFFF"/>
+  </g>
+  <text class="wordmark" x="286" y="165" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="108" font-weight="850" letter-spacing="5">ACKO</text>
+</svg>

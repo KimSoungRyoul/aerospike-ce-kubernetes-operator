@@ -1,22 +1,157 @@
 :root {
-  --ifm-color-primary: #c41e3a;
-  --ifm-color-primary-dark: #b01b34;
-  --ifm-color-primary-darker: #a61a32;
-  --ifm-color-primary-darkest: #891529;
-  --ifm-color-primary-light: #d42140;
-  --ifm-color-primary-lighter: #d62d4a;
-  --ifm-color-primary-lightest: #dc4d65;
+  --acko-navy: #0b1f33;
+  --acko-yellow: #ffc72c;
+  --acko-white: #ffffff;
+  --acko-muted: #647283;
+  --ifm-color-primary: #0b1f33;
+  --ifm-color-primary-dark: #081728;
+  --ifm-color-primary-darker: #071522;
+  --ifm-color-primary-darkest: #050f19;
+  --ifm-color-primary-light: #19334d;
+  --ifm-color-primary-lighter: #25435f;
+  --ifm-color-primary-lightest: #dce5ed;
+  --ifm-link-color: #153f68;
+  --ifm-navbar-link-color: #0b1f33;
+  --ifm-heading-color: #0b1f33;
   --ifm-code-font-size: 95%;
-  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+  --ifm-code-background: #eef2f5;
+  --docusaurus-highlighted-code-line-bg: rgba(255, 199, 44, 0.24);
 }
 
 [data-theme='dark'] {
-  --ifm-color-primary: #e05a73;
-  --ifm-color-primary-dark: #dc3f5c;
-  --ifm-color-primary-darker: #da324f;
-  --ifm-color-primary-darkest: #bf1e3c;
-  --ifm-color-primary-light: #e4758a;
-  --ifm-color-primary-lighter: #e68297;
-  --ifm-color-primary-lightest: #ecaab7;
-  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+  --ifm-color-primary: #ffc72c;
+  --ifm-color-primary-dark: #f2b900;
+  --ifm-color-primary-darker: #e3aa00;
+  --ifm-color-primary-darkest: #bb8c00;
+  --ifm-color-primary-light: #ffd45d;
+  --ifm-color-primary-lighter: #ffdf82;
+  --ifm-color-primary-lightest: #fff0bd;
+  --ifm-background-color: #081522;
+  --ifm-background-surface-color: #0b1f33;
+  --ifm-navbar-background-color: #0b1f33;
+  --ifm-footer-background-color: #07121d;
+  --ifm-link-color: #ffd45d;
+  --ifm-navbar-link-color: #ffffff;
+  --ifm-heading-color: #ffffff;
+  --ifm-code-background: #132c44;
+  --docusaurus-highlighted-code-line-bg: rgba(255, 199, 44, 0.2);
+}
+
+/* The yellow rail mirrors the A/K cluster-node mark without adding a second motif. */
+.navbar {
+  border-bottom: 3px solid var(--acko-yellow);
+  box-shadow: 0 4px 18px rgba(11, 31, 51, 0.08);
+}
+
+.navbar__brand {
+  margin-right: 1.6rem;
+}
+
+.navbar__logo {
+  height: 2.15rem;
+}
+
+.navbar__link {
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.navbar__link:hover,
+.navbar__link--active {
+  color: #9a6d00;
+}
+
+[data-theme='dark'] .navbar__link:hover,
+[data-theme='dark'] .navbar__link--active {
+  color: var(--acko-yellow);
+}
+
+.theme-doc-markdown > h1:first-child {
+  margin-bottom: 1.35rem;
+  padding: 1.1rem 1.35rem;
+  border-left: 7px solid var(--acko-yellow);
+  border-radius: 0 12px 12px 0;
+  background: linear-gradient(90deg, rgba(11, 31, 51, 0.08), rgba(11, 31, 51, 0));
+  letter-spacing: -0.025em;
+}
+
+[data-theme='dark'] .theme-doc-markdown > h1:first-child {
+  background: linear-gradient(90deg, rgba(255, 199, 44, 0.12), rgba(255, 199, 44, 0));
+}
+
+.theme-doc-markdown a:not(.button),
+.table-of-contents__link,
+.menu__link {
+  text-underline-offset: 0.18em;
+  text-decoration-thickness: 0.08em;
+}
+
+.theme-doc-markdown a:not(.button):hover {
+  text-decoration: underline;
+}
+
+.button--primary {
+  border-color: var(--acko-yellow);
+  background: var(--acko-yellow);
+  color: var(--acko-navy);
+  font-weight: 800;
+}
+
+.button--primary:hover,
+.button--primary:active {
+  border-color: #e3aa00;
+  background: #e3aa00;
+  color: var(--acko-navy);
+}
+
+code {
+  border: 1px solid rgba(100, 114, 131, 0.28);
+  color: var(--acko-navy);
+}
+
+[data-theme='dark'] code {
+  border-color: rgba(255, 199, 44, 0.2);
+  color: var(--acko-white);
+}
+
+.theme-code-block,
+pre code {
+  border-left-color: var(--acko-yellow);
+}
+
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 3px solid var(--acko-yellow);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+[data-theme='dark'] :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline-color: var(--acko-white);
+}
+
+@media (max-width: 576px) {
+  .navbar__brand {
+    margin-right: 0.65rem;
+  }
+
+  .navbar__logo {
+    height: 1.8rem;
+    max-width: 9.75rem;
+  }
+
+  .theme-doc-markdown > h1:first-child {
+    padding: 0.85rem 1rem;
+    font-size: 2rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
