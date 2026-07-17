@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"slices"
@@ -3599,6 +3600,86 @@ func TestValidate_ReplicationFactorStringType(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "got 0") {
 		t.Errorf("error should not report the misleading 'got 0' for a string value, got: %v", err)
+	}
+}
+
+// TestValidateNamespaceConfig_ReplicationFactorStringType verifies the
+// per-namespace CE validation path (validateNamespaceConfig) rejects a
+// string-typed replication-factor explicitly instead of silently skipping the
+// range check, and that the message is consistent with the
+// validateReplicationFactor path ("must be an integer, got string").
+func TestValidateNamespaceConfig_ReplicationFactorStringType(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	nsMap := map[string]any{
+		"name":               "test",
+		"replication-factor": "2",
+	}
+
+	errs, _ := v.validateNamespaceConfig(nsMap, 0)
+	if len(errs) == 0 {
+		t.Fatal("expected error when replication-factor is a string")
+	}
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e, "replication-factor must be an integer, got string") {
+			found = true
+		}
+		if strings.Contains(e, "got 0") {
+			t.Errorf("error should not report the misleading 'got 0' for a string value, got: %v", e)
+		}
+	}
+	if !found {
+		t.Errorf("expected 'replication-factor must be an integer, got string' error, got: %v", errs)
+	}
+}
+
+// TestValidateNamespaceConfig_ReplicationFactorNonIntegerJSONNumber verifies
+// that a json.Number that cannot be parsed as an integer is rejected instead
+// of silently passing the range check.
+func TestValidateNamespaceConfig_ReplicationFactorNonIntegerJSONNumber(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	nsMap := map[string]any{
+		"name":               "test",
+		"replication-factor": json.Number("2.5"),
+	}
+
+	errs, _ := v.validateNamespaceConfig(nsMap, 0)
+	if len(errs) == 0 {
+		t.Fatal("expected error when replication-factor is a non-integer json.Number")
+	}
+	if !strings.Contains(errs[0], "replication-factor must be an integer, got 2.5") {
+		t.Errorf("expected 'replication-factor must be an integer, got 2.5' error, got: %v", errs)
+	}
+}
+
+// TestValidateReplicationFactor_StringType exercises the cross-check path
+// (validateReplicationFactor) directly with a string-typed value to pin the
+// "must be an integer, got string" message emitted by its default case.
+func TestValidateReplicationFactor_StringType(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeConfig: &AerospikeConfigSpec{
+				Value: map[string]any{
+					"namespaces": []any{
+						map[string]any{
+							"name":               "test",
+							"replication-factor": "2",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	errs := v.validateReplicationFactor(cluster)
+	if len(errs) == 0 {
+		t.Fatal("expected error when replication-factor is a string")
+	}
+	if !strings.Contains(errs[0], "replication-factor must be an integer, got string") {
+		t.Errorf("expected 'replication-factor must be an integer, got string' error, got: %v", errs)
 	}
 }
 
