@@ -56,6 +56,7 @@ const config = {
         logo: {
           alt: 'ACKO — Aerospike CE Kubernetes Operator',
           src: 'img/logo.svg',
+          srcDark: 'img/logo-dark.svg',
         },
         items: [
           {
