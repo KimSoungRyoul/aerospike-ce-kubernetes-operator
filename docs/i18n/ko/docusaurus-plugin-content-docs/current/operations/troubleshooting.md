@@ -13,7 +13,7 @@ title: 트러블슈팅
 |------|----------|------------|----------|
 | Phase = `Error` | `kubectl get asc <name> -o jsonpath='{.status.lastReconcileError}'` | 잘못된 설정, 이미지 풀 실패, 리소스 부족 | 에러 메시지 기반으로 수정 후 재적용 |
 | Phase = `WaitingForMigration` | `kubectl exec <pod> -- asinfo -v 'statistics' \| grep migrate` | 데이터 마이그레이션 진행 중 | 완료 대기 (자동 재시도) |
-| `InProgress`에서 멈춤 | `kubectl get pvc -n <ns> -l aerospike.io/cr-name=<name>` | PVC Pending, 이미지 풀 실패, 스케줄링 실패 | StorageClass/이미지/리소스 확인 |
+| `InProgress`에서 멈춤 | `kubectl get pvc -n <ns> -l app.kubernetes.io/instance=<name>` | PVC Pending, 이미지 풀 실패, 스케줄링 실패 | StorageClass/이미지/리소스 확인 |
 | `CircuitBreakerActive` 이벤트 | `kubectl get asc <name> -o jsonpath='{.status.failedReconcileCount}'` | 10회 이상 연속 실패 | `lastReconcileError` 확인 후 근본 원인 수정 |
 | Pod `CrashLoopBackOff` | `kubectl logs <pod> -c aerospike-server --previous` | 설정 파싱 오류, 메모리 부족 | 서버 로그 확인 후 설정 수정 |
 | Webhook이 CR 거부 | `kubectl apply` 에러 메시지 확인 | CE 제약 위반 | [검증 에러 패턴](#검증-에러-패턴) 참조 |
@@ -40,7 +40,7 @@ title: 트러블슈팅
 kubectl -n aerospike get asc <name> -o jsonpath='{.status.phase}{"\t"}{.status.phaseReason}'
 
 # Pending 상태의 PVC 확인
-kubectl -n aerospike get pvc -l aerospike.io/cr-name=<name>
+kubectl -n aerospike get pvc -l app.kubernetes.io/instance=<name>
 
 # 파드 이벤트에서 스케줄링/풀 에러 확인
 kubectl -n aerospike describe pod <pod-name>
@@ -338,7 +338,7 @@ PersistentVolumeClaim이 `Pending` 상태에 머무르는 경우입니다.
 
 ```bash
 # PVC 상태 확인
-kubectl -n aerospike get pvc -l aerospike.io/cr-name=<name>
+kubectl -n aerospike get pvc -l app.kubernetes.io/instance=<name>
 
 # PVC 이벤트 상세 확인
 kubectl -n aerospike describe pvc <pvc-name>
