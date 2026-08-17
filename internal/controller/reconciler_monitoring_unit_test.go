@@ -24,6 +24,11 @@ import (
 // API failure during monitoring-resource cleanup.
 var errMonitoringGetFailure = errors.New("simulated API server failure")
 
+// monitoringTestCluster is the cluster name shared by the monitoring unit tests.
+// Named rather than repeated inline so goconst does not flag the literal, and so
+// the fixtures and the expected resource names cannot drift apart.
+const monitoringTestCluster = "demo"
+
 func TestToStringMap(t *testing.T) {
 	tests := []struct {
 		name string
@@ -333,7 +338,7 @@ func TestReconcileMetricsService_CleanupGetErrorNotSwallowed(t *testing.T) {
 	scheme := rollingRestartScheme(t)
 
 	cluster := &ackov1alpha1.AerospikeCluster{}
-	cluster.Name = "demo"
+	cluster.Name = monitoringTestCluster
 	cluster.Namespace = ctrlTestNamespace
 
 	base := fake.NewClientBuilder().
@@ -402,7 +407,7 @@ func monitoringGetErrClient(scheme *runtime.Scheme, errFor func(resource string)
 func forbiddenMonitoringErr(resource string) error {
 	return apierrors.NewForbidden(
 		schema.GroupResource{Group: "monitoring.coreos.com", Resource: resource},
-		"demo",
+		monitoringTestCluster,
 		errors.New(`clusterrole "acko-manager" does not grant this resource`),
 	)
 }
@@ -457,7 +462,7 @@ func TestReconcileMonitoring_ForbiddenDegradesFeature(t *testing.T) {
 			scheme := rollingRestartScheme(t)
 
 			cluster := &ackov1alpha1.AerospikeCluster{}
-			cluster.Name = "demo"
+			cluster.Name = monitoringTestCluster
 			cluster.Namespace = ctrlTestNamespace
 			cluster.Spec.Monitoring = tc.monitoring
 
@@ -482,7 +487,7 @@ func TestReconcileMonitoring_UnexpectedErrorStillFailsReconcile(t *testing.T) {
 	scheme := rollingRestartScheme(t)
 
 	cluster := &ackov1alpha1.AerospikeCluster{}
-	cluster.Name = "demo"
+	cluster.Name = monitoringTestCluster
 	cluster.Namespace = ctrlTestNamespace
 
 	r := &AerospikeClusterReconciler{

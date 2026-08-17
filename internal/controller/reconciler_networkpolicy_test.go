@@ -255,7 +255,7 @@ func TestReconcileNetworkPolicy_CiliumForbiddenDegrades(t *testing.T) {
 	scheme := rollingRestartScheme(t)
 
 	cluster := &ackov1alpha1.AerospikeCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "demo", Namespace: ctrlTestNamespace},
+		ObjectMeta: metav1.ObjectMeta{Name: monitoringTestCluster, Namespace: ctrlTestNamespace},
 		Spec: ackov1alpha1.AerospikeClusterSpec{
 			Size:  1,
 			Image: "aerospike:ce-8.1.1.1",
@@ -298,7 +298,7 @@ func TestReconcileNetworkPolicy_CiliumOtherErrorStillFails(t *testing.T) {
 	scheme := rollingRestartScheme(t)
 
 	cluster := &ackov1alpha1.AerospikeCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "demo", Namespace: ctrlTestNamespace},
+		ObjectMeta: metav1.ObjectMeta{Name: monitoringTestCluster, Namespace: ctrlTestNamespace},
 		Spec: ackov1alpha1.AerospikeClusterSpec{
 			Size:  1,
 			Image: "aerospike:ce-8.1.1.1",
