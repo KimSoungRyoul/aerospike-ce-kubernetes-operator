@@ -13,7 +13,7 @@ Start with the symptom table, then use the focused checks below to find and fix 
 |---------|--------------|--------------|------------|
 | Phase = `Error` | `kubectl get asc <name> -o jsonpath='{.status.lastReconcileError}'` | Invalid config, image pull failure, insufficient resources | Fix based on error message and re-apply |
 | Phase = `WaitingForMigration` | `kubectl exec <pod> -- asinfo -v 'statistics' \| grep migrate` | Data migration in progress | Wait for completion (automatic) |
-| Stuck at `InProgress` | `kubectl get pvc -n <ns> -l aerospike.io/cr-name=<name>` | PVC Pending, ImagePull failure, scheduling failure | Check StorageClass, image, and resources |
+| Stuck at `InProgress` | `kubectl get pvc -n <ns> -l app.kubernetes.io/instance=<name>` | PVC Pending, ImagePull failure, scheduling failure | Check StorageClass, image, and resources |
 | `CircuitBreakerActive` event | `kubectl get asc <name> -o jsonpath='{.status.failedReconcileCount}'` | 10+ consecutive failures | Check `lastReconcileError`, fix root cause |
 | Pod `CrashLoopBackOff` | `kubectl logs <pod> -c aerospike-server --previous` | Config parsing error, out of memory | Check server logs and fix config |
 | Webhook rejects CR | Check `kubectl apply` error message | CE constraint violation | See [Validation Error Patterns](#validation-error-patterns) |
@@ -40,7 +40,7 @@ The cluster remains in the `InProgress` phase instead of moving to `Completed`.
 kubectl -n aerospike get asc <name> -o jsonpath='{.status.phase}{"\t"}{.status.phaseReason}'
 
 # Check for pending PVCs
-kubectl -n aerospike get pvc -l aerospike.io/cr-name=<name>
+kubectl -n aerospike get pvc -l app.kubernetes.io/instance=<name>
 
 # Check pod events for scheduling or pull errors
 kubectl -n aerospike describe pod <pod-name>
@@ -359,7 +359,7 @@ PersistentVolumeClaims remain in `Pending` state.
 
 ```bash
 # Check PVC status
-kubectl -n aerospike get pvc -l aerospike.io/cr-name=<name>
+kubectl -n aerospike get pvc -l app.kubernetes.io/instance=<name>
 
 # Check PVC events for details
 kubectl -n aerospike describe pvc <pvc-name>
