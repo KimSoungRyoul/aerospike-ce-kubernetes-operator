@@ -33,6 +33,18 @@ var prometheusRuleGVK = schema.GroupVersionKind{
 	Kind:    "PrometheusRule",
 }
 
+// reconcileMonitoring reconciles the metrics Service plus the two optional
+// Prometheus-Operator resources.
+//
+// ServiceMonitor and PrometheusRule are best-effort: the CRDs may not be
+// installed, and the operator's ClusterRole may not grant access to them (a
+// chart install that predates the RBAC entry, or an RBAC-only install trimmed
+// by the cluster admin). Both of those conditions must degrade the individual
+// feature, never fail the reconcile — an error returned from here reaches
+// handleReconcileError, and after maxFailedReconciles consecutive failures the
+// circuit breaker freezes scale, rolling restart, config and ACL
+// reconciliation for the whole cluster. Losing the entire control loop over an
+// optional monitoring integration is never the right trade.
 func (r *AerospikeClusterReconciler) reconcileMonitoring(
 	ctx context.Context,
 	cluster *ackov1alpha1.AerospikeCluster,
@@ -53,10 +65,15 @@ func (r *AerospikeClusterReconciler) reconcileMonitoring(
 		cluster.Spec.Monitoring.ServiceMonitor.Enabled
 
 	if err := r.reconcileServiceMonitor(ctx, cluster, smEnabled); err != nil {
-		// Only log and skip if the CRD is not installed; propagate other errors.
-		if meta.IsNoMatchError(err) {
+		// Only log and skip if the CRD is not installed or the operator is not
+		// allowed to touch it; propagate other errors.
+		switch {
+		case meta.IsNoMatchError(err):
 			log.Info("ServiceMonitor CRD not installed, skipping")
-		} else {
+		case errors.IsForbidden(err):
+			log.Info("ServiceMonitor access denied by RBAC, skipping",
+				"name", utils.ServiceMonitorName(cluster.Name), "error", err.Error())
+		default:
 			return fmt.Errorf("reconciling ServiceMonitor: %w", err)
 		}
 	}
@@ -67,9 +84,13 @@ func (r *AerospikeClusterReconciler) reconcileMonitoring(
 		cluster.Spec.Monitoring.PrometheusRule.Enabled
 
 	if err := r.reconcilePrometheusRule(ctx, cluster, prEnabled); err != nil {
-		if meta.IsNoMatchError(err) {
+		switch {
+		case meta.IsNoMatchError(err):
 			log.Info("PrometheusRule CRD not installed, skipping")
-		} else {
+		case errors.IsForbidden(err):
+			log.Info("PrometheusRule access denied by RBAC, skipping",
+				"name", utils.PrometheusRuleName(cluster.Name), "error", err.Error())
+		default:
 			return fmt.Errorf("reconciling PrometheusRule: %w", err)
 		}
 	}

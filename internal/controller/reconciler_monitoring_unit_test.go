@@ -10,6 +10,8 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -356,5 +358,145 @@ func TestReconcileMetricsService_CleanupGetErrorNotSwallowed(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "getting metrics service") {
 		t.Errorf("expected wrapped cleanup Get error, got: %v", err)
+	}
+}
+
+// monitoringResourceFor returns the monitoring.coreos.com resource name for an
+// unstructured object, or "" if the object is not one of the two optional
+// Prometheus-Operator kinds.
+func monitoringResourceFor(obj client.Object) string {
+	u, ok := obj.(*unstructured.Unstructured)
+	if !ok {
+		return ""
+	}
+	gvk := u.GroupVersionKind()
+	if gvk.Group != "monitoring.coreos.com" {
+		return ""
+	}
+	switch gvk.Kind {
+	case "ServiceMonitor":
+		return "servicemonitors"
+	case "PrometheusRule":
+		return "prometheusrules"
+	}
+	return ""
+}
+
+// monitoringGetErrClient builds a fake client whose Get fails for every
+// monitoring.coreos.com object with the error errFor produces for that
+// resource, while serving every other Get normally.
+func monitoringGetErrClient(scheme *runtime.Scheme, errFor func(resource string) error) client.WithWatch {
+	base := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	return interceptor.NewClient(base, interceptor.Funcs{
+		Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey,
+			obj client.Object, opts ...client.GetOption) error {
+			if resource := monitoringResourceFor(obj); resource != "" {
+				return errFor(resource)
+			}
+			return c.Get(ctx, key, obj, opts...)
+		},
+	})
+}
+
+func forbiddenMonitoringErr(resource string) error {
+	return apierrors.NewForbidden(
+		schema.GroupResource{Group: "monitoring.coreos.com", Resource: resource},
+		"demo",
+		errors.New(`clusterrole "acko-manager" does not grant this resource`),
+	)
+}
+
+// TestReconcileMonitoring_ForbiddenDegradesFeature is the regression test for
+// the RBAC-403 cluster freeze. reconcilePrometheusRule issues a Get on *every*
+// reconcile — including when the feature is disabled, where the Get exists only
+// to clean up a stale object. A chart install whose manager ClusterRole omits
+// monitoring.coreos.com/prometheusrules therefore got a 403 on every pass, and
+// the error funnelled into handleReconcileError until the circuit breaker
+// wedged the cluster in BackoffActive: no scale, no rolling restart, no config
+// change, no ACL sync. A 403 on an optional resource must degrade that one
+// feature and leave the reconcile successful, exactly as a missing CRD does.
+func TestReconcileMonitoring_ForbiddenDegradesFeature(t *testing.T) {
+	tests := []struct {
+		name       string
+		monitoring *ackov1alpha1.AerospikeMonitoringSpec
+	}{
+		{
+			// The reported failure mode: the cluster asks for no monitoring at
+			// all, yet the stale-object cleanup Get still 403s.
+			name:       "monitoring not configured",
+			monitoring: nil,
+		},
+		{
+			name: "monitoring enabled, optional resources disabled",
+			monitoring: &ackov1alpha1.AerospikeMonitoringSpec{
+				Enabled:       true,
+				ExporterImage: "exporter:v1",
+				Port:          9145,
+			},
+		},
+		{
+			name: "optional resources explicitly enabled",
+			monitoring: &ackov1alpha1.AerospikeMonitoringSpec{
+				Enabled:       true,
+				ExporterImage: "exporter:v1",
+				Port:          9145,
+				ServiceMonitor: &ackov1alpha1.ServiceMonitorSpec{
+					Enabled:  true,
+					Interval: "30s",
+				},
+				PrometheusRule: &ackov1alpha1.PrometheusRuleSpec{
+					Enabled: true,
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			scheme := rollingRestartScheme(t)
+
+			cluster := &ackov1alpha1.AerospikeCluster{}
+			cluster.Name = "demo"
+			cluster.Namespace = ctrlTestNamespace
+			cluster.Spec.Monitoring = tc.monitoring
+
+			r := &AerospikeClusterReconciler{
+				Client: monitoringGetErrClient(scheme, forbiddenMonitoringErr),
+				Scheme: scheme,
+			}
+
+			if err := r.reconcileMonitoring(context.Background(), cluster); err != nil {
+				t.Fatalf("reconcileMonitoring() = %v, want nil: a 403 on an optional "+
+					"monitoring resource must not fail the reconcile", err)
+			}
+		})
+	}
+}
+
+// TestReconcileMonitoring_UnexpectedErrorStillFailsReconcile guards the other
+// side of the fix: only "this resource is unreachable by design" errors — a
+// missing CRD or a 403 — are allowed to degrade the feature. A transient API
+// failure must still surface, or a real outage would be silently swallowed.
+func TestReconcileMonitoring_UnexpectedErrorStillFailsReconcile(t *testing.T) {
+	scheme := rollingRestartScheme(t)
+
+	cluster := &ackov1alpha1.AerospikeCluster{}
+	cluster.Name = "demo"
+	cluster.Namespace = ctrlTestNamespace
+
+	r := &AerospikeClusterReconciler{
+		Client: monitoringGetErrClient(scheme, func(string) error {
+			return apierrors.NewInternalError(errMonitoringGetFailure)
+		}),
+		Scheme: scheme,
+	}
+
+	err := r.reconcileMonitoring(context.Background(), cluster)
+	if err == nil {
+		t.Fatal("reconcileMonitoring() = nil, want error for a non-403 API failure")
+	}
+	if !strings.Contains(err.Error(), "reconciling ServiceMonitor") {
+		t.Errorf("expected the ServiceMonitor error to propagate, got: %v", err)
 	}
 }
