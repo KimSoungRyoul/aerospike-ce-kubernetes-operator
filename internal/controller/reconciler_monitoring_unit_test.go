@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -16,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	ackov1alpha1 "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/api/v1alpha1"
 )
@@ -503,5 +505,176 @@ func TestReconcileMonitoring_UnexpectedErrorStillFailsReconcile(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "reconciling ServiceMonitor") {
 		t.Errorf("expected the ServiceMonitor error to propagate, got: %v", err)
+	}
+}
+
+// recordingSink captures which level a log line was emitted at, so the
+// enabled/disabled split in logForbiddenMonitoringResource is asserted rather
+// than assumed. WithValues/WithName intentionally return the same sink: the test
+// only cares about messages and levels.
+type recordingSink struct {
+	errorMsgs []string
+	infoMsgs  []string
+}
+
+func (s *recordingSink) Init(logr.RuntimeInfo)               {}
+func (s *recordingSink) Enabled(int) bool                    { return true }
+func (s *recordingSink) WithValues(...any) logr.LogSink      { return s }
+func (s *recordingSink) WithName(string) logr.LogSink        { return s }
+func (s *recordingSink) Info(_ int, msg string, _ ...any)    { s.infoMsgs = append(s.infoMsgs, msg) }
+func (s *recordingSink) Error(_ error, msg string, _ ...any) { s.errorMsgs = append(s.errorMsgs, msg) }
+
+func (s *recordingSink) logged(msgs []string, want string) bool {
+	for _, m := range msgs {
+		if strings.Contains(m, want) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestReconcileMonitoring_ForbiddenLogLevelMatchesEnabled pins the Error-vs-Info
+// split. A 403 on a resource the user explicitly enabled means the operator is
+// silently not delivering something that was asked for, and with no
+// MonitoringReady condition to read the log is the only signal — so it must be
+// Error. A 403 on a disabled resource only blocks the stale-object cleanup Get,
+// where an Error on every reconcile would train operators to ignore the
+// operator's Error logs.
+func TestReconcileMonitoring_ForbiddenLogLevelMatchesEnabled(t *testing.T) {
+	const (
+		errorMsg = "Access denied for an enabled monitoring resource"
+		infoMsg  = "Access denied for monitoring resource, skipping stale-object cleanup"
+	)
+
+	tests := []struct {
+		name         string
+		monitoring   *ackov1alpha1.AerospikeMonitoringSpec
+		wantErrorLog bool
+	}{
+		{
+			name:         "disabled resource logs at Info",
+			monitoring:   nil,
+			wantErrorLog: false,
+		},
+		{
+			name: "enabled resource logs at Error",
+			monitoring: &ackov1alpha1.AerospikeMonitoringSpec{
+				Enabled:       true,
+				ExporterImage: "exporter:v1",
+				Port:          9145,
+				ServiceMonitor: &ackov1alpha1.ServiceMonitorSpec{
+					Enabled:  true,
+					Interval: "30s",
+				},
+				PrometheusRule: &ackov1alpha1.PrometheusRuleSpec{Enabled: true},
+			},
+			wantErrorLog: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			scheme := rollingRestartScheme(t)
+
+			cluster := &ackov1alpha1.AerospikeCluster{}
+			cluster.Name = monitoringTestCluster
+			cluster.Namespace = ctrlTestNamespace
+			cluster.Spec.Monitoring = tc.monitoring
+
+			r := &AerospikeClusterReconciler{
+				Client: monitoringGetErrClient(scheme, forbiddenMonitoringErr),
+				Scheme: scheme,
+			}
+
+			sink := &recordingSink{}
+			ctx := logf.IntoContext(context.Background(), logr.New(sink))
+
+			if err := r.reconcileMonitoring(ctx, cluster); err != nil {
+				t.Fatalf("reconcileMonitoring() = %v, want nil", err)
+			}
+
+			gotError := sink.logged(sink.errorMsgs, errorMsg)
+			gotInfo := sink.logged(sink.infoMsgs, infoMsg)
+
+			if tc.wantErrorLog {
+				if !gotError {
+					t.Errorf("expected an Error-level log for an enabled resource, got errors=%v infos=%v",
+						sink.errorMsgs, sink.infoMsgs)
+				}
+				if gotInfo {
+					t.Errorf("an enabled resource must not be reported at Info: %v", sink.infoMsgs)
+				}
+				return
+			}
+			if !gotInfo {
+				t.Errorf("expected an Info-level log for a disabled resource, got errors=%v infos=%v",
+					sink.errorMsgs, sink.infoMsgs)
+			}
+			if gotError {
+				t.Errorf("a disabled resource must not be reported at Error: %v", sink.errorMsgs)
+			}
+		})
+	}
+}
+
+// TestMonitoringCleanupForbiddenSurvivesErrorWrap pins the coupling between the
+// cleanup error wrap and the IsForbidden classification.
+//
+// The disabled path wraps the Get failure as
+// "getting <Kind> %s for cleanup: %w", and reconcileMonitoring's
+// errors.IsForbidden case only matches because apierrors.IsForbidden resolves
+// through errors.As. If a refactor drops the %w — switching to %v, or building a
+// fresh error — the 403 silently stops being recognised and the reconcile starts
+// failing again, which is the original cluster-freeze bug. Nothing else in the
+// suite would catch that, because reconcileMonitoring would still return an
+// error for a reason the tests do not distinguish.
+func TestMonitoringCleanupForbiddenSurvivesErrorWrap(t *testing.T) {
+	tests := []struct {
+		name    string
+		call    func(r *AerospikeClusterReconciler, cluster *ackov1alpha1.AerospikeCluster) error
+		wantMsg string
+	}{
+		{
+			name: "ServiceMonitor cleanup",
+			call: func(r *AerospikeClusterReconciler, c *ackov1alpha1.AerospikeCluster) error {
+				return r.reconcileServiceMonitor(context.Background(), c, false)
+			},
+			wantMsg: "getting ServiceMonitor",
+		},
+		{
+			name: "PrometheusRule cleanup",
+			call: func(r *AerospikeClusterReconciler, c *ackov1alpha1.AerospikeCluster) error {
+				return r.reconcilePrometheusRule(context.Background(), c, false)
+			},
+			wantMsg: "getting PrometheusRule",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			scheme := rollingRestartScheme(t)
+
+			cluster := &ackov1alpha1.AerospikeCluster{}
+			cluster.Name = monitoringTestCluster
+			cluster.Namespace = ctrlTestNamespace
+
+			r := &AerospikeClusterReconciler{
+				Client: monitoringGetErrClient(scheme, forbiddenMonitoringErr),
+				Scheme: scheme,
+			}
+
+			err := tc.call(r, cluster)
+			if err == nil {
+				t.Fatal("expected the cleanup Get error to be returned to the caller")
+			}
+			// The wrap must still be there ...
+			if !strings.Contains(err.Error(), tc.wantMsg) || !strings.Contains(err.Error(), "for cleanup") {
+				t.Errorf("expected the wrapped cleanup error, got: %v", err)
+			}
+			// ... and IsForbidden must still see through it.
+			if !apierrors.IsForbidden(err) {
+				t.Errorf("apierrors.IsForbidden must match through the %%w wrap, got: %v", err)
+			}
+		})
 	}
 }
