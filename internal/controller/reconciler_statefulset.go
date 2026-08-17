@@ -106,11 +106,10 @@ func (r *AerospikeClusterReconciler) reconcileStatefulSet(
 	// for why keying it on the replica delta of a single reconcile leaked every
 	// scale-down PVC permanently.
 	//
-	// Deliberately runs before a scale-up patch too. On 3->5 it reclaims any
-	// leftover PVCs at ordinals 3-4 and the StatefulSet then provisions fresh
-	// ones, which is the whole point: skipping reclamation here would hand the
-	// new pods the exact devices the removed nodes wrote.
-	r.reclaimOrphanedRackPVCs(ctx, cluster, rack.ID, existing, storageSpec)
+	// rackSize is passed so reclamation can tell an operator-driven scale-down
+	// from an external write that lowered spec.replicas behind the operator's
+	// back — see reclaimOrphanedRackPVCs.
+	r.reclaimOrphanedRackPVCs(ctx, cluster, rack.ID, existing, rackSize, storageSpec)
 
 	needsUpdate := oldReplicas != rackSize
 	var existingHash, existingPodSpecHash string
@@ -273,13 +272,18 @@ func (r *AerospikeClusterReconciler) checkScaleDownReadiness(
 //     non-positive value means the observed replica count is unknown or the rack
 //     is being torn down entirely, and reclamation is skipped rather than
 //     guessed at.
-//   - The observed pod set must match the replica count exactly. This gate is
-//     LOAD-BEARING, not a second layer: the ordinal bound alone is not
-//     sufficient, because during a scale-down the StatefulSet's replica count
-//     drops before the removed pods finish terminating, so a PVC at an ordinal
-//     >= spec.replicas can still be mounted. Requiring len(pods) ==
-//     spec.replicas closes the case where the label query returns fewer pods
-//     than exist and the per-pod check would be vacuous.
+//   - currentReplicas must not be below rackSize. Only an operator-driven
+//     scale-down may trigger reclamation; an external write that lowered
+//     spec.replicas must not.
+//   - The StatefulSet must report a settled status matching its spec
+//     (ObservedGeneration == Generation, Status.Replicas == Spec.Replicas).
+//     This is the LOAD-BEARING pod gate: the ordinal bound alone is not
+//     sufficient, because during a scale-down the replica count drops before
+//     the removed pods finish terminating, so a PVC at an ordinal >=
+//     spec.replicas can still be mounted. status.replicas comes from
+//     kube-controller-manager using the StatefulSet's own selector, so unlike a
+//     rack-label query it cannot be defeated by pod labels or a stale informer.
+//   - The rack-label pod list is kept as a secondary check.
 //   - Selection then requires ALL of: ordinal >= spec.replicas, the operator's
 //     cluster labels (with no unfiltered namespace-wide fallback), a volume name
 //     that is one of the StatefulSet's own VolumeClaimTemplates, no foreign
@@ -294,6 +298,7 @@ func (r *AerospikeClusterReconciler) reclaimOrphanedRackPVCs(
 	cluster *ackov1alpha1.AerospikeCluster,
 	rackID int,
 	sts *appsv1.StatefulSet,
+	rackSize int32,
 	storageSpec *ackov1alpha1.AerospikeStorageSpec,
 ) {
 	log := logf.FromContext(ctx)
@@ -329,6 +334,49 @@ func (r *AerospikeClusterReconciler) reclaimOrphanedRackPVCs(
 		return
 	}
 
+	// Only reclaim when the operator itself put the StatefulSet at this replica
+	// count. A count BELOW the rack size the operator wants did not come from an
+	// operator scale-down — `kubectl scale sts`, an HPA aimed at the StatefulSet
+	// instead of the CR, GitOps drift or a backup restore can all lower it — and
+	// this function sits above the scale-down branch, so isMigrationInProgress
+	// and the quiesce path never run for it. Reclaiming there would destroy the
+	// volumes of every ordinal the operator is about to bring back, on the same
+	// pass that scales the rack up onto blank devices.
+	//
+	// Skipping is safe because reclamation also runs on every converged pass: a
+	// stale volume left by a real scale-down is caught while the rack sits at the
+	// smaller size, not only on the way back up. The residual gap is a scale-down
+	// immediately followed by a scale-up with no reconcile converging in between,
+	// which is documented in the PR rather than papered over.
+	if currentReplicas < rackSize {
+		log.V(1).Info("Skipping PVC reclamation: StatefulSet is below the desired rack size",
+			"statefulset", stsName, "replicas", currentReplicas, "rackSize", rackSize)
+		return
+	}
+
+	// The StatefulSet's own status is the authoritative pod count, and it is the
+	// only one that cannot be defeated by labels. kube-controller-manager
+	// computes status.replicas from the StatefulSet's OWN selector
+	// (SelectorLabelsForCluster, which carries no rack label) and counts
+	// terminating pods, and it arrives on the same object read as spec.replicas,
+	// so there is no cross-informer skew.
+	//
+	// The label-scoped list below cannot do this job alone: the rack label is not
+	// selector-enforced, and podutil.BuildPodTemplateSpec lets
+	// spec.podSpec.metadata.labels overwrite acko.io/rack, so a pod can be live
+	// and invisible to listRackPods. A stale pod informer has the same effect.
+	if sts.Status.ObservedGeneration != sts.Generation {
+		log.V(1).Info("Deferring PVC reclamation: StatefulSet status has not caught up with its spec",
+			"statefulset", stsName, "generation", sts.Generation,
+			"observedGeneration", sts.Status.ObservedGeneration)
+		return
+	}
+	if sts.Status.Replicas != currentReplicas {
+		log.V(1).Info("Deferring PVC reclamation: StatefulSet still reports pods it has not released",
+			"statefulset", stsName, "statusReplicas", sts.Status.Replicas, "replicas", currentReplicas)
+		return
+	}
+
 	rackPods, listErr := r.listRackPods(ctx, cluster, rackID)
 	if listErr != nil {
 		log.Error(listErr, "Failed to list rack pods for PVC reclamation, deferring",
@@ -336,11 +384,9 @@ func (r *AerospikeClusterReconciler) reclaimOrphanedRackPVCs(
 		return
 	}
 
-	// Fail closed unless the rack has converged to exactly the observed replica
-	// count. Fewer pods than replicas means either the rack is still coming up or
-	// the label query is not seeing every pod — in which case the per-pod ordinal
-	// check below would pass vacuously while live pods sit above the bound. More
-	// pods than replicas means a scale-down is still in flight.
+	// Secondary check. Weaker than the status gate above — it can be defeated by
+	// label manipulation or a stale informer — but it costs nothing and catches
+	// the case where the rack label genuinely disagrees with the StatefulSet.
 	if len(rackPods) != int(currentReplicas) {
 		log.V(1).Info("Deferring PVC reclamation: observed pod count does not match the replica count",
 			"statefulset", stsName, "pods", len(rackPods), "replicas", currentReplicas)

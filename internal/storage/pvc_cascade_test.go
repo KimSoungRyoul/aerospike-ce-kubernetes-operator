@@ -14,6 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	v1alpha1 "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/api/v1alpha1"
+	"github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/internal/utils"
 )
 
 const (
@@ -33,10 +34,11 @@ func newPVCForCluster(name, clusterName string) *corev1.PersistentVolumeClaim {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: testNamespace,
-			Labels: map[string]string{
-				"app.kubernetes.io/name":     "aerospike-cluster",
-				"app.kubernetes.io/instance": clusterName,
-			},
+			// The full label set the operator stamps onto VolumeClaimTemplates,
+			// not just the two GetPVCsForStatefulSet happens to filter on — the
+			// reclaim path requires all four, so an under-specified fixture would
+			// silently stop matching.
+			Labels: utils.LabelsForCluster(clusterName),
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},

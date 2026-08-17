@@ -77,7 +77,7 @@ func pvcReclaimSts(clusterName string, replicas *int32, vctNames ...string) *app
 			ObjectMeta: metav1.ObjectMeta{Name: name},
 		})
 	}
-	return &appsv1.StatefulSet{
+	sts := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      utils.StatefulSetName(clusterName, pvcReclaimRackID),
 			Namespace: ctrlTestNamespace,
@@ -88,6 +88,23 @@ func pvcReclaimSts(clusterName string, replicas *int32, vctNames ...string) *app
 			VolumeClaimTemplates: vcts,
 		},
 	}
+	// A settled status: ObservedGeneration == Generation (both 0 here) and
+	// status.replicas == spec.replicas. This is what kube-controller-manager
+	// reports for a converged StatefulSet, and what the reclaim status gate
+	// requires. Tests that need an unsettled StatefulSet call withStatusReplicas.
+	if replicas != nil {
+		sts.Status.Replicas = *replicas
+	}
+	return sts
+}
+
+// withStatusReplicas overrides status.replicas so a test can model a
+// StatefulSet that still owns pods it has not released — the shape
+// kube-controller-manager reports while scaled-down pods are terminating, and
+// the one that must defer reclamation.
+func withStatusReplicas(sts *appsv1.StatefulSet, statusReplicas int32) *appsv1.StatefulSet {
+	sts.Status.Replicas = statusReplicas
+	return sts
 }
 
 func int32Ptr(v int32) *int32 { return &v }
@@ -252,7 +269,7 @@ func TestReclaimOrphanedRackPVCs_SelectsPVCWithNoOwnerReferences(t *testing.T) {
 
 	r := pvcReclaimReconciler(scheme, pvcReclaimPod(cluster.Name, 0), orphan)
 	r.reclaimOrphanedRackPVCs(context.Background(), cluster, pvcReclaimRackID,
-		pvcReclaimSts(cluster.Name, int32Ptr(1), "data"), cluster.Spec.Storage)
+		pvcReclaimSts(cluster.Name, int32Ptr(1), "data"), 1, cluster.Spec.Storage)
 
 	if pvcExists(t, r.Client, orphan.Name) {
 		t.Error("orphan with no ownerReferences was not reclaimed; the default " +
@@ -272,7 +289,7 @@ func TestReclaimOrphanedRackPVCs_SelectsPVCOwnedByThisStatefulSet(t *testing.T) 
 
 	r := pvcReclaimReconciler(scheme, pvcReclaimPod(cluster.Name, 0), orphan)
 	r.reclaimOrphanedRackPVCs(context.Background(), cluster, pvcReclaimRackID,
-		pvcReclaimSts(cluster.Name, int32Ptr(1), "data"), cluster.Spec.Storage)
+		pvcReclaimSts(cluster.Name, int32Ptr(1), "data"), 1, cluster.Spec.Storage)
 
 	if pvcExists(t, r.Client, orphan.Name) {
 		t.Error("orphan owned by this StatefulSet was not reclaimed")
@@ -351,7 +368,8 @@ func TestReclaimOrphanedRackPVCs_NeverSelectsInUsePVC(t *testing.T) {
 
 			r := pvcReclaimReconciler(scheme, objs...)
 			r.reclaimOrphanedRackPVCs(context.Background(), cluster, pvcReclaimRackID,
-				pvcReclaimSts(cluster.Name, int32Ptr(tc.specReplicas), "data"), cluster.Spec.Storage)
+				pvcReclaimSts(cluster.Name, int32Ptr(tc.specReplicas), "data"),
+				tc.specReplicas, cluster.Spec.Storage)
 
 			shouldBeGone := map[int]bool{}
 			for _, ordinal := range tc.wantDeleted {
@@ -397,7 +415,7 @@ func TestReclaimOrphanedRackPVCs_DefersWhenPodsMissingRackLabel(t *testing.T) {
 	// The StatefulSet is mid-scale-down: replicas already reads 1 while pods
 	// 1 and 2 are still running.
 	r.reclaimOrphanedRackPVCs(context.Background(), cluster, pvcReclaimRackID,
-		pvcReclaimSts(cluster.Name, int32Ptr(1), "data"), cluster.Spec.Storage)
+		pvcReclaimSts(cluster.Name, int32Ptr(1), "data"), 1, cluster.Spec.Storage)
 
 	for ordinal := range 3 {
 		name := pvcReclaimPVCName(cluster.Name, "data", ordinal)
@@ -420,7 +438,7 @@ func TestReclaimOrphanedRackPVCs_NeverSelectsForeignOwnedPVC(t *testing.T) {
 
 	r := pvcReclaimReconciler(scheme, pvcReclaimPod(cluster.Name, 0), foreign)
 	r.reclaimOrphanedRackPVCs(context.Background(), cluster, pvcReclaimRackID,
-		pvcReclaimSts(cluster.Name, int32Ptr(1), "data"), cluster.Spec.Storage)
+		pvcReclaimSts(cluster.Name, int32Ptr(1), "data"), 1, cluster.Spec.Storage)
 
 	if !pvcExists(t, r.Client, foreign.Name) {
 		t.Error("PVC owned by a foreign UID was reclaimed")
@@ -442,7 +460,7 @@ func TestReclaimOrphanedRackPVCs_NeverSelectsUnlabelledPVC(t *testing.T) {
 
 	r := pvcReclaimReconciler(scheme, pvcReclaimPod(cluster.Name, 0), unlabelled)
 	r.reclaimOrphanedRackPVCs(context.Background(), cluster, pvcReclaimRackID,
-		pvcReclaimSts(cluster.Name, int32Ptr(1), "data"), cluster.Spec.Storage)
+		pvcReclaimSts(cluster.Name, int32Ptr(1), "data"), 1, cluster.Spec.Storage)
 
 	if !pvcExists(t, r.Client, unlabelled.Name) {
 		t.Error("unlabelled PVC was reclaimed through a name-only ownership test")
@@ -478,7 +496,7 @@ func TestReclaimOrphanedRackPVCs_NeverSelectsVolumeNotInStatefulSet(t *testing.T
 
 	r := pvcReclaimReconciler(scheme, pvcReclaimPod(cluster.Name, 0), foreignVol)
 	r.reclaimOrphanedRackPVCs(context.Background(), cluster, pvcReclaimRackID,
-		pvcReclaimSts(cluster.Name, int32Ptr(1), "data"), cluster.Spec.Storage)
+		pvcReclaimSts(cluster.Name, int32Ptr(1), "data"), 1, cluster.Spec.Storage)
 
 	if !pvcExists(t, r.Client, foreignVol.Name) {
 		t.Error("PVC whose volume is not a VolumeClaimTemplate of this StatefulSet was reclaimed")
@@ -497,7 +515,7 @@ func TestReclaimOrphanedRackPVCs_NeverSelectsMalformedOrdinal(t *testing.T) {
 
 	r := pvcReclaimReconciler(scheme, pvcReclaimPod(cluster.Name, 0), malformed)
 	r.reclaimOrphanedRackPVCs(context.Background(), cluster, pvcReclaimRackID,
-		pvcReclaimSts(cluster.Name, int32Ptr(1), "data"), cluster.Spec.Storage)
+		pvcReclaimSts(cluster.Name, int32Ptr(1), "data"), 1, cluster.Spec.Storage)
 
 	if !pvcExists(t, r.Client, malformed.Name) {
 		t.Error("PVC with a malformed ordinal was reclaimed")
@@ -519,7 +537,7 @@ func TestReclaimOrphanedRackPVCs_DefersWhilePodAboveReplicaCountExists(t *testin
 	)
 
 	r.reclaimOrphanedRackPVCs(context.Background(), cluster, pvcReclaimRackID,
-		pvcReclaimSts(cluster.Name, int32Ptr(1), "data"), cluster.Spec.Storage)
+		pvcReclaimSts(cluster.Name, int32Ptr(1), "data"), 1, cluster.Spec.Storage)
 
 	for ordinal := range 2 {
 		name := pvcReclaimPVCName(cluster.Name, "data", ordinal)
@@ -545,7 +563,7 @@ func TestReclaimOrphanedRackPVCs_DefersOnUnparseablePodName(t *testing.T) {
 	)
 
 	r.reclaimOrphanedRackPVCs(context.Background(), cluster, pvcReclaimRackID,
-		pvcReclaimSts(cluster.Name, int32Ptr(1), "data"), cluster.Spec.Storage)
+		pvcReclaimSts(cluster.Name, int32Ptr(1), "data"), 1, cluster.Spec.Storage)
 
 	if !pvcExists(t, r.Client, pvcReclaimPVCName(cluster.Name, "data", 1)) {
 		t.Error("PVC was reclaimed despite a rack pod with an unparseable ordinal")
@@ -565,7 +583,7 @@ func TestReclaimOrphanedRackPVCs_SkipsWhenReplicaCountUnknown(t *testing.T) {
 	)
 
 	r.reclaimOrphanedRackPVCs(context.Background(), cluster, pvcReclaimRackID,
-		pvcReclaimSts(cluster.Name, nil, "data"), cluster.Spec.Storage)
+		pvcReclaimSts(cluster.Name, nil, "data"), 1, cluster.Spec.Storage)
 
 	for ordinal := range 2 {
 		name := pvcReclaimPVCName(cluster.Name, "data", ordinal)
@@ -589,7 +607,7 @@ func TestReclaimOrphanedRackPVCs_SkipsAtZeroReplicas(t *testing.T) {
 	)
 
 	r.reclaimOrphanedRackPVCs(context.Background(), cluster, pvcReclaimRackID,
-		pvcReclaimSts(cluster.Name, int32Ptr(0), "data"), cluster.Spec.Storage)
+		pvcReclaimSts(cluster.Name, int32Ptr(0), "data"), 0, cluster.Spec.Storage)
 
 	for ordinal := range 2 {
 		name := pvcReclaimPVCName(cluster.Name, "data", ordinal)
@@ -627,7 +645,7 @@ func TestReclaimOrphanedRackPVCs_NonCascadeVolumesIssueNoList(t *testing.T) {
 	}
 
 	r.reclaimOrphanedRackPVCs(context.Background(), cluster, pvcReclaimRackID,
-		pvcReclaimSts(cluster.Name, int32Ptr(1), "data"), cluster.Spec.Storage)
+		pvcReclaimSts(cluster.Name, int32Ptr(1), "data"), 1, cluster.Spec.Storage)
 
 	if lists != 0 {
 		t.Errorf("issued %d List call(s) for a cluster with no cascadeDelete volume, want 0", lists)
@@ -662,7 +680,7 @@ func TestReclaimOrphanedRackPVCs_Idempotent(t *testing.T) {
 	sts := pvcReclaimSts(cluster.Name, int32Ptr(1), "data")
 	for pass := 1; pass <= 3; pass++ {
 		r.reclaimOrphanedRackPVCs(context.Background(), cluster, pvcReclaimRackID,
-			sts, cluster.Spec.Storage)
+			sts, 1, cluster.Spec.Storage)
 	}
 
 	if !pvcExists(t, r.Client, pvcReclaimPVCName(cluster.Name, "data", 0)) {
@@ -720,5 +738,280 @@ func TestRackPodOrdinal(t *testing.T) {
 				t.Errorf("rackPodOrdinal(%q) = %d, want %d", tc.podName, got, tc.want)
 			}
 		})
+	}
+}
+
+// --- regressions ported from independent verification of this PR ---
+//
+// Both hazards below were introduced by moving reclamation to the top of
+// reconcileStatefulSet, and both were demonstrated by a reviewer with a failing
+// test before being fixed. They are kept here so the hazards cannot return
+// silently.
+
+// TestReconcileStatefulSet_DoesNotReclaimOnExternalScaleDown covers an external
+// write that lowered spec.replicas behind the operator's back — `kubectl scale
+// sts`, an HPA aimed at the StatefulSet instead of the CR, GitOps drift, a
+// backup restore.
+//
+// Reclamation sits above the scale-down branch, so isMigrationInProgress and the
+// quiesce path never run for this transition. Before the rackSize guard the
+// operator deleted the volumes of every ordinal above the externally-lowered
+// count and then, on the same pass, scaled the rack back up onto blank devices —
+// a destructive behaviour that did not exist before this PR, for a scale-down
+// the CR never asked for.
+func TestReconcileStatefulSet_DoesNotReclaimOnExternalScaleDown(t *testing.T) {
+	scheme := rollingRestartScheme(t)
+
+	cluster := pvcReclaimCluster(true)
+	cluster.Spec.Size = 3
+	rack := &ackov1alpha1.Rack{ID: pvcReclaimRackID}
+
+	const configHash = "cfg-SAME"
+	podSpecHash := computePodSpecHash(cluster, rack)
+
+	// Someone scaled the StatefulSet to 1. The removed pods have finished
+	// terminating, so the rack looks "converged" at 1 by every local signal.
+	sts := pvcReclaimSts(cluster.Name, int32Ptr(1), "data")
+	sts.Spec.Template = corev1.PodTemplateSpec{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{
+				utils.ConfigHashAnnotation:  configHash,
+				utils.PodSpecHashAnnotation: podSpecHash,
+			},
+		},
+	}
+
+	r := pvcReclaimReconciler(scheme,
+		sts,
+		pvcReclaimPod(cluster.Name, 0),
+		pvcReclaimPVC(cluster.Name, 0),
+		pvcReclaimPVC(cluster.Name, 1), // holds node 1's Aerospike data
+		pvcReclaimPVC(cluster.Name, 2), // holds node 2's Aerospike data
+	)
+
+	// rackSize = 3: the operator is about to scale the rack back up to the size
+	// the CR asks for.
+	if _, err := r.reconcileStatefulSet(
+		context.Background(), cluster, rack, nil, configHash, 3); err != nil {
+		t.Fatalf("reconcileStatefulSet() error = %v", err)
+	}
+
+	for _, ordinal := range []int{1, 2} {
+		name := pvcReclaimPVCName(cluster.Name, "data", ordinal)
+		if !pvcExists(t, r.Client, name) {
+			t.Errorf("PVC %s was destroyed on the pass that scales the rack back up; "+
+				"the CR never asked for a scale-down", name)
+		}
+	}
+
+	// And the rack really is scaled back up, so this is not passing by accident
+	// of the reconcile bailing out early.
+	after := &appsv1.StatefulSet{}
+	if err := r.Get(context.Background(),
+		types.NamespacedName{Name: sts.Name, Namespace: ctrlTestNamespace}, after); err != nil {
+		t.Fatalf("get sts: %v", err)
+	}
+	if after.Spec.Replicas == nil || *after.Spec.Replicas != 3 {
+		t.Errorf("expected the rack to be scaled back up to 3, got %v", after.Spec.Replicas)
+	}
+}
+
+// TestReconcileStatefulSet_DoesNotEatPreProvisionedScaleUpPVCs is the same guard
+// from the operator's other side: an admin pre-provisions PVCs at the ordinals a
+// scale-up will use (seeding nodes from restored PVs), then raises size.
+// Reclamation runs before the scale-up patch, so without the rackSize guard it
+// consumed exactly the claims the admin staged.
+func TestReconcileStatefulSet_DoesNotEatPreProvisionedScaleUpPVCs(t *testing.T) {
+	scheme := rollingRestartScheme(t)
+
+	cluster := pvcReclaimCluster(true)
+	cluster.Spec.Size = 3
+	rack := &ackov1alpha1.Rack{ID: pvcReclaimRackID}
+
+	const configHash = "cfg-SAME"
+	podSpecHash := computePodSpecHash(cluster, rack)
+
+	sts := pvcReclaimSts(cluster.Name, int32Ptr(1), "data")
+	sts.Spec.Template = corev1.PodTemplateSpec{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{
+				utils.ConfigHashAnnotation:  configHash,
+				utils.PodSpecHashAnnotation: podSpecHash,
+			},
+		},
+	}
+
+	r := pvcReclaimReconciler(scheme,
+		sts,
+		pvcReclaimPod(cluster.Name, 0),
+		pvcReclaimPVC(cluster.Name, 0),
+		// Hand-created, bound to restored PVs, labelled like the operator's own.
+		pvcReclaimPVC(cluster.Name, 1),
+		pvcReclaimPVC(cluster.Name, 2),
+	)
+
+	if _, err := r.reconcileStatefulSet(
+		context.Background(), cluster, rack, nil, configHash, 3); err != nil {
+		t.Fatalf("reconcileStatefulSet() error = %v", err)
+	}
+
+	for _, ordinal := range []int{1, 2} {
+		name := pvcReclaimPVCName(cluster.Name, "data", ordinal)
+		if !pvcExists(t, r.Client, name) {
+			t.Errorf("pre-provisioned PVC %s was destroyed by the pre-scale-up reclaim", name)
+		}
+	}
+}
+
+// TestReclaimOrphanedRackPVCs_DefersWhenLivePodsAreInvisibleToRackQuery covers
+// the pod-gate bypass. len(rackPods) == spec.replicas only catches a *wrong*
+// count, so hiding pods until the count comes out right defeats it.
+//
+// This is reachable without an attacker: the StatefulSet's Selector is
+// SelectorLabelsForCluster, which carries no rack label, so acko.io/rack is not
+// selector-enforced — and podutil.BuildPodTemplateSpec lets
+// spec.podSpec.metadata.labels overwrite it. A lagging pod informer produces the
+// same shape. The fix is to gate on the StatefulSet's own status, which
+// kube-controller-manager computes from the StatefulSet's selector and which
+// arrives on the same object read as spec.replicas.
+func TestReclaimOrphanedRackPVCs_DefersWhenLivePodsAreInvisibleToRackQuery(t *testing.T) {
+	stsName := utils.StatefulSetName("demo", pvcReclaimRackID)
+
+	tests := []struct {
+		name string
+		// pods are the objects that exist; hiddenFromList are removed from every
+		// List result to model either a mislabelled pod or a stale informer.
+		visiblePods []int
+		hiddenPods  []int
+	}{
+		{
+			// Pods 1 and 2 are live but carry no rack label, so listRackPods
+			// returns exactly one pod and the count check passes.
+			name:        "pods mislabelled so the visible count matches",
+			visiblePods: []int{0},
+			hiddenPods:  []int{1, 2},
+		},
+		{
+			// Same shape via a lagging pod informer.
+			name:        "pods hidden by a stale informer",
+			visiblePods: []int{0},
+			hiddenPods:  []int{1, 2},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			scheme := rollingRestartScheme(t)
+			cluster := pvcReclaimCluster(true)
+
+			objs := make([]client.Object, 0, len(tc.visiblePods)+len(tc.hiddenPods)+3)
+			for _, o := range tc.visiblePods {
+				objs = append(objs, pvcReclaimPod(cluster.Name, o))
+			}
+			for _, o := range tc.hiddenPods {
+				objs = append(objs, pvcReclaimPod(cluster.Name, o))
+			}
+			for ordinal := range 3 {
+				objs = append(objs, pvcReclaimPVC(cluster.Name, ordinal))
+			}
+
+			base := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
+			hidden := map[string]bool{}
+			for _, o := range tc.hiddenPods {
+				hidden[fmt.Sprintf("%s-%d", stsName, o)] = true
+			}
+			cl := interceptor.NewClient(base, interceptor.Funcs{
+				List: func(ctx context.Context, c client.WithWatch,
+					list client.ObjectList, opts ...client.ListOption) error {
+					if err := c.List(ctx, list, opts...); err != nil {
+						return err
+					}
+					pl, ok := list.(*corev1.PodList)
+					if !ok {
+						return nil
+					}
+					kept := pl.Items[:0]
+					for i := range pl.Items {
+						if !hidden[pl.Items[i].Name] {
+							kept = append(kept, pl.Items[i])
+						}
+					}
+					pl.Items = kept
+					return nil
+				},
+			})
+
+			r := &AerospikeClusterReconciler{
+				Client: cl, Scheme: scheme, Recorder: record.NewFakeRecorder(8),
+			}
+
+			// spec.replicas is 1, but kube-controller-manager still counts all
+			// three pods via the StatefulSet's own selector, so status.replicas
+			// is 3. That mismatch is what defers the pass.
+			sts := withStatusReplicas(pvcReclaimSts(cluster.Name, int32Ptr(1), "data"), 3)
+
+			r.reclaimOrphanedRackPVCs(context.Background(), cluster, pvcReclaimRackID,
+				sts, 1, cluster.Spec.Storage)
+
+			for ordinal := range 3 {
+				name := pvcReclaimPVCName(cluster.Name, "data", ordinal)
+				if !pvcExists(t, r.Client, name) {
+					t.Errorf("PVC %s deleted while its pod is live but invisible to the rack query", name)
+				}
+			}
+		})
+	}
+}
+
+// TestReclaimOrphanedRackPVCs_DefersUntilStatusCatchesUp pins the
+// ObservedGeneration half of the status gate: immediately after the operator
+// patches spec.replicas the StatefulSet controller has not acted yet, so no
+// conclusion may be drawn from status.replicas.
+func TestReclaimOrphanedRackPVCs_DefersUntilStatusCatchesUp(t *testing.T) {
+	scheme := rollingRestartScheme(t)
+	cluster := pvcReclaimCluster(true)
+
+	r := pvcReclaimReconciler(scheme,
+		pvcReclaimPod(cluster.Name, 0),
+		pvcReclaimPVC(cluster.Name, 0),
+		pvcReclaimPVC(cluster.Name, 1),
+	)
+
+	sts := pvcReclaimSts(cluster.Name, int32Ptr(1), "data")
+	sts.Generation = 7
+	sts.Status.ObservedGeneration = 6 // controller has not caught up
+
+	r.reclaimOrphanedRackPVCs(context.Background(), cluster, pvcReclaimRackID,
+		sts, 1, cluster.Spec.Storage)
+
+	if !pvcExists(t, r.Client, pvcReclaimPVCName(cluster.Name, "data", 1)) {
+		t.Error("PVC reclaimed while the StatefulSet status had not caught up with its spec")
+	}
+}
+
+// TestReclaimOrphanedRackPVCs_NeverSelectsPVCMissingComponentLabels closes the
+// gap a reviewer found by constructing a PVC that satisfied every other guard:
+// correct name, correct ordinal, nil ownerReferences, and the two labels the
+// legacy getter checks. The reclaim listing now matches all four labels
+// LabelsForCluster stamps, so a claim carrying only name+instance is not ours.
+func TestReclaimOrphanedRackPVCs_NeverSelectsPVCMissingComponentLabels(t *testing.T) {
+	scheme := rollingRestartScheme(t)
+	cluster := pvcReclaimCluster(true)
+
+	foreign := pvcReclaimPVCNamed(cluster.Name,
+		pvcReclaimPVCName(cluster.Name, "data", 1), false)
+	foreign.Labels = map[string]string{
+		utils.AppLabel:      "aerospike-cluster",
+		utils.InstanceLabel: cluster.Name,
+		// no component, no managed-by
+	}
+
+	r := pvcReclaimReconciler(scheme, pvcReclaimPod(cluster.Name, 0), foreign)
+	r.reclaimOrphanedRackPVCs(context.Background(), cluster, pvcReclaimRackID,
+		pvcReclaimSts(cluster.Name, int32Ptr(1), "data"), 1, cluster.Spec.Storage)
+
+	if !pvcExists(t, r.Client, foreign.Name) {
+		t.Error("PVC carrying only app/instance labels was reclaimed; " +
+			"component and managed-by must also match")
 	}
 }

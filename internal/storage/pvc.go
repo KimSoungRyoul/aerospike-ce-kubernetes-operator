@@ -12,8 +12,10 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1alpha1 "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/api/v1alpha1"
+	"github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/internal/utils"
 )
 
 // GetPVCsForStatefulSet lists PVCs belonging to the given StatefulSet of the
@@ -119,6 +121,16 @@ func ownedByStatefulSetUID(pvc *corev1.PersistentVolumeClaim, stsUID types.UID) 
 	return false
 }
 
+// ownerRefSummary renders a PVC's ownerReferences compactly for a log field.
+func ownerRefSummary(pvc *corev1.PersistentVolumeClaim) string {
+	refs := pvc.GetOwnerReferences()
+	parts := make([]string, 0, len(refs))
+	for i := range refs {
+		parts = append(parts, fmt.Sprintf("%s/%s(%s)", refs[i].Kind, refs[i].Name, refs[i].UID))
+	}
+	return strings.Join(parts, ",")
+}
+
 // ownedOrphanCandidates returns the PVCs that belong to sts and sit at an
 // ordinal at or above desiredReplicas.
 //
@@ -155,13 +167,14 @@ func ownedOrphanCandidates(
 		return nil, nil
 	}
 
+	// All four labels LabelsForCluster stamps, not just the two the legacy
+	// getter checks. component and managed-by cost nothing to match and narrow
+	// the surface against hand-created or restored claims that happen to carry
+	// the name/instance pair.
 	pvcList := &corev1.PersistentVolumeClaimList{}
 	if err := c.List(ctx, pvcList,
 		client.InNamespace(sts.Namespace),
-		client.MatchingLabels{
-			"app.kubernetes.io/name":     "aerospike-cluster",
-			"app.kubernetes.io/instance": clusterName,
-		},
+		client.MatchingLabels(utils.LabelsForCluster(clusterName)),
 	); err != nil {
 		return nil, fmt.Errorf("listing PVCs in namespace %s: %w", sts.Namespace, err)
 	}
@@ -179,6 +192,16 @@ func ownedOrphanCandidates(
 			continue
 		}
 		if !ownedByStatefulSetUID(pvc, sts.UID) {
+			// Log rather than drop silently. Under
+			// persistentVolumeClaimRetentionPolicy.whenScaled=Delete the
+			// StatefulSet controller stamps the *Pod* as owner, which reads as
+			// foreign here — correct (kube-controller-manager reclaims those
+			// itself, so this path has nothing to do) but worth seeing, because
+			// otherwise reclamation appearing to do nothing is indistinguishable
+			// from reclamation being broken.
+			logf.FromContext(ctx).V(1).Info(
+				"Skipping PVC: ownerReferences name a different owner",
+				"pvc", pvc.Name, "statefulset", sts.Name, "owners", ownerRefSummary(pvc))
 			continue
 		}
 		matched = append(matched, *pvc)
