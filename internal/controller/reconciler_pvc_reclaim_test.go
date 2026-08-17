@@ -341,7 +341,7 @@ func TestReclaimOrphanedRackPVCs_NeverSelectsInUsePVC(t *testing.T) {
 			scheme := rollingRestartScheme(t)
 			cluster := pvcReclaimCluster(true)
 
-			var objs []client.Object
+			objs := make([]client.Object, 0, len(tc.podOrdinals)+len(tc.pvcOrdinals))
 			for _, ordinal := range tc.podOrdinals {
 				objs = append(objs, pvcReclaimPod(cluster.Name, ordinal))
 			}
@@ -399,7 +399,7 @@ func TestReclaimOrphanedRackPVCs_DefersWhenPodsMissingRackLabel(t *testing.T) {
 	r.reclaimOrphanedRackPVCs(context.Background(), cluster, pvcReclaimRackID,
 		pvcReclaimSts(cluster.Name, int32Ptr(1), "data"), cluster.Spec.Storage)
 
-	for ordinal := 0; ordinal < 3; ordinal++ {
+	for ordinal := range 3 {
 		name := pvcReclaimPVCName(cluster.Name, "data", ordinal)
 		if !pvcExists(t, r.Client, name) {
 			t.Errorf("PVC %s was deleted while a live pod at that ordinal exists "+
@@ -521,7 +521,7 @@ func TestReclaimOrphanedRackPVCs_DefersWhilePodAboveReplicaCountExists(t *testin
 	r.reclaimOrphanedRackPVCs(context.Background(), cluster, pvcReclaimRackID,
 		pvcReclaimSts(cluster.Name, int32Ptr(1), "data"), cluster.Spec.Storage)
 
-	for ordinal := 0; ordinal < 2; ordinal++ {
+	for ordinal := range 2 {
 		name := pvcReclaimPVCName(cluster.Name, "data", ordinal)
 		if !pvcExists(t, r.Client, name) {
 			t.Errorf("PVC %s was deleted while a pod above the replica count is still terminating", name)
@@ -567,7 +567,7 @@ func TestReclaimOrphanedRackPVCs_SkipsWhenReplicaCountUnknown(t *testing.T) {
 	r.reclaimOrphanedRackPVCs(context.Background(), cluster, pvcReclaimRackID,
 		pvcReclaimSts(cluster.Name, nil, "data"), cluster.Spec.Storage)
 
-	for ordinal := 0; ordinal < 2; ordinal++ {
+	for ordinal := range 2 {
 		name := pvcReclaimPVCName(cluster.Name, "data", ordinal)
 		if !pvcExists(t, r.Client, name) {
 			t.Errorf("PVC %s was deleted with an unknown replica count", name)
@@ -591,7 +591,7 @@ func TestReclaimOrphanedRackPVCs_SkipsAtZeroReplicas(t *testing.T) {
 	r.reclaimOrphanedRackPVCs(context.Background(), cluster, pvcReclaimRackID,
 		pvcReclaimSts(cluster.Name, int32Ptr(0), "data"), cluster.Spec.Storage)
 
-	for ordinal := 0; ordinal < 2; ordinal++ {
+	for ordinal := range 2 {
 		name := pvcReclaimPVCName(cluster.Name, "data", ordinal)
 		if !pvcExists(t, r.Client, name) {
 			t.Errorf("PVC %s was deleted for a rack at zero replicas", name)
@@ -633,7 +633,7 @@ func TestReclaimOrphanedRackPVCs_NonCascadeVolumesIssueNoList(t *testing.T) {
 		t.Errorf("issued %d List call(s) for a cluster with no cascadeDelete volume, want 0", lists)
 	}
 
-	for ordinal := 0; ordinal < 2; ordinal++ {
+	for ordinal := range 2 {
 		name := pvcReclaimPVCName(cluster.Name, "data", ordinal)
 		if !pvcExists(t, r.Client, name) {
 			t.Errorf("non-cascadeDelete PVC %s was deleted", name)
