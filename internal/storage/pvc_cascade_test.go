@@ -4,10 +4,12 @@ import (
 	"context"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -95,6 +97,29 @@ func storageSpecMultiVolume(cascadeVol, nonCascadeVol string) *v1alpha1.Aerospik
 	}
 }
 
+// testStsUID is the UID PVC ownerReferences must match to be reclaimable.
+const testStsUID = types.UID("sts-uid-1")
+
+// newTestSts builds the StatefulSet the reclaim predicate is evaluated against.
+// It supplies the namespace, the name prefix, the UID and the
+// VolumeClaimTemplate names a PVC's volume must be one of.
+func newTestSts(vctNames ...string) *appsv1.StatefulSet {
+	vcts := make([]corev1.PersistentVolumeClaim, 0, len(vctNames))
+	for _, name := range vctNames {
+		vcts = append(vcts, corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+		})
+	}
+	return &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testStsName,
+			Namespace: testNamespace,
+			UID:       testStsUID,
+		},
+		Spec: appsv1.StatefulSetSpec{VolumeClaimTemplates: vcts},
+	}
+}
+
 // --- DeleteOrphanedCascadeDeletePVCs tests ---
 
 func TestDeleteOrphanedCascadeDeletePVCs_DeletesOnlyCascadeOrphans(t *testing.T) {
@@ -113,7 +138,7 @@ func TestDeleteOrphanedCascadeDeletePVCs_DeletesOnlyCascadeOrphans(t *testing.T)
 	)
 
 	ctx := context.Background()
-	deleted, err := DeleteOrphanedCascadeDeletePVCs(ctx, c, testNamespace, testClusterName, testStsName, 1, spec)
+	deleted, err := DeleteOrphanedCascadeDeletePVCs(ctx, c, newTestSts("data", "logs"), testClusterName, 1, spec)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -166,7 +191,7 @@ func TestDeleteOrphanedCascadeDeletePVCs_NoCascadeVolumes(t *testing.T) {
 	)
 
 	ctx := context.Background()
-	deleted, err := DeleteOrphanedCascadeDeletePVCs(ctx, c, testNamespace, testClusterName, testStsName, 1, spec)
+	deleted, err := DeleteOrphanedCascadeDeletePVCs(ctx, c, newTestSts("data"), testClusterName, 1, spec)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -191,7 +216,7 @@ func TestDeleteOrphanedCascadeDeletePVCs_NilStorageSpec(t *testing.T) {
 	)
 
 	ctx := context.Background()
-	deleted, err := DeleteOrphanedCascadeDeletePVCs(ctx, c, testNamespace, testClusterName, testStsName, 0, nil)
+	deleted, err := DeleteOrphanedCascadeDeletePVCs(ctx, c, newTestSts("data"), testClusterName, 0, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -211,7 +236,7 @@ func TestDeleteOrphanedCascadeDeletePVCs_AllCascadeAllOrphans(t *testing.T) {
 	)
 
 	ctx := context.Background()
-	deleted, err := DeleteOrphanedCascadeDeletePVCs(ctx, c, testNamespace, testClusterName, testStsName, 0, spec)
+	deleted, err := DeleteOrphanedCascadeDeletePVCs(ctx, c, newTestSts("data"), testClusterName, 0, spec)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -238,7 +263,7 @@ func TestDeleteOrphanedCascadeDeletePVCs_NoOrphans(t *testing.T) {
 	)
 
 	ctx := context.Background()
-	deleted, err := DeleteOrphanedCascadeDeletePVCs(ctx, c, testNamespace, testClusterName, testStsName, 2, spec)
+	deleted, err := DeleteOrphanedCascadeDeletePVCs(ctx, c, newTestSts("data"), testClusterName, 2, spec)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -273,7 +298,7 @@ func TestDeleteOrphanedCascadeDeletePVCs_PolicyFallback(t *testing.T) {
 	)
 
 	ctx := context.Background()
-	deleted, err := DeleteOrphanedCascadeDeletePVCs(ctx, c, testNamespace, testClusterName, testStsName, 1, spec)
+	deleted, err := DeleteOrphanedCascadeDeletePVCs(ctx, c, newTestSts("data"), testClusterName, 1, spec)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

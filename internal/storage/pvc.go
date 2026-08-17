@@ -7,8 +7,10 @@ import (
 	"strconv"
 	"strings"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1alpha1 "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/api/v1alpha1"
@@ -91,26 +93,121 @@ func HasCascadeDeletePVCs(storageSpec *v1alpha1.AerospikeStorageSpec) bool {
 	return len(cascadeDeleteVolumeNames(storageSpec)) > 0
 }
 
-// DeleteOrphanedCascadeDeletePVCs removes PVCs for pod ordinals >= desiredReplicas,
-// but only for volumes that have cascadeDelete enabled. Non-cascade PVCs are preserved.
-// This is the correct function to use during scale-down.
+// ownedByStatefulSetUID reports whether pvc may be attributed to the given
+// StatefulSet UID.
+//
+// A PVC with NO ownerReferences passes, because that is the normal shape rather
+// than an anomaly: the StatefulSet controller only stamps an ownerReference onto
+// a volumeClaimTemplate PVC when persistentVolumeClaimRetentionPolicy is set to
+// Delete, and this operator never sets that field — it defaults to
+// Retain/Retain, documented upstream as "retained until manually deleted".
+// Requiring an ownerReference would reclaim nothing at all on a default install.
+//
+// What this check does buy is rejecting a PVC that names some *other* owner: a
+// sibling StatefulSet, a foreign cluster, or a hand-created claim that happens
+// to collide with the ordinal naming pattern.
+func ownedByStatefulSetUID(pvc *corev1.PersistentVolumeClaim, stsUID types.UID) bool {
+	refs := pvc.GetOwnerReferences()
+	if len(refs) == 0 {
+		return true
+	}
+	for i := range refs {
+		if refs[i].UID == stsUID {
+			return true
+		}
+	}
+	return false
+}
+
+// ownedOrphanCandidates returns the PVCs that belong to sts and sit at an
+// ordinal at or above desiredReplicas.
+//
+// Ownership is established against the StatefulSet object the caller just read,
+// and every available signal must agree:
+//
+//   - The operator's cluster labels must be present. Unlike
+//     GetPVCsForStatefulSet this deliberately does NOT fall back to an
+//     unfiltered namespace-wide List. That fallback exists so cluster
+//     *deletion* can still find legacy pre-label PVCs, and in that path a name
+//     substring is the only ownership signal. Reclamation runs on every
+//     reconcile of every rack, so it must not inherit a name-only test — an
+//     unlabelled foreign claim called data-<sts>-9 would be selected.
+//   - The PVC name must decompose as <volume>-<stsName>-<ordinal> where
+//     <volume> is one of the StatefulSet's own VolumeClaimTemplate names, taken
+//     from the live object rather than from the spec.
+//   - Any ownerReferences present must include this StatefulSet's UID.
 //
 // desiredReplicas must be the replica count the StatefulSet is actually running
 // (its own spec.replicas), never a lower target the operator is still working
 // towards: ordinals between the two still have live pods holding their volumes.
+func ownedOrphanCandidates(
+	ctx context.Context,
+	c client.Client,
+	sts *appsv1.StatefulSet,
+	clusterName string,
+	desiredReplicas int32,
+) ([]corev1.PersistentVolumeClaim, error) {
+	vctNames := make(map[string]bool, len(sts.Spec.VolumeClaimTemplates))
+	for i := range sts.Spec.VolumeClaimTemplates {
+		vctNames[sts.Spec.VolumeClaimTemplates[i].Name] = true
+	}
+	if len(vctNames) == 0 {
+		return nil, nil
+	}
+
+	pvcList := &corev1.PersistentVolumeClaimList{}
+	if err := c.List(ctx, pvcList,
+		client.InNamespace(sts.Namespace),
+		client.MatchingLabels{
+			"app.kubernetes.io/name":     "aerospike-cluster",
+			"app.kubernetes.io/instance": clusterName,
+		},
+	); err != nil {
+		return nil, fmt.Errorf("listing PVCs in namespace %s: %w", sts.Namespace, err)
+	}
+
+	var matched []corev1.PersistentVolumeClaim
+	for i := range pvcList.Items {
+		pvc := &pvcList.Items[i]
+
+		ordinal, ok := extractOrdinal(pvc.Name, sts.Name)
+		if !ok || ordinal < desiredReplicas {
+			continue
+		}
+		volName, ok := extractVolumeName(pvc.Name, sts.Name)
+		if !ok || !vctNames[volName] {
+			continue
+		}
+		if !ownedByStatefulSetUID(pvc, sts.UID) {
+			continue
+		}
+		matched = append(matched, *pvc)
+	}
+
+	return matched, nil
+}
+
+// DeleteOrphanedCascadeDeletePVCs removes PVCs for pod ordinals >= desiredReplicas,
+// but only for volumes that have cascadeDelete enabled. Non-cascade PVCs are preserved.
+// This is the correct function to use during scale-down.
+//
+// sts must be the live StatefulSet object; it supplies the namespace, the name
+// prefix, the VolumeClaimTemplate names and the UID that together establish
+// ownership. See ownedOrphanCandidates for the full predicate.
 func DeleteOrphanedCascadeDeletePVCs(
 	ctx context.Context,
 	c client.Client,
-	namespace, clusterName, stsName string,
+	sts *appsv1.StatefulSet,
+	clusterName string,
 	desiredReplicas int32,
 	storageSpec *v1alpha1.AerospikeStorageSpec,
 ) (int, error) {
 	cascadeVolumes := cascadeDeleteVolumeNames(storageSpec)
-	if len(cascadeVolumes) == 0 {
+	if len(cascadeVolumes) == 0 || sts == nil {
 		return 0, nil
 	}
 
-	pvcs, err := GetPVCsForStatefulSet(ctx, c, namespace, clusterName, stsName)
+	pvcs, err := ownedOrphanCandidates(ctx, c, sts, clusterName, desiredReplicas)
 	if err != nil {
 		return 0, err
 	}
@@ -119,21 +216,9 @@ func DeleteOrphanedCascadeDeletePVCs(
 	var deleteErrs []error
 	for i := range pvcs {
 		pvc := &pvcs[i]
-		ordinal, ok := extractOrdinal(pvc.Name, stsName)
-		if !ok {
-			continue
-		}
 
-		if ordinal < desiredReplicas {
-			continue
-		}
-
-		volName, ok := extractVolumeName(pvc.Name, stsName)
-		if !ok {
-			continue
-		}
-
-		if !cascadeVolumes[volName] {
+		volName, ok := extractVolumeName(pvc.Name, sts.Name)
+		if !ok || !cascadeVolumes[volName] {
 			continue
 		}
 

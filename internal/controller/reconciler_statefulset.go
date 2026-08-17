@@ -105,7 +105,12 @@ func (r *AerospikeClusterReconciler) reconcileStatefulSet(
 	// reached whichever way this function returns — see reclaimOrphanedRackPVCs
 	// for why keying it on the replica delta of a single reconcile leaked every
 	// scale-down PVC permanently.
-	r.reclaimOrphanedRackPVCs(ctx, cluster, rack.ID, stsName, existing.Spec.Replicas, storageSpec)
+	//
+	// Deliberately runs before a scale-up patch too. On 3->5 it reclaims any
+	// leftover PVCs at ordinals 3-4 and the StatefulSet then provisions fresh
+	// ones, which is the whole point: skipping reclamation here would hand the
+	// new pods the exact devices the removed nodes wrote.
+	r.reclaimOrphanedRackPVCs(ctx, cluster, rack.ID, existing, storageSpec)
 
 	needsUpdate := oldReplicas != rackSize
 	var existingHash, existingPodSpecHash string
@@ -261,18 +266,25 @@ func (r *AerospikeClusterReconciler) checkScaleDownReadiness(
 //
 // Safety, in the order the guards run:
 //
-//   - specReplicas is the StatefulSet's own spec.replicas, NEVER the desired
-//     rack size. During a batched scale-down the ordinals between the two still
-//     have live pods, and deleting their PVCs would pull the volume out from
-//     under a running Aerospike node. A nil or non-positive value means the
-//     observed replica count is unknown or the rack is being torn down
-//     entirely, and reclamation is skipped rather than guessed at.
-//   - Only PVCs at ordinal >= specReplicas are ever considered, and only ones
-//     the operator owns and marked cascadeDelete. Both bounds live in
-//     storage.DeleteOrphanedCascadeDeletePVCs; a PVC in use by a pod at an
-//     ordinal below specReplicas cannot be selected by construction.
-//   - A pod observed at or above specReplicas defers the whole pass: that pod
-//     is still terminating and still mounting its volume.
+//   - The bound is sts.Spec.Replicas — the count the StatefulSet is actually
+//     running — NEVER the desired rack size. During a batched scale-down the
+//     ordinals between the two still have live pods, and deleting their PVCs
+//     would pull the volume out from under a running Aerospike node. A nil or
+//     non-positive value means the observed replica count is unknown or the rack
+//     is being torn down entirely, and reclamation is skipped rather than
+//     guessed at.
+//   - The observed pod set must match the replica count exactly. This gate is
+//     LOAD-BEARING, not a second layer: the ordinal bound alone is not
+//     sufficient, because during a scale-down the StatefulSet's replica count
+//     drops before the removed pods finish terminating, so a PVC at an ordinal
+//     >= spec.replicas can still be mounted. Requiring len(pods) ==
+//     spec.replicas closes the case where the label query returns fewer pods
+//     than exist and the per-pod check would be vacuous.
+//   - Selection then requires ALL of: ordinal >= spec.replicas, the operator's
+//     cluster labels (with no unfiltered namespace-wide fallback), a volume name
+//     that is one of the StatefulSet's own VolumeClaimTemplates, no foreign
+//     ownerReference, and cascadeDelete on that volume. See
+//     storage.ownedOrphanCandidates.
 //
 // Cost on the steady-state path: nothing at all for clusters with no
 // cascadeDelete PV volume (the common case — cascadeDelete defaults to false),
@@ -281,8 +293,7 @@ func (r *AerospikeClusterReconciler) reclaimOrphanedRackPVCs(
 	ctx context.Context,
 	cluster *ackov1alpha1.AerospikeCluster,
 	rackID int,
-	stsName string,
-	specReplicas *int32,
+	sts *appsv1.StatefulSet,
 	storageSpec *ackov1alpha1.AerospikeStorageSpec,
 ) {
 	log := logf.FromContext(ctx)
@@ -293,15 +304,20 @@ func (r *AerospikeClusterReconciler) reclaimOrphanedRackPVCs(
 		return
 	}
 
+	if sts == nil {
+		return
+	}
+	stsName := sts.Name
+
 	// Without an observed replica count there is no safe lower bound on which
 	// ordinals are orphaned. Treating nil as 0 would make every PVC in the rack
 	// a candidate.
-	if specReplicas == nil {
+	if sts.Spec.Replicas == nil {
 		log.V(1).Info("Skipping PVC reclamation: StatefulSet has no observed replica count",
 			"statefulset", stsName)
 		return
 	}
-	currentReplicas := *specReplicas
+	currentReplicas := *sts.Spec.Replicas
 
 	// A rack at zero replicas is being torn down, not scaled down. Whole-rack
 	// PVC deletion belongs to the rack-removal / cluster-deletion path, which
@@ -320,6 +336,17 @@ func (r *AerospikeClusterReconciler) reclaimOrphanedRackPVCs(
 		return
 	}
 
+	// Fail closed unless the rack has converged to exactly the observed replica
+	// count. Fewer pods than replicas means either the rack is still coming up or
+	// the label query is not seeing every pod — in which case the per-pod ordinal
+	// check below would pass vacuously while live pods sit above the bound. More
+	// pods than replicas means a scale-down is still in flight.
+	if len(rackPods) != int(currentReplicas) {
+		log.V(1).Info("Deferring PVC reclamation: observed pod count does not match the replica count",
+			"statefulset", stsName, "pods", len(rackPods), "replicas", currentReplicas)
+		return
+	}
+
 	for i := range rackPods {
 		ordinal, ok := rackPodOrdinal(rackPods[i].Name)
 		if !ok || ordinal >= int(currentReplicas) {
@@ -334,7 +361,7 @@ func (r *AerospikeClusterReconciler) reclaimOrphanedRackPVCs(
 	log.V(1).Info("Checking for orphaned cascade-delete PVCs",
 		"statefulset", stsName, "replicas", currentReplicas)
 	deleted, err := storage.DeleteOrphanedCascadeDeletePVCs(
-		ctx, r.Client, cluster.Namespace, cluster.Name, stsName, currentReplicas, storageSpec)
+		ctx, r.Client, sts, cluster.Name, currentReplicas, storageSpec)
 	if err != nil {
 		log.Error(err, "Failed to delete orphaned cascade PVCs", "statefulset", stsName)
 		r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventPVCCleanupFailed,
