@@ -11,13 +11,16 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 func boolPtr(b bool) *bool { return &b }
@@ -7095,6 +7098,103 @@ func TestValidate_CEImageVersionEnforcement(t *testing.T) {
 				t.Errorf("validate() with image %q: unexpected error: %v", tc.image, err)
 			}
 		})
+	}
+}
+
+// newServiceMonitorGetErrClient builds a ServiceMonitor-aware fake client whose
+// Get always fails with getErr, so the validator's uniqueness probe can be
+// driven through a specific API error.
+func newServiceMonitorGetErrClient(t *testing.T, getErr error) client.Client {
+	t.Helper()
+
+	scheme := runtime.NewScheme()
+	if err := AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme: %v", err)
+	}
+
+	smListGVK := serviceMonitorGVK
+	smListGVK.Kind = "ServiceMonitorList"
+	scheme.AddKnownTypeWithName(serviceMonitorGVK, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(smListGVK, &unstructured.UnstructuredList{})
+
+	base := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	return interceptor.NewClient(base, interceptor.Funcs{
+		Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey,
+			obj client.Object, opts ...client.GetOption) error {
+			return getErr
+		},
+	})
+}
+
+// TestValidateServiceMonitorUniqueness_ForbiddenDoesNotRejectCR pins that a 403
+// on the ServiceMonitor uniqueness probe does not fail admission.
+//
+// The probe is an optimisation: it turns a name collision into a clear
+// admission error instead of a confusing reconcile failure. Rejecting the CR
+// when the operator merely lacks permission to run it is strictly worse than
+// the reconcile-time degradation for the same 403 — the user cannot create or
+// update the AerospikeCluster at all, so they cannot even edit their way out of
+// it. That is reachable in the scenario the chart supports with
+// `--set rbac.create=false`, where the cluster admin trims
+// monitoring.coreos.com out of the operator's role.
+func TestValidateServiceMonitorUniqueness_ForbiddenDoesNotRejectCR(t *testing.T) {
+	cluster := makeMonitoringEnabledCluster("uid-new")
+
+	forbidden := apierrors.NewForbidden(
+		schema.GroupResource{Group: "monitoring.coreos.com", Resource: "servicemonitors"},
+		serviceMonitorName(cluster),
+		fmt.Errorf(`clusterrole "acko-manager" does not grant get on servicemonitors`),
+	)
+
+	v := &AerospikeClusterValidator{Client: newServiceMonitorGetErrClient(t, forbidden)}
+
+	if err := v.validateServiceMonitorUniqueness(context.Background(), cluster); err != nil {
+		t.Fatalf("validateServiceMonitorUniqueness() = %v, want nil: a 403 on the "+
+			"uniqueness probe must not reject the CR at admission", err)
+	}
+}
+
+// TestValidate_ForbiddenServiceMonitorProbeStillAdmits drives the whole
+// validator, not just the probe, so the 403 has to survive every layer between
+// validate() and the admission response.
+func TestValidate_ForbiddenServiceMonitorProbeStillAdmits(t *testing.T) {
+	cluster := makeMonitoringEnabledCluster("uid-new")
+	cluster.Spec.Monitoring.ExporterImage = "aerospike-prometheus-exporter:v1"
+	cluster.Spec.Monitoring.Port = 9145
+	cluster.Spec.Monitoring.ServiceMonitor.Interval = "30s"
+
+	forbidden := apierrors.NewForbidden(
+		schema.GroupResource{Group: "monitoring.coreos.com", Resource: "servicemonitors"},
+		serviceMonitorName(cluster), fmt.Errorf("access denied"))
+
+	v := &AerospikeClusterValidator{Client: newServiceMonitorGetErrClient(t, forbidden)}
+
+	if _, err := v.ValidateCreate(context.Background(), cluster); err != nil {
+		t.Errorf("ValidateCreate() = %v, want nil", err)
+	}
+	if _, err := v.ValidateUpdate(context.Background(), cluster.DeepCopy(), cluster); err != nil {
+		t.Errorf("ValidateUpdate() = %v, want nil", err)
+	}
+}
+
+// TestValidateServiceMonitorUniqueness_OtherErrorsStillReject guards the other
+// side: only "we are not allowed to look" and "the CRD is absent" may pass. A
+// transient API failure must still fail admission rather than admit a CR whose
+// ServiceMonitor name may collide.
+func TestValidateServiceMonitorUniqueness_OtherErrorsStillReject(t *testing.T) {
+	cluster := makeMonitoringEnabledCluster("uid-new")
+
+	internalErr := apierrors.NewInternalError(fmt.Errorf("etcd unavailable"))
+
+	v := &AerospikeClusterValidator{Client: newServiceMonitorGetErrClient(t, internalErr)}
+
+	err := v.validateServiceMonitorUniqueness(context.Background(), cluster)
+	if err == nil {
+		t.Fatal("validateServiceMonitorUniqueness() = nil, want error for a non-403 API failure")
+	}
+	if !strings.Contains(err.Error(), "getting ServiceMonitor") {
+		t.Errorf("expected the wrapped Get error, got: %v", err)
 	}
 }
 

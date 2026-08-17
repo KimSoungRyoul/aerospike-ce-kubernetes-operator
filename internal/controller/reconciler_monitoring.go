@@ -7,6 +7,7 @@ import (
 	"maps"
 	"reflect"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -33,6 +34,18 @@ var prometheusRuleGVK = schema.GroupVersionKind{
 	Kind:    "PrometheusRule",
 }
 
+// reconcileMonitoring reconciles the metrics Service plus the two optional
+// Prometheus-Operator resources.
+//
+// ServiceMonitor and PrometheusRule are best-effort: the CRDs may not be
+// installed, and the operator's ClusterRole may not grant access to them (a
+// chart install that predates the RBAC entry, or an RBAC-only install trimmed
+// by the cluster admin). Both of those conditions must degrade the individual
+// feature, never fail the reconcile — an error returned from here reaches
+// handleReconcileError, and after maxFailedReconciles consecutive failures the
+// circuit breaker freezes scale, rolling restart, config and ACL
+// reconciliation for the whole cluster. Losing the entire control loop over an
+// optional monitoring integration is never the right trade.
 func (r *AerospikeClusterReconciler) reconcileMonitoring(
 	ctx context.Context,
 	cluster *ackov1alpha1.AerospikeCluster,
@@ -53,10 +66,15 @@ func (r *AerospikeClusterReconciler) reconcileMonitoring(
 		cluster.Spec.Monitoring.ServiceMonitor.Enabled
 
 	if err := r.reconcileServiceMonitor(ctx, cluster, smEnabled); err != nil {
-		// Only log and skip if the CRD is not installed; propagate other errors.
-		if meta.IsNoMatchError(err) {
+		// Only log and skip if the CRD is not installed or the operator is not
+		// allowed to touch it; propagate other errors.
+		switch {
+		case meta.IsNoMatchError(err):
 			log.Info("ServiceMonitor CRD not installed, skipping")
-		} else {
+		case errors.IsForbidden(err):
+			logForbiddenMonitoringResource(
+				log, smEnabled, "ServiceMonitor", utils.ServiceMonitorName(cluster.Name), err)
+		default:
 			return fmt.Errorf("reconciling ServiceMonitor: %w", err)
 		}
 	}
@@ -67,14 +85,44 @@ func (r *AerospikeClusterReconciler) reconcileMonitoring(
 		cluster.Spec.Monitoring.PrometheusRule.Enabled
 
 	if err := r.reconcilePrometheusRule(ctx, cluster, prEnabled); err != nil {
-		if meta.IsNoMatchError(err) {
+		switch {
+		case meta.IsNoMatchError(err):
 			log.Info("PrometheusRule CRD not installed, skipping")
-		} else {
+		case errors.IsForbidden(err):
+			logForbiddenMonitoringResource(
+				log, prEnabled, "PrometheusRule", utils.PrometheusRuleName(cluster.Name), err)
+		default:
 			return fmt.Errorf("reconciling PrometheusRule: %w", err)
 		}
 	}
 
 	return nil
+}
+
+// logForbiddenMonitoringResource reports a 403 on an optional monitoring
+// resource at a level that matches what the user loses.
+//
+// A 403 is not only an RBAC gap. The API server returns Forbidden for a
+// ValidatingWebhook or policy-engine (Kyverno / Gatekeeper) denial and for
+// ResourceQuota exhaustion too, so any of those degrades the feature by this
+// same path. Degrading is still the right call — freezing the whole control
+// loop over an optional integration is worse — but when the resource is
+// *enabled* the operator is silently not delivering something the user asked
+// for, and that must not be buried in an Info line. There is no
+// MonitoringReady status condition to read instead, so the log is currently the
+// only signal; publishing a degraded condition is the proper follow-up.
+//
+// When the resource is disabled the 403 only blocks the stale-object cleanup
+// Get. That is worth reporting, but not at Error on every reconcile for a
+// feature nobody asked for.
+func logForbiddenMonitoringResource(log logr.Logger, enabled bool, kind, name string, err error) {
+	if enabled {
+		log.Error(err, "Access denied for an enabled monitoring resource; feature degraded",
+			"kind", kind, "name", name)
+		return
+	}
+	log.Info("Access denied for monitoring resource, skipping stale-object cleanup",
+		"kind", kind, "name", name, "error", err.Error())
 }
 
 func (r *AerospikeClusterReconciler) reconcileMetricsService(

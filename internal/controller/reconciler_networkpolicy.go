@@ -185,6 +185,19 @@ func (r *AerospikeClusterReconciler) reconcileCiliumNetworkPolicy(
 		return nil
 	}
 
+	// Access denied — same shape as the CRD-absent case and the same reason to
+	// degrade rather than fail: this error reaches reconcileCluster ->
+	// handleReconcileError -> the circuit breaker, which after
+	// maxFailedReconciles freezes scale, rolling restart, config and ACL
+	// reconciliation for the whole cluster. Losing the control loop over an
+	// optional network-policy integration is never the right trade. Logged at
+	// Error because the policy was explicitly enabled and is not being applied.
+	if err != nil && errors.IsForbidden(err) {
+		log.Error(err, "Access denied for CiliumNetworkPolicy; network policy not applied",
+			"name", npName)
+		return nil
+	}
+
 	selectorLabels := utils.SelectorLabelsForCluster(cluster.Name)
 	labels := utils.LabelsForCluster(cluster.Name)
 

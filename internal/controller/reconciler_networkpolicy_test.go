@@ -1,12 +1,22 @@
 package controller
 
 import (
+	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	ackov1alpha1 "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/api/v1alpha1"
 	"github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/internal/podutil"
 	networkingv1 "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/tools/record"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 func TestBuildK8sNetworkPolicy_BasicPorts(t *testing.T) {
@@ -230,5 +240,98 @@ func TestK8sNetworkPolicyChanged_LabelsChanged(t *testing.T) {
 
 	if changed := k8sNetworkPolicyChanged(existing, desired); !changed {
 		t.Fatal("k8sNetworkPolicyChanged() = false, want true when labels differ")
+	}
+}
+
+// TestReconcileNetworkPolicy_CiliumForbiddenDegrades covers the same 403 funnel
+// as the monitoring resources. reconcileNetworkPolicy's error reaches
+// reconcileCluster -> handleReconcileError -> the circuit breaker
+// (reconciler.go:609), so a denied CiliumNetworkPolicy Get would freeze scale,
+// rolling restart, config and ACL reconciliation for the whole cluster over an
+// optional network-policy integration. The chart does grant cilium.io, so the
+// exposure is narrower than the missing prometheusrules grant — but an RBAC-only
+// install, a policy-engine denial or a ResourceQuota all reach it.
+func TestReconcileNetworkPolicy_CiliumForbiddenDegrades(t *testing.T) {
+	scheme := rollingRestartScheme(t)
+
+	cluster := &ackov1alpha1.AerospikeCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: monitoringTestCluster, Namespace: ctrlTestNamespace},
+		Spec: ackov1alpha1.AerospikeClusterSpec{
+			Size:  1,
+			Image: "aerospike:ce-8.1.1.1",
+			NetworkPolicyConfig: &ackov1alpha1.NetworkPolicyConfig{
+				Enabled: true,
+				Type:    ackov1alpha1.NetworkPolicyTypeCilium,
+			},
+		},
+	}
+
+	base := fake.NewClientBuilder().WithScheme(scheme).Build()
+	denying := interceptor.NewClient(base, interceptor.Funcs{
+		Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey,
+			obj client.Object, opts ...client.GetOption) error {
+			if u, ok := obj.(*unstructured.Unstructured); ok &&
+				u.GroupVersionKind() == ciliumNetworkPolicyGVK {
+				return apierrors.NewForbidden(
+					schema.GroupResource{Group: "cilium.io", Resource: "ciliumnetworkpolicies"},
+					key.Name, errors.New("access denied"))
+			}
+			return c.Get(ctx, key, obj, opts...)
+		},
+	})
+
+	r := &AerospikeClusterReconciler{
+		Client:   denying,
+		Scheme:   scheme,
+		Recorder: record.NewFakeRecorder(8),
+	}
+
+	if err := r.reconcileNetworkPolicy(context.Background(), cluster); err != nil {
+		t.Fatalf("reconcileNetworkPolicy() = %v, want nil: a 403 on an optional "+
+			"CiliumNetworkPolicy must not fail the reconcile", err)
+	}
+}
+
+// TestReconcileNetworkPolicy_CiliumOtherErrorStillFails guards the other side —
+// only a 403 or an absent CRD may degrade; a transient API failure must surface.
+func TestReconcileNetworkPolicy_CiliumOtherErrorStillFails(t *testing.T) {
+	scheme := rollingRestartScheme(t)
+
+	cluster := &ackov1alpha1.AerospikeCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: monitoringTestCluster, Namespace: ctrlTestNamespace},
+		Spec: ackov1alpha1.AerospikeClusterSpec{
+			Size:  1,
+			Image: "aerospike:ce-8.1.1.1",
+			NetworkPolicyConfig: &ackov1alpha1.NetworkPolicyConfig{
+				Enabled: true,
+				Type:    ackov1alpha1.NetworkPolicyTypeCilium,
+			},
+		},
+	}
+
+	base := fake.NewClientBuilder().WithScheme(scheme).Build()
+	failing := interceptor.NewClient(base, interceptor.Funcs{
+		Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey,
+			obj client.Object, opts ...client.GetOption) error {
+			if u, ok := obj.(*unstructured.Unstructured); ok &&
+				u.GroupVersionKind() == ciliumNetworkPolicyGVK {
+				return apierrors.NewInternalError(errors.New("etcd unavailable"))
+			}
+			return c.Get(ctx, key, obj, opts...)
+		},
+	})
+
+	r := &AerospikeClusterReconciler{
+		Client:   failing,
+		Scheme:   scheme,
+		Recorder: record.NewFakeRecorder(8),
+	}
+
+	err := r.reconcileNetworkPolicy(context.Background(), cluster)
+	if err == nil {
+		t.Fatal("reconcileNetworkPolicy() = nil, want error for a non-403 API failure")
+	}
+	if !strings.Contains(err.Error(), "getting CiliumNetworkPolicy") {
+		t.Errorf("expected the wrapped Get error, got: %v", err)
 	}
 }
