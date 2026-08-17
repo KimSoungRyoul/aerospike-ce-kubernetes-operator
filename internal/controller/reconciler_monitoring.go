@@ -7,6 +7,7 @@ import (
 	"maps"
 	"reflect"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -71,8 +72,8 @@ func (r *AerospikeClusterReconciler) reconcileMonitoring(
 		case meta.IsNoMatchError(err):
 			log.Info("ServiceMonitor CRD not installed, skipping")
 		case errors.IsForbidden(err):
-			log.Info("ServiceMonitor access denied by RBAC, skipping",
-				"name", utils.ServiceMonitorName(cluster.Name), "error", err.Error())
+			logForbiddenMonitoringResource(
+				log, smEnabled, "ServiceMonitor", utils.ServiceMonitorName(cluster.Name), err)
 		default:
 			return fmt.Errorf("reconciling ServiceMonitor: %w", err)
 		}
@@ -88,14 +89,40 @@ func (r *AerospikeClusterReconciler) reconcileMonitoring(
 		case meta.IsNoMatchError(err):
 			log.Info("PrometheusRule CRD not installed, skipping")
 		case errors.IsForbidden(err):
-			log.Info("PrometheusRule access denied by RBAC, skipping",
-				"name", utils.PrometheusRuleName(cluster.Name), "error", err.Error())
+			logForbiddenMonitoringResource(
+				log, prEnabled, "PrometheusRule", utils.PrometheusRuleName(cluster.Name), err)
 		default:
 			return fmt.Errorf("reconciling PrometheusRule: %w", err)
 		}
 	}
 
 	return nil
+}
+
+// logForbiddenMonitoringResource reports a 403 on an optional monitoring
+// resource at a level that matches what the user loses.
+//
+// A 403 is not only an RBAC gap. The API server returns Forbidden for a
+// ValidatingWebhook or policy-engine (Kyverno / Gatekeeper) denial and for
+// ResourceQuota exhaustion too, so any of those degrades the feature by this
+// same path. Degrading is still the right call — freezing the whole control
+// loop over an optional integration is worse — but when the resource is
+// *enabled* the operator is silently not delivering something the user asked
+// for, and that must not be buried in an Info line. There is no
+// MonitoringReady status condition to read instead, so the log is currently the
+// only signal; publishing a degraded condition is the proper follow-up.
+//
+// When the resource is disabled the 403 only blocks the stale-object cleanup
+// Get. That is worth reporting, but not at Error on every reconcile for a
+// feature nobody asked for.
+func logForbiddenMonitoringResource(log logr.Logger, enabled bool, kind, name string, err error) {
+	if enabled {
+		log.Error(err, "Access denied for an enabled monitoring resource; feature degraded",
+			"kind", kind, "name", name)
+		return
+	}
+	log.Info("Access denied for monitoring resource, skipping stale-object cleanup",
+		"kind", kind, "name", name, "error", err.Error())
 }
 
 func (r *AerospikeClusterReconciler) reconcileMetricsService(

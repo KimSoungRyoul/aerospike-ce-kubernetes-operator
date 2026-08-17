@@ -451,6 +451,20 @@ func (v *AerospikeClusterValidator) validateServiceMonitorUniqueness(
 		// CRD not installed — the reconciler will skip ServiceMonitor reconciliation
 		// with a clearer log message, so don't fail admission here.
 		return nil
+	case apierrors.IsForbidden(err):
+		// Access denied on the uniqueness probe. Failing admission here is worse
+		// than the reconcile-time degradation for the same 403: it rejects every
+		// create and update of the AerospikeCluster, so the user cannot even
+		// write the CR, let alone fix it. That is reachable in exactly the
+		// scenario the chart supports with `--set rbac.create=false` — an
+		// RBAC-only install where the cluster admin trimmed
+		// monitoring.coreos.com out of the operator's role.
+		//
+		// The probe is an optimisation, not a correctness requirement: it turns
+		// a name collision into an admission error instead of a confusing
+		// reconcile failure. Without permission to run it we lose that nicety
+		// and nothing else — the reconciler still degrades the feature safely.
+		return nil
 	default:
 		return fmt.Errorf("getting ServiceMonitor %q in namespace %q: %w", smName, cluster.Namespace, err)
 	}
