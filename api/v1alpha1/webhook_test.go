@@ -7197,3 +7197,414 @@ func TestValidateServiceMonitorUniqueness_OtherErrorsStillReject(t *testing.T) {
 		t.Errorf("expected the wrapped Get error, got: %v", err)
 	}
 }
+
+// --- CE network-TLS rejection tests ---
+//
+// The pre-existing CE TLS check looked only at the top-level
+// aerospikeConfig["tls"] key. Real Aerospike TLS lives inside the network
+// stanza — `network { tls <name> { ... } }` plus tls-port / tls-name /
+// tls-authenticate-client on each of service, heartbeat and fabric — which is
+// what the Aerospike documentation tells users to write. configgen renders any
+// sub-map under `network` verbatim, so an unchecked stanza reached
+// aerospike.conf and the CE asd process refused to start: permanent
+// CrashLoopBackOff, no admission error naming the Enterprise feature, and on a
+// live cluster the config-hash change rolled every pod into it batch by batch.
+
+func TestValidate_NetworkTLSRejected(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+
+	tests := []struct {
+		name    string
+		network map[string]any
+		// wantPath is the key path the admission error must name so an operator
+		// can find and delete the offending key.
+		wantPath string
+	}{
+		{
+			name: "network.tls certificate stanza",
+			network: map[string]any{
+				"tls": map[string]any{
+					"aerospike-tls": map[string]any{
+						"cert-file": "/etc/aerospike/cert.pem",
+						"key-file":  "/etc/aerospike/key.pem",
+					},
+				},
+			},
+			wantPath: "aerospikeConfig.network must not contain 'tls' section",
+		},
+		{
+			// Presence of the key is enough — a nil value still says the user
+			// intended TLS, and configgen would render an empty stanza.
+			name:     "network.tls with a nil value",
+			network:  map[string]any{"tls": nil},
+			wantPath: "aerospikeConfig.network must not contain 'tls' section",
+		},
+		{
+			name: "network.service.tls-port",
+			network: map[string]any{
+				"service": map[string]any{
+					"port":     3000,
+					"tls-port": 4333,
+				},
+			},
+			wantPath: "aerospikeConfig.network.service.tls-port",
+		},
+		{
+			name: "network.service.tls-authenticate-client",
+			network: map[string]any{
+				"service": map[string]any{
+					"tls-authenticate-client": "any",
+				},
+			},
+			wantPath: "aerospikeConfig.network.service.tls-authenticate-client",
+		},
+		{
+			// heartbeat has its own sub-generator (generateHeartbeatSubsection),
+			// so it needs its own case rather than sharing the service path.
+			name: "network.heartbeat.tls-port",
+			network: map[string]any{
+				"heartbeat": map[string]any{
+					"mode":     "mesh",
+					"tls-port": 3012,
+				},
+			},
+			wantPath: "aerospikeConfig.network.heartbeat.tls-port",
+		},
+		{
+			name: "network.heartbeat.tls-name",
+			network: map[string]any{
+				"heartbeat": map[string]any{
+					"mode":     "mesh",
+					"tls-name": "aerospike-tls",
+				},
+			},
+			wantPath: "aerospikeConfig.network.heartbeat.tls-name",
+		},
+		{
+			name: "network.fabric.tls-port",
+			network: map[string]any{
+				"fabric": map[string]any{
+					"port":     3001,
+					"tls-port": 3011,
+				},
+			},
+			wantPath: "aerospikeConfig.network.fabric.tls-port",
+		},
+		{
+			name: "network.fabric.tls-name",
+			network: map[string]any{
+				"fabric": map[string]any{
+					"tls-name": "aerospike-tls",
+				},
+			},
+			wantPath: "aerospikeConfig.network.fabric.tls-name",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cluster := &AerospikeCluster{
+				Spec: AerospikeClusterSpec{
+					Size:  3,
+					Image: "aerospike:ce-8.1.1.1",
+					AerospikeConfig: &AerospikeConfigSpec{
+						Value: map[string]any{"network": tc.network},
+					},
+				},
+			}
+
+			_, err := v.validate(cluster)
+			if err == nil {
+				t.Fatalf("validate() = nil, want error for %s", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.wantPath) {
+				t.Errorf("error must name the offending key path %q, got: %v", tc.wantPath, err)
+			}
+			// Every CE rejection names the Enterprise feature (goal 3-5), so an
+			// operator can tell "not supported here" from "you typed it wrong".
+			if !strings.Contains(err.Error(), "TLS is Enterprise-only") {
+				t.Errorf("error must name the Enterprise feature, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestValidate_NetworkTLSRejectedAcrossAllEndpointsAtOnce pins that a full TLS
+// configuration — the shape a user copies out of the Aerospike docs — is
+// reported key by key rather than only at the first hit, so one admission
+// round-trip tells the operator everything to remove.
+func TestValidate_NetworkTLSRejectedAcrossAllEndpointsAtOnce(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeConfig: &AerospikeConfigSpec{
+				Value: map[string]any{
+					"network": map[string]any{
+						"tls": map[string]any{
+							"aerospike-tls": map[string]any{"cert-file": "/cert.pem"},
+						},
+						"service": map[string]any{
+							"port":     3000,
+							"tls-port": 4333,
+							"tls-name": "aerospike-tls",
+						},
+						"heartbeat": map[string]any{
+							"mode":     "mesh",
+							"tls-port": 3012,
+						},
+						"fabric": map[string]any{
+							"tls-port": 3011,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("validate() = nil, want error for a full network TLS configuration")
+	}
+
+	wantPaths := []string{
+		"aerospikeConfig.network must not contain 'tls' section",
+		"aerospikeConfig.network.service.tls-name",
+		"aerospikeConfig.network.service.tls-port",
+		"aerospikeConfig.network.heartbeat.tls-port",
+		"aerospikeConfig.network.fabric.tls-port",
+	}
+	for _, want := range wantPaths {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected %q in error, got: %v", want, err)
+		}
+	}
+}
+
+// TestValidate_NetworkNonTLSKeysAccepted is the over-rejection guard: an
+// ordinary CE network stanza must still pass. Without this the tls- prefix
+// match could quietly reject valid configurations.
+func TestValidate_NetworkNonTLSKeysAccepted(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeConfig: &AerospikeConfigSpec{
+				Value: map[string]any{
+					"network": map[string]any{
+						"service": map[string]any{
+							"port":           3000,
+							"access-address": "10.0.0.1",
+							"access-port":    3000,
+						},
+						"heartbeat": map[string]any{
+							"mode":     "mesh",
+							"port":     3002,
+							"interval": 150,
+							"timeout":  10,
+						},
+						"fabric": map[string]any{
+							"port":             3001,
+							"channel-bulk-fds": 2,
+						},
+						"info": map[string]any{
+							"port": 3003,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if _, err := v.validate(cluster); err != nil {
+		t.Errorf("validate() = %v, want nil for a plain CE network stanza", err)
+	}
+}
+
+// TestValidateUpdate_NetworkTLSRejected pins that the new check runs on UPDATE
+// as well as CREATE. This is the path that matters most: adding TLS to a live
+// cluster changes the config hash, so an admitted edit would roll every pod
+// into a crash loop one batch at a time. ValidateUpdate funnels into the same
+// validateWithCtx -> validate() chain as ValidateCreate, and this test pins
+// that it stays that way.
+func TestValidateUpdate_NetworkTLSRejected(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+
+	oldCluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			AerospikeConfig: &AerospikeConfigSpec{
+				Value: map[string]any{
+					"network": map[string]any{
+						"heartbeat": map[string]any{"mode": "mesh", "port": 3002},
+					},
+				},
+			},
+		},
+	}
+	newCluster := oldCluster.DeepCopy()
+	newCluster.Spec.AerospikeConfig.Value["network"] = map[string]any{
+		"heartbeat": map[string]any{
+			"mode":     "mesh",
+			"port":     3002,
+			"tls-port": 3012,
+			"tls-name": "aerospike-tls",
+		},
+	}
+
+	_, err := v.ValidateUpdate(context.Background(), oldCluster, newCluster)
+	if err == nil {
+		t.Fatal("ValidateUpdate() = nil, want error for network TLS added on update")
+	}
+	if !strings.Contains(err.Error(), "aerospikeConfig.network.heartbeat.tls-port") {
+		t.Errorf("expected the offending key path in the error, got: %v", err)
+	}
+}
+
+// TestValidate_PerRackNetworkTLSRejected covers the per-rack bypass route: a
+// rack's aerospikeConfig is DeepMerged into the effective config and rendered
+// into that rack's ConfigMap, so it must be held to the same CE constraints as
+// the cluster-level config.
+func TestValidate_PerRackNetworkTLSRejected(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			RackConfig: &RackConfig{
+				Racks: []Rack{
+					{
+						ID: 1,
+						AerospikeConfig: &AerospikeConfigSpec{
+							Value: map[string]any{
+								"network": map[string]any{
+									"service": map[string]any{"tls-port": 4333},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("validate() = nil, want error for network TLS in a per-rack config")
+	}
+	if !strings.Contains(err.Error(), "aerospikeConfig.network.service.tls-port") {
+		t.Errorf("expected the offending key path in the error, got: %v", err)
+	}
+}
+
+// TestValidate_OverridesTLSKeysRejected covers the templated-bypass route for
+// per-endpoint TLS keys: spec.overrides.aerospikeConfig.{service,
+// namespaceDefaults} are merged into the cluster's effective config, so a
+// tls-* key there reaches aerospike.conf exactly like a cluster-level one.
+func TestValidate_OverridesTLSKeysRejected(t *testing.T) {
+	tests := []struct {
+		name      string
+		overrides *AerospikeClusterTemplateSpec
+		wantPath  string
+	}{
+		{
+			name: "tls-port in overrides service",
+			overrides: &AerospikeClusterTemplateSpec{
+				AerospikeConfig: &TemplateAerospikeConfig{
+					Service: &AerospikeConfigSpec{
+						Value: map[string]any{"tls-port": 4333},
+					},
+				},
+			},
+			wantPath: "spec.overrides.aerospikeConfig.service.tls-port",
+		},
+		{
+			name: "tls-name in overrides namespaceDefaults",
+			overrides: &AerospikeClusterTemplateSpec{
+				AerospikeConfig: &TemplateAerospikeConfig{
+					NamespaceDefaults: &AerospikeConfigSpec{
+						Value: map[string]any{"tls-name": "aerospike-tls"},
+					},
+				},
+			},
+			wantPath: "spec.overrides.aerospikeConfig.namespaceDefaults.tls-name",
+		},
+		{
+			name: "nested network.tls in overrides service",
+			overrides: &AerospikeClusterTemplateSpec{
+				AerospikeConfig: &TemplateAerospikeConfig{
+					Service: &AerospikeConfigSpec{
+						Value: map[string]any{
+							"network": map[string]any{
+								"tls": map[string]any{"aerospike-tls": map[string]any{}},
+							},
+						},
+					},
+				},
+			},
+			wantPath: "spec.overrides.aerospikeConfig.service.network must not contain 'tls' section",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			v := &AerospikeClusterValidator{}
+			cluster := &AerospikeCluster{
+				Spec: AerospikeClusterSpec{
+					Size:        3,
+					Image:       "aerospike:ce-8.1.1.1",
+					TemplateRef: &TemplateRef{Name: "prod"},
+					Overrides:   tc.overrides,
+				},
+			}
+
+			_, err := v.validate(cluster)
+			if err == nil {
+				t.Fatalf("validate() = nil, want error for %s", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.wantPath) {
+				t.Errorf("error must name %q, got: %v", tc.wantPath, err)
+			}
+			if !strings.Contains(err.Error(), "TLS is Enterprise-only") {
+				t.Errorf("error must name the Enterprise feature, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestValidate_OverridesNonTLSKeysAccepted is the over-rejection guard for the
+// overrides path.
+func TestValidate_OverridesNonTLSKeysAccepted(t *testing.T) {
+	v := &AerospikeClusterValidator{}
+	cluster := &AerospikeCluster{
+		Spec: AerospikeClusterSpec{
+			Size:        3,
+			Image:       "aerospike:ce-8.1.1.1",
+			TemplateRef: &TemplateRef{Name: "prod"},
+			Overrides: &AerospikeClusterTemplateSpec{
+				AerospikeConfig: &TemplateAerospikeConfig{
+					Service: &AerospikeConfigSpec{
+						Value: map[string]any{
+							"proto-fd-max":       15000,
+							"enable-security":    false,
+							"transaction-max-ms": 1000,
+						},
+					},
+					NamespaceDefaults: &AerospikeConfigSpec{
+						Value: map[string]any{
+							"replication-factor": 2,
+							"default-ttl":        "30d",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if _, err := v.validate(cluster); err != nil {
+		t.Errorf("validate() = %v, want nil for plain CE overrides", err)
+	}
+}

@@ -725,10 +725,13 @@ func (v *AerospikeClusterValidator) validateAerospikeConfig(config map[string]an
 		errors = append(errors, "aerospikeConfig must not contain 'xdr' section (XDR is Enterprise-only)")
 	}
 
-	// CE does not support TLS
+	// CE does not support TLS. The top-level key is only the smaller half of the
+	// surface — Aerospike documents TLS inside the network stanza, so
+	// validateNetworkTLSCE covers where users actually write it.
 	if _, exists := config["tls"]; exists {
 		errors = append(errors, "aerospikeConfig must not contain 'tls' section (TLS is Enterprise-only)")
 	}
+	errors = append(errors, validateNetworkTLSCE("aerospikeConfig", config)...)
 
 	// Count namespaces (CE limit: 2)
 	if nsSection, exists := config["namespaces"]; exists {
@@ -824,6 +827,85 @@ func (v *AerospikeClusterValidator) validateAerospikeConfig(config map[string]an
 	}
 
 	return errors, warnings
+}
+
+// tlsKeyPrefix is the prefix shared by every per-endpoint TLS key that
+// Aerospike accepts inside a network sub-stanza: tls-port, tls-name,
+// tls-authenticate-client, tls-mutual-authentication, ... No Community Edition
+// configuration key starts with it, so a prefix match is both sufficient to
+// catch the whole family and safe against rejecting a legitimate CE key.
+const tlsKeyPrefix = "tls-"
+
+// tlsNetworkSubsections lists the network sub-stanzas that accept per-endpoint
+// TLS keys.
+var tlsNetworkSubsections = []string{"service", "heartbeat", "fabric"}
+
+// validateNetworkTLSCE rejects Enterprise-only TLS configuration inside the
+// network stanza.
+//
+// The top-level aerospikeConfig["tls"] check is not where TLS lives. Real
+// Aerospike TLS is configured as:
+//
+//	network {
+//	    tls <name> { cert-file ...; key-file ...; ca-file ... }
+//	    service   { port 3000; tls-port 4333; tls-name <name> }
+//	    heartbeat { mode mesh; tls-port 3012; tls-name <name> }
+//	    fabric    { port 3001; tls-port 3011; tls-name <name> }
+//	}
+//
+// which is exactly what the Aerospike documentation tells a user to write, and
+// none of it was checked. configgen then passes it straight through:
+// generateNetworkSection renders any sub-map under `network` verbatim and
+// scalar tls-* keys go through writeMapEntries unfiltered, so the
+// Enterprise-only stanza reaches aerospike.conf and the CE asd process refuses
+// to start — a permanent CrashLoopBackOff with no admission error naming the
+// Enterprise feature. On a live cluster it is worse: the edit changes the
+// config hash, so the rolling restart walks every pod into the crash loop one
+// batch at a time.
+//
+// fieldPath is the user-facing prefix for error messages (e.g.
+// "aerospikeConfig"). The reported path always names the offending key in full
+// so an operator can find and remove it.
+func validateNetworkTLSCE(fieldPath string, config map[string]any) []string {
+	netCfg, ok := config["network"].(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	var errs []string
+
+	// `network { tls <name> { ... } }` — the certificate/key material. The
+	// presence of the key is enough; the value shape is irrelevant, because a
+	// user who wrote it intended an Enterprise feature either way.
+	if _, exists := netCfg["tls"]; exists {
+		errs = append(errs, fmt.Sprintf(
+			"%s.network must not contain 'tls' section (TLS is Enterprise-only)", fieldPath))
+	}
+
+	// Per-endpoint tls-* keys under service / heartbeat / fabric.
+	for _, subsection := range tlsNetworkSubsections {
+		subMap, ok := netCfg[subsection].(map[string]any)
+		if !ok {
+			continue
+		}
+		// Collect and sort: map iteration order is random, and a stanza can
+		// carry several tls-* keys at once. An unstable admission message would
+		// be confusing to read and impossible to assert on.
+		var tlsKeys []string
+		for key := range subMap {
+			if strings.HasPrefix(key, tlsKeyPrefix) {
+				tlsKeys = append(tlsKeys, key)
+			}
+		}
+		slices.Sort(tlsKeys)
+		for _, key := range tlsKeys {
+			errs = append(errs, fmt.Sprintf(
+				"%s.network.%s.%s is not allowed in CE edition (TLS is Enterprise-only)",
+				fieldPath, subsection, key))
+		}
+	}
+
+	return errs
 }
 
 // enterpriseOnlySecurityKeys lists security sub-keys that are Enterprise-only.
