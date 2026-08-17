@@ -60,21 +60,14 @@ func GetPVCsForStatefulSet(ctx context.Context, c client.Client, namespace, clus
 	return matched, nil
 }
 
-// DeleteOrphanedCascadeDeletePVCs removes PVCs for pod ordinals >= desiredReplicas,
-// but only for volumes that have cascadeDelete enabled. Non-cascade PVCs are preserved.
-// This is the correct function to use during scale-down.
-func DeleteOrphanedCascadeDeletePVCs(
-	ctx context.Context,
-	c client.Client,
-	namespace, clusterName, stsName string,
-	desiredReplicas int32,
-	storageSpec *v1alpha1.AerospikeStorageSpec,
-) (int, error) {
+// cascadeDeleteVolumeNames returns the set of PV-backed volume names that have
+// cascadeDelete enabled. Volumes without a PersistentVolume source have no PVC
+// to reclaim, and cascadeDelete defaults to false, so the set is empty for any
+// cluster that has not opted in.
+func cascadeDeleteVolumeNames(storageSpec *v1alpha1.AerospikeStorageSpec) map[string]bool {
 	if storageSpec == nil {
-		return 0, nil
+		return nil
 	}
-
-	// Build a set of volume names that have cascadeDelete enabled
 	cascadeVolumes := make(map[string]bool)
 	for i := range storageSpec.Volumes {
 		vol := &storageSpec.Volumes[i]
@@ -82,7 +75,37 @@ func DeleteOrphanedCascadeDeletePVCs(
 			cascadeVolumes[vol.Name] = true
 		}
 	}
+	return cascadeVolumes
+}
 
+// HasCascadeDeletePVCs reports whether the spec declares any PV-backed volume
+// with cascadeDelete enabled — i.e. whether there is anything for
+// DeleteOrphanedCascadeDeletePVCs to reclaim at all.
+//
+// Callers use it as a cheap pre-gate so the steady-state reconcile path skips
+// the PVC List entirely for clusters that never opt into cascadeDelete. It
+// shares cascadeDeleteVolumeNames with the deleter deliberately: a gate that
+// could ever be looser than the deleter's own predicate would let a caller
+// believe it had reclaimed PVCs it never looked at.
+func HasCascadeDeletePVCs(storageSpec *v1alpha1.AerospikeStorageSpec) bool {
+	return len(cascadeDeleteVolumeNames(storageSpec)) > 0
+}
+
+// DeleteOrphanedCascadeDeletePVCs removes PVCs for pod ordinals >= desiredReplicas,
+// but only for volumes that have cascadeDelete enabled. Non-cascade PVCs are preserved.
+// This is the correct function to use during scale-down.
+//
+// desiredReplicas must be the replica count the StatefulSet is actually running
+// (its own spec.replicas), never a lower target the operator is still working
+// towards: ordinals between the two still have live pods holding their volumes.
+func DeleteOrphanedCascadeDeletePVCs(
+	ctx context.Context,
+	c client.Client,
+	namespace, clusterName, stsName string,
+	desiredReplicas int32,
+	storageSpec *v1alpha1.AerospikeStorageSpec,
+) (int, error) {
+	cascadeVolumes := cascadeDeleteVolumeNames(storageSpec)
 	if len(cascadeVolumes) == 0 {
 		return 0, nil
 	}
@@ -222,19 +245,7 @@ func DeleteCascadeDeletePVCs(
 	namespace, clusterName, stsName string,
 	storageSpec *v1alpha1.AerospikeStorageSpec,
 ) error {
-	if storageSpec == nil {
-		return nil
-	}
-
-	// Build a set of volume names that have cascadeDelete enabled
-	cascadeVolumes := make(map[string]bool)
-	for i := range storageSpec.Volumes {
-		vol := &storageSpec.Volumes[i]
-		if vol.Source.PersistentVolume != nil && ResolveCascadeDelete(vol, storageSpec) {
-			cascadeVolumes[vol.Name] = true
-		}
-	}
-
+	cascadeVolumes := cascadeDeleteVolumeNames(storageSpec)
 	if len(cascadeVolumes) == 0 {
 		return nil
 	}
