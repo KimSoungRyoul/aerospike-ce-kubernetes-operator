@@ -19,6 +19,7 @@ package template
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -99,10 +100,67 @@ func isEnterpriseTag(image string) bool {
 	return strings.HasPrefix(tagLower, "ee-") || strings.HasPrefix(tagLower, "ent-")
 }
 
+// tlsKeyPrefixCE is the prefix shared by every per-endpoint TLS key Aerospike
+// accepts inside a network sub-stanza (tls-port, tls-name,
+// tls-authenticate-client, ...). No CE configuration key starts with it.
+// Mirrors api/v1alpha1.tlsKeyPrefix — duplicated to keep this file's
+// package-local-mirror convention.
+const tlsKeyPrefixCE = "tls-"
+
+// tlsNetworkSubsectionsCE lists the network sub-stanzas that accept
+// per-endpoint TLS keys. Mirrors api/v1alpha1.tlsNetworkSubsections.
+var tlsNetworkSubsectionsCE = []string{"service", "heartbeat", "fabric"}
+
+// validateMergedNetworkTLSCE rejects Enterprise-only TLS configuration inside
+// the merged config's network stanza: the `network { tls <name> { ... } }`
+// definition and per-endpoint tls-* keys under service / heartbeat / fabric.
+//
+// This is the post-merge half of the check — the merged map is what configgen
+// actually consumes, and a template default combined with a cluster override
+// can produce a TLS stanza that neither input carried on its own. Mirrors
+// api/v1alpha1.validateNetworkTLSCE; see that function for why the top-level
+// `tls` key alone does not cover the TLS surface.
+func validateMergedNetworkTLSCE(config map[string]any) []string {
+	netCfg, ok := config["network"].(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	var errs []string
+
+	if _, exists := netCfg["tls"]; exists {
+		errs = append(errs,
+			"merged aerospikeConfig.network must not contain 'tls' section (TLS is Enterprise-only)")
+	}
+
+	for _, subsection := range tlsNetworkSubsectionsCE {
+		subMap, ok := netCfg[subsection].(map[string]any)
+		if !ok {
+			continue
+		}
+		// Sorted for a deterministic message: map iteration order is random and
+		// a stanza can carry several tls-* keys at once.
+		var tlsKeys []string
+		for key := range subMap {
+			if strings.HasPrefix(key, tlsKeyPrefixCE) {
+				tlsKeys = append(tlsKeys, key)
+			}
+		}
+		slices.Sort(tlsKeys)
+		for _, key := range tlsKeys {
+			errs = append(errs, fmt.Sprintf(
+				"merged aerospikeConfig.network.%s.%s is not allowed in CE edition (TLS is Enterprise-only)",
+				subsection, key))
+		}
+	}
+
+	return errs
+}
+
 // validateMergedConfigCE reapplies the CE-specific aerospikeConfig checks
-// (xdr/tls absent, no enterprise security sub-keys, no enterprise namespace
-// keys) on the materialised cluster config map. Mirrors the CE checks
-// performed by the cluster webhook on the raw aerospikeConfig.
+// (xdr/tls absent — including network TLS, no enterprise security sub-keys, no
+// enterprise namespace keys) on the materialised cluster config map. Mirrors
+// the CE checks performed by the cluster webhook on the raw aerospikeConfig.
 func validateMergedConfigCE(config map[string]any) []string {
 	if config == nil {
 		return nil
@@ -115,6 +173,7 @@ func validateMergedConfigCE(config map[string]any) []string {
 	if _, exists := config["tls"]; exists {
 		errs = append(errs, "merged aerospikeConfig must not contain 'tls' section (TLS is Enterprise-only)")
 	}
+	errs = append(errs, validateMergedNetworkTLSCE(config)...)
 	if secSection, exists := config["security"]; exists {
 		if secMap, ok := secSection.(map[string]any); ok {
 			for enterpriseKey, reason := range enterpriseOnlySecurityKeysCE {

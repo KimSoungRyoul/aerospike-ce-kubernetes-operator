@@ -19,6 +19,7 @@ package v1alpha1
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -205,6 +206,9 @@ func (v *AerospikeClusterTemplateValidator) validate(tmpl *AerospikeClusterTempl
 // Mirrors the CE constraints enforced in validateAerospikeConfig on the
 // AerospikeCluster webhook:
 //   - top-level "xdr" and "tls" keys are forbidden,
+//   - per-endpoint "tls-*" keys are forbidden, and a nested "network" map is
+//     handed to validateNetworkTLSCE (see that function for why the plain
+//     "tls" key is not the whole TLS surface),
 //   - "security" sub-keys listed in enterpriseOnlySecurityKeys are forbidden,
 //   - when isNamespaceDefaults is true, top-level keys listed in
 //     enterpriseOnlyNamespaceKeys are forbidden (compression, strong-
@@ -230,6 +234,26 @@ func validateTemplateConfigBannedKeys(fieldPath string, cfg map[string]any, isNa
 		errs = append(errs, fmt.Sprintf(
 			"%s must not contain 'tls' section (TLS is Enterprise-only)", fieldPath))
 	}
+	// Per-endpoint TLS keys (tls-port, tls-name, tls-authenticate-client, ...).
+	// A template's service/namespaceDefaults map is merged into the cluster's
+	// aerospikeConfig and rendered by configgen, so an Enterprise-only tls-*
+	// key here reaches aerospike.conf the same way a top-level 'tls' section
+	// would and crashes the CE asd process at startup.
+	var tlsKeys []string
+	for key := range cfg {
+		if strings.HasPrefix(key, tlsKeyPrefix) {
+			tlsKeys = append(tlsKeys, key)
+		}
+	}
+	slices.Sort(tlsKeys)
+	for _, key := range tlsKeys {
+		errs = append(errs, fmt.Sprintf(
+			"%s.%s is not allowed in CE edition (TLS is Enterprise-only)", fieldPath, key))
+	}
+	// A nested network map is not reachable through the current typed template
+	// fields (TemplateNetworkConfig exposes heartbeat only), but these maps are
+	// PreserveUnknownFields, so check it rather than rely on that staying true.
+	errs = append(errs, validateNetworkTLSCE(fieldPath, cfg)...)
 	if secSection, exists := cfg["security"]; exists {
 		secMap, ok := secSection.(map[string]any)
 		if !ok {
