@@ -17,6 +17,7 @@ limitations under the License.
 package template
 
 import (
+	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -871,5 +872,101 @@ func TestApplyAerospikeConfig_RefusesNonMapService(t *testing.T) {
 	// Make sure we did NOT overwrite the user's payload with the template merge.
 	if got, ok := cluster.Spec.AerospikeConfig.Value["service"].(string); !ok || got != "this-should-be-a-map" {
 		t.Errorf("expected original service value preserved, got %v", cluster.Spec.AerospikeConfig.Value["service"])
+	}
+}
+
+// --- post-merge CE network-TLS re-validation ---
+
+// TestValidateMergedSpecCE_RejectsNetworkTLS covers the post-merge half of the
+// network-TLS check. The merged map is what configgen actually consumes, and a
+// template default combined with a cluster override can produce a TLS stanza
+// that neither input carried on its own — so the check has to run here as well
+// as at admission time.
+func TestValidateMergedSpecCE_RejectsNetworkTLS(t *testing.T) {
+	tests := []struct {
+		name     string
+		network  map[string]any
+		wantPath string
+	}{
+		{
+			name: "network.tls certificate stanza",
+			network: map[string]any{
+				"tls": map[string]any{
+					"aerospike-tls": map[string]any{"cert-file": "/cert.pem"},
+				},
+			},
+			wantPath: "merged aerospikeConfig.network must not contain 'tls' section",
+		},
+		{
+			name:     "network.service.tls-port",
+			network:  map[string]any{"service": map[string]any{"tls-port": 4333}},
+			wantPath: "merged aerospikeConfig.network.service.tls-port",
+		},
+		{
+			name: "network.heartbeat.tls-name",
+			network: map[string]any{
+				"heartbeat": map[string]any{"mode": "mesh", "tls-name": "aerospike-tls"},
+			},
+			wantPath: "merged aerospikeConfig.network.heartbeat.tls-name",
+		},
+		{
+			name:     "network.fabric.tls-port",
+			network:  map[string]any{"fabric": map[string]any{"tls-port": 3011}},
+			wantPath: "merged aerospikeConfig.network.fabric.tls-port",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := &ackov1alpha1.AerospikeClusterSpec{
+				Size:  3,
+				Image: testImageCE8,
+				AerospikeConfig: &ackov1alpha1.AerospikeConfigSpec{
+					Value: map[string]any{"network": tc.network},
+				},
+			}
+
+			errs := validateMergedSpecCE(spec)
+			if len(errs) == 0 {
+				t.Fatalf("validateMergedSpecCE() = no errors, want one for %s", tc.name)
+			}
+			joined := strings.Join(errs, "; ")
+			if !strings.Contains(joined, tc.wantPath) {
+				t.Errorf("errors must name %q, got: %v", tc.wantPath, errs)
+			}
+			if !strings.Contains(joined, "TLS is Enterprise-only") {
+				t.Errorf("errors must name the Enterprise feature, got: %v", errs)
+			}
+		})
+	}
+}
+
+// TestValidateMergedSpecCE_AcceptsPlainNetworkStanza is the over-rejection
+// guard for the merged path: an ordinary CE network stanza must produce no
+// errors.
+func TestValidateMergedSpecCE_AcceptsPlainNetworkStanza(t *testing.T) {
+	spec := &ackov1alpha1.AerospikeClusterSpec{
+		Size:  3,
+		Image: testImageCE8,
+		AerospikeConfig: &ackov1alpha1.AerospikeConfigSpec{
+			Value: map[string]any{
+				"network": map[string]any{
+					"service": map[string]any{
+						"port":           3000,
+						"access-address": "10.0.0.1",
+					},
+					"heartbeat": map[string]any{
+						"mode":     "mesh",
+						"port":     3002,
+						"interval": 150,
+					},
+					"fabric": map[string]any{"port": 3001},
+				},
+			},
+		},
+	}
+
+	if errs := validateMergedSpecCE(spec); len(errs) > 0 {
+		t.Errorf("unexpected errors for a plain CE network stanza: %v", errs)
 	}
 }

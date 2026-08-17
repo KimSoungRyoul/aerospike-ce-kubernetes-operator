@@ -759,3 +759,155 @@ func TestTemplateResourcesEqualRequestsLimits(t *testing.T) {
 		})
 	}
 }
+
+// --- CE network-TLS rejection on the template path ---
+
+// TestAerospikeClusterTemplateValidate_TLSKeysRejected mirrors the cluster
+// webhook's network-TLS check on the template's own aerospikeConfig maps. A
+// template's service / namespaceDefaults map is merged into every cluster that
+// references it, so an Enterprise-only tls-* key there crashes the CE asd
+// process on each of those clusters at once.
+func TestAerospikeClusterTemplateValidate_TLSKeysRejected(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   *TemplateAerospikeConfig
+		wantPath string
+	}{
+		{
+			name: "tls-port in service",
+			config: &TemplateAerospikeConfig{
+				Service: &AerospikeConfigSpec{
+					Value: map[string]any{"tls-port": 4333},
+				},
+			},
+			wantPath: "spec.aerospikeConfig.service.tls-port",
+		},
+		{
+			name: "tls-authenticate-client in service",
+			config: &TemplateAerospikeConfig{
+				Service: &AerospikeConfigSpec{
+					Value: map[string]any{"tls-authenticate-client": "any"},
+				},
+			},
+			wantPath: "spec.aerospikeConfig.service.tls-authenticate-client",
+		},
+		{
+			name: "tls-name in namespaceDefaults",
+			config: &TemplateAerospikeConfig{
+				NamespaceDefaults: &AerospikeConfigSpec{
+					Value: map[string]any{"tls-name": "aerospike-tls"},
+				},
+			},
+			wantPath: "spec.aerospikeConfig.namespaceDefaults.tls-name",
+		},
+		{
+			// These maps are PreserveUnknownFields, so a nested network map is
+			// checked rather than assumed impossible.
+			name: "nested network.tls in service",
+			config: &TemplateAerospikeConfig{
+				Service: &AerospikeConfigSpec{
+					Value: map[string]any{
+						"network": map[string]any{
+							"tls": map[string]any{
+								"aerospike-tls": map[string]any{"cert-file": "/cert.pem"},
+							},
+						},
+					},
+				},
+			},
+			wantPath: "spec.aerospikeConfig.service.network must not contain 'tls' section",
+		},
+		{
+			name: "nested network.heartbeat.tls-port in service",
+			config: &TemplateAerospikeConfig{
+				Service: &AerospikeConfigSpec{
+					Value: map[string]any{
+						"network": map[string]any{
+							"heartbeat": map[string]any{"tls-port": 3012},
+						},
+					},
+				},
+			},
+			wantPath: "spec.aerospikeConfig.service.network.heartbeat.tls-port",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			v := &AerospikeClusterTemplateValidator{}
+			tmpl := &AerospikeClusterTemplate{
+				ObjectMeta: metav1.ObjectMeta{Name: "tls-tmpl", Namespace: "default"},
+				Spec: AerospikeClusterTemplateSpec{
+					AerospikeConfig: tc.config,
+				},
+			}
+
+			_, err := v.ValidateCreate(context.Background(), tmpl)
+			if err == nil {
+				t.Fatalf("ValidateCreate() = nil, want error for %s", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.wantPath) {
+				t.Errorf("error must name %q, got: %v", tc.wantPath, err)
+			}
+			if !strings.Contains(err.Error(), "TLS is Enterprise-only") {
+				t.Errorf("error must name the Enterprise feature, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestAerospikeClusterTemplateValidate_TLSKeysRejectedOnUpdate pins that the
+// check runs on UPDATE too — editing a live template re-bases every cluster
+// that references it.
+func TestAerospikeClusterTemplateValidate_TLSKeysRejectedOnUpdate(t *testing.T) {
+	v := &AerospikeClusterTemplateValidator{}
+	oldTmpl := &AerospikeClusterTemplate{
+		ObjectMeta: metav1.ObjectMeta{Name: "tls-tmpl", Namespace: "default"},
+		Spec: AerospikeClusterTemplateSpec{
+			AerospikeConfig: &TemplateAerospikeConfig{
+				Service: &AerospikeConfigSpec{
+					Value: map[string]any{"proto-fd-max": 15000},
+				},
+			},
+		},
+	}
+	newTmpl := oldTmpl.DeepCopy()
+	newTmpl.Spec.AerospikeConfig.Service.Value["tls-port"] = 4333
+
+	_, err := v.ValidateUpdate(context.Background(), oldTmpl, newTmpl)
+	if err == nil {
+		t.Fatal("ValidateUpdate() = nil, want error for tls-port added on update")
+	}
+	if !strings.Contains(err.Error(), "spec.aerospikeConfig.service.tls-port") {
+		t.Errorf("expected the offending key path in the error, got: %v", err)
+	}
+}
+
+// TestAerospikeClusterTemplateValidate_NonTLSKeysAccepted is the
+// over-rejection guard: ordinary CE template defaults must still pass.
+func TestAerospikeClusterTemplateValidate_NonTLSKeysAccepted(t *testing.T) {
+	v := &AerospikeClusterTemplateValidator{}
+	tmpl := &AerospikeClusterTemplate{
+		ObjectMeta: metav1.ObjectMeta{Name: "plain-tmpl", Namespace: "default"},
+		Spec: AerospikeClusterTemplateSpec{
+			AerospikeConfig: &TemplateAerospikeConfig{
+				Service: &AerospikeConfigSpec{
+					Value: map[string]any{
+						"proto-fd-max":    15000,
+						"enable-security": false,
+					},
+				},
+				NamespaceDefaults: &AerospikeConfigSpec{
+					Value: map[string]any{
+						"replication-factor": 2,
+						"default-ttl":        "30d",
+					},
+				},
+			},
+		},
+	}
+
+	if _, err := v.ValidateCreate(context.Background(), tmpl); err != nil {
+		t.Errorf("ValidateCreate() = %v, want nil for plain CE template defaults", err)
+	}
+}
