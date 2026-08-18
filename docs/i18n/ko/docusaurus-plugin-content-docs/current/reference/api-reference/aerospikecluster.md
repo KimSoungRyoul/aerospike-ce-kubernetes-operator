@@ -438,6 +438,7 @@ Aerospike 서버 컨테이너를 커스터마이징합니다.
 | `aerospikeConfig` | [AerospikeConfigSpec](#aerospikeconfigspec) | 아니요 | 랙별 Aerospike 설정 오버라이드. |
 | `storage` | [AerospikeStorageSpec](#aerospikestoragespec) | 아니요 | 랙별 스토리지 오버라이드. |
 | `podSpec` | [RackPodSpec](#rackpodspec) | 아니요 | 랙별 파드 스케줄링 오버라이드. |
+| `maxUnavailable` | [IntOrString](https://pkg.go.dev/k8s.io/apimachinery/pkg/util/intstr#IntOrString) | 아니요 | 이 rack에서 voluntary disruption이 허용되는 최대 pod 수. 이 rack의 PDB에 대해 `spec.maxUnavailable`를 override 합니다. 미설정 시 과반 기본값. 클러스터 크기가 아니라 이 rack의 pod 수를 기준으로 검증됩니다. |
 
 ---
 

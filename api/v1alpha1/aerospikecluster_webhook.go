@@ -618,7 +618,8 @@ func (v *AerospikeClusterValidator) validate(cluster *AerospikeCluster) (admissi
 	if muErr := validateIntOrString(cluster.Spec.MaxUnavailable, "maxUnavailable", 0); muErr != "" {
 		allErrors = append(allErrors, muErr)
 	}
-	warnings = append(warnings, v.validateMaxUnavailable(cluster)...)
+	allErrors = append(allErrors, v.validateMaxUnavailable(cluster)...)
+	allErrors = append(allErrors, v.validateRackMaxUnavailable(cluster)...)
 	if len(cluster.Spec.Operations) > 0 {
 		allErrors = append(allErrors, v.validateOperations(cluster.Spec.Operations)...)
 	}
@@ -1511,36 +1512,90 @@ func (v *AerospikeClusterValidator) validateBatchSize(cluster *AerospikeCluster)
 	return nil
 }
 
-// validateMaxUnavailable warns if maxUnavailable is >= cluster size.
+// validateMaxUnavailable REJECTS a maxUnavailable that would let a
+// PodDisruptionBudget permit full disruption.
+//
+// This was warning-level. A warning appears once in `kubectl apply` output and
+// then never again, while the consequence surfaces much later during an
+// unrelated node drain — so maxUnavailable: 8 on an 8-node CE cluster (the CE
+// maximum) was admitted and the resulting PDB permitted a drain to evict every
+// pod at once. That is not a budget, and a warning is not a control (#94).
 //
 // When spec.size is 0 and spec.templateRef is set, the size will be supplied
 // later by the resolved template; the mu >= size comparison is skipped to avoid
-// a spurious "PodDisruptionBudget will not prevent full disruption" warning
-// that fires for every templateRef-backed cluster with maxUnavailable set.
-// Mirrors the sizeDeferredToTemplate pattern used in validateBatchSize (#305).
-func (v *AerospikeClusterValidator) validateMaxUnavailable(cluster *AerospikeCluster) admission.Warnings {
+// a spurious rejection for every templateRef-backed cluster with maxUnavailable
+// set. Mirrors the sizeDeferredToTemplate pattern used in validateBatchSize (#305).
+func (v *AerospikeClusterValidator) validateMaxUnavailable(cluster *AerospikeCluster) []string {
 	if cluster.Spec.Size == 0 && cluster.Spec.TemplateRef != nil {
 		return nil
 	}
 	if cluster.Spec.MaxUnavailable == nil {
 		return nil
 	}
-	mu := *cluster.Spec.MaxUnavailable
+	return maxUnavailableErrors(*cluster.Spec.MaxUnavailable, "spec.maxUnavailable", cluster.Spec.Size)
+}
+
+// validateRackMaxUnavailable applies the same rule to each rack's own budget,
+// against that rack's pod count rather than the cluster's.
+//
+// The rack size mirrors the reconciler's getRackSize: spec.size distributed
+// evenly across racks, with the remainder going to the lowest-indexed racks. A
+// rack of 2 pods with maxUnavailable: 2 permits the whole rack to be drained,
+// which is precisely the failure per-rack PDBs exist to prevent.
+func (v *AerospikeClusterValidator) validateRackMaxUnavailable(cluster *AerospikeCluster) []string {
+	if cluster.Spec.RackConfig == nil || len(cluster.Spec.RackConfig.Racks) == 0 {
+		return nil
+	}
+	// Deferred to the template, same reasoning as validateMaxUnavailable.
+	if cluster.Spec.Size == 0 && cluster.Spec.TemplateRef != nil {
+		return nil
+	}
+
+	racks := cluster.Spec.RackConfig.Racks
+	numRacks := int32(len(racks))
+	baseSize := cluster.Spec.Size / numRacks
+	remainder := cluster.Spec.Size % numRacks
+
+	var errs []string
+	for i := range racks {
+		if racks[i].MaxUnavailable == nil {
+			continue
+		}
+		rackSize := baseSize
+		if int32(i) < remainder {
+			rackSize++
+		}
+		field := fmt.Sprintf("spec.rackConfig.racks[id=%d].maxUnavailable", racks[i].ID)
+		errs = append(errs, maxUnavailableErrors(*racks[i].MaxUnavailable, field, rackSize)...)
+	}
+	return errs
+}
+
+// maxUnavailableErrors reports why the given budget would permit full disruption
+// of a pod set of the given size, or nil when it is a real budget. Shared by the
+// cluster-level check and the per-rack check so the two cannot diverge.
+func maxUnavailableErrors(mu intstr.IntOrString, field string, size int32) []string {
 	if mu.Type == intstr.Int {
-		if mu.IntVal >= cluster.Spec.Size {
-			return admission.Warnings{fmt.Sprintf(
-				"maxUnavailable (%d) is >= cluster size (%d); PodDisruptionBudget will not prevent full disruption",
-				mu.IntVal, cluster.Spec.Size)}
+		if size > 0 && mu.IntVal >= size {
+			return []string{fmt.Sprintf(
+				"%s (%d) is >= the pod count it protects (%d); a PodDisruptionBudget that allows every pod "+
+					"to be evicted at once is not a budget. Use a value below %d, or set spec.disablePDB "+
+					"to opt out of disruption protection deliberately",
+				field, mu.IntVal, size, size)}
 		}
-	} else {
-		s := mu.StrVal
-		if numStr, ok := strings.CutSuffix(s, "%"); ok {
-			num, err := strconv.Atoi(numStr)
-			if err == nil && num >= 100 {
-				return admission.Warnings{fmt.Sprintf(
-					"maxUnavailable (%s) allows 100%% disruption; PodDisruptionBudget will not protect availability", s)}
-			}
-		}
+		return nil
+	}
+
+	numStr, ok := strings.CutSuffix(mu.StrVal, "%")
+	if !ok {
+		return nil
+	}
+	num, err := strconv.Atoi(numStr)
+	if err == nil && num >= 100 {
+		return []string{fmt.Sprintf(
+			"%s (%s) allows 100%% disruption; a PodDisruptionBudget that allows every pod to be evicted "+
+				"at once is not a budget. Use a value below 100%%, or set spec.disablePDB to opt out of "+
+				"disruption protection deliberately", field, mu.StrVal)}
 	}
 	return nil
 }

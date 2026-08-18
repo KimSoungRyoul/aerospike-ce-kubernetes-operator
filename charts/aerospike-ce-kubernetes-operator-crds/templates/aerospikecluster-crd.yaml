@@ -6450,6 +6450,18 @@ spec:
                             be >= 1; rack ID 0 is reserved.
                           minimum: 1
                           type: integer
+                        maxUnavailable:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          description: |-
+                            MaxUnavailable is the maximum number of pods in THIS rack that may be
+                            voluntarily disrupted at once. It overrides spec.maxUnavailable for this
+                            rack's PodDisruptionBudget.
+
+                            Leave unset to get the quorum-aware default: a majority of the rack's pods
+                            must stay available (minAvailable = rackSize/2 + 1).
+                          x-kubernetes-int-or-string: true
                         nodeName:
                           description: NodeName constrains this rack to a specific
                             Kubernetes node.
@@ -15029,6 +15041,18 @@ spec:
                                 Must be >= 1; rack ID 0 is reserved.
                               minimum: 1
                               type: integer
+                            maxUnavailable:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              description: |-
+                                MaxUnavailable is the maximum number of pods in THIS rack that may be
+                                voluntarily disrupted at once. It overrides spec.maxUnavailable for this
+                                rack's PodDisruptionBudget.
+
+                                Leave unset to get the quorum-aware default: a majority of the rack's pods
+                                must stay available (minAvailable = rackSize/2 + 1).
+                              x-kubernetes-int-or-string: true
                             nodeName:
                               description: NodeName constrains this rack to a specific
                                 Kubernetes node.

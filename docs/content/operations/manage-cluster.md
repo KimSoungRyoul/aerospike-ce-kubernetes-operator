@@ -920,7 +920,50 @@ When using HPA, avoid manually changing `spec.size` — let the autoscaler manag
 
 ## Pod Disruption Budget
 
-By default, the operator creates a PodDisruptionBudget to protect the cluster during maintenance.
+The operator creates PodDisruptionBudgets so voluntary disruption — a node drain, a cluster upgrade — cannot take out more of the cluster than it can survive.
+
+### One PDB per rack
+
+| Topology | PDBs created |
+|---|---|
+| Single rack (no `rackConfig`, or one rack) | one cluster-wide PDB, `<cluster>-pdb` |
+| Multi-rack | one PDB per rack, `<cluster>-<rackID>-pdb` |
+
+A single cluster-wide PDB counts disruptions across every rack. With 3 racks of 2 pods and `maxUnavailable: 1`, Kubernetes allows one eviction at a time — but nothing constrains *which* pods, so a drain can take both pods of the same rack in sequence and leave that rack with nothing. Per-rack budgets make the constraint per-rack.
+
+PDBs for racks removed from `spec.rackConfig.racks` are deleted, and switching between single-rack and multi-rack swaps between the two shapes.
+
+### Default: a majority of each rack stays available
+
+With no `maxUnavailable` set, each PDB gets `minAvailable = rackSize/2 + 1`:
+
+| Rack size | minAvailable | Evictions allowed |
+|---|---|---|
+| 1 | 1 | 0 |
+| 2 | 2 | 0 |
+| 3 | 2 | 1 |
+| 4 | 3 | 1 |
+| 5 | 3 | 2 |
+| 6 | 4 | 2 |
+
+:::warning A rack of 1 or 2 pods allows no voluntary disruption
+At those sizes a majority *is* every pod, so `kubectl drain` of a node hosting one of them blocks until you set `maxUnavailable` explicitly, scale the rack up, or set `spec.disablePDB: true`. This is a direct consequence of the majority rule, not an oversight.
+:::
+
+### Custom MaxUnavailable
+
+```yaml
+spec:
+  maxUnavailable: 1         # Can be integer or percentage string like "25%"
+  rackConfig:
+    racks:
+      - id: 1
+        maxUnavailable: 2   # Overrides spec.maxUnavailable for this rack only
+```
+
+Precedence: `rack.maxUnavailable` > `spec.maxUnavailable` > the majority default.
+
+A value that would allow **every** pod it protects to be evicted at once is rejected at admission — `maxUnavailable: 3` on a 3-pod rack, or any percentage at or above 100%. That is not a budget. To opt out of disruption protection, use `spec.disablePDB: true` explicitly.
 
 ### Disable PDB
 
@@ -929,12 +972,7 @@ spec:
   disablePDB: true
 ```
 
-### Custom MaxUnavailable
-
-```yaml
-spec:
-  maxUnavailable: 1         # Can be integer or percentage string like "25%"
-```
+Removes every PDB the operator manages for the cluster, cluster-wide and per-rack.
 
 ## Host Network
 

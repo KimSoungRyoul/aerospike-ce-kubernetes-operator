@@ -883,6 +883,38 @@ HPA를 사용할 때는 `spec.size`를 수동으로 변경하지 마세요 — �
 
 기본적으로 오퍼레이터는 유지보수 중 클러스터를 보호하기 위해 PodDisruptionBudget을 생성합니다.
 
+### rack별 PDB
+
+| 토폴로지 | 생성되는 PDB |
+|---|---|
+| 단일 rack (`rackConfig` 없음 또는 rack 1개) | 클러스터 전체 PDB 1개, `<cluster>-pdb` |
+| Multi-rack | rack별 PDB, `<cluster>-<rackID>-pdb` |
+
+클러스터 전체 PDB 하나는 모든 rack에 걸쳐 disruption 수를 셉니다. rack 3개 × pod 2개에 `maxUnavailable: 1`이면 Kubernetes는 한 번에 1개 eviction만 허용하지만, *어떤* pod인지는 제약하지 않으므로 drain이 같은 rack의 pod 2개를 연달아 제거해 해당 rack을 비울 수 있습니다. rack별 PDB는 이 제약을 rack 단위로 만듭니다.
+
+spec에서 제거된 rack의 PDB는 삭제되며, 단일 rack ↔ multi-rack 전환 시 두 형태 사이를 오갑니다.
+
+### 기본값: rack의 과반이 유지됨
+
+`maxUnavailable`를 설정하지 않으면 각 PDB는 `minAvailable = rackSize/2 + 1`을 사용합니다.
+
+| rack 크기 | minAvailable | 허용되는 eviction |
+|---|---|---|
+| 1 | 1 | 0 |
+| 2 | 2 | 0 |
+| 3 | 2 | 1 |
+| 4 | 3 | 1 |
+| 5 | 3 | 2 |
+| 6 | 4 | 2 |
+
+:::warning rack이 1~2개 pod이면 voluntary disruption이 전혀 허용되지 않습니다
+이 크기에서는 과반이 곧 전체이므로, 해당 pod이 있는 노드의 `kubectl drain`은 `maxUnavailable`를 명시하거나 rack을 키우거나 `spec.disablePDB: true`를 설정할 때까지 차단됩니다. 이는 과반 규칙의 직접적인 결과이며 버그가 아닙니다.
+:::
+
+우선순위: `rack.maxUnavailable` > `spec.maxUnavailable` > 과반 기본값.
+
+보호 대상 pod을 **전부** eviction 할 수 있게 하는 값(3-pod rack에 `maxUnavailable: 3`, 또는 100% 이상의 퍼센트)은 admission에서 거부됩니다. 그것은 budget이 아닙니다. disruption 보호를 끄려면 `spec.disablePDB: true`를 명시적으로 사용하세요.
+
 ### PDB 비활성화
 
 ```yaml
