@@ -126,7 +126,8 @@ Observed state of the Aerospike CE cluster.
 | Field | Type | Description |
 |---|---|---|
 | `phase` | string | Cluster phase: `InProgress`, `Completed`, `Error`, `ScalingUp`, `ScalingDown`, `WaitingForMigration`, `RollingRestart`, `ACLSync`, `Paused`, `Deleting`. |
-| `size` | int32 | Current number of ready pods. |
+| `size` | int32 | Current number of **ready** pods. Readiness view for humans and printer columns — not what the scale subresource reads. |
+| `replicas` | int32 | Total number of pods matching `selector`, ready or not. This is the `scale` subresource's status field, so HPA/KEDA read it. |
 | `health` | string | Human-readable pod readiness summary in `ready/total` format (e.g., `3/3`). |
 | `conditions` | [][Condition](https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/conditions/) | Latest observations of cluster state. |
 | `pods` | map[string][AerospikePodStatus](#aerospikepodstatus) | Per-pod status information, keyed by pod name. |
