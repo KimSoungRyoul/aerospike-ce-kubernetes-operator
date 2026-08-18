@@ -346,6 +346,17 @@ helm-sync-crds: manifests ## Sync generated CRDs into aerospike-ce-kubernetes-op
 	bash hack/helm-sync-crds.sh
 	helm dep update charts/aerospike-ce-kubernetes-operator
 
+.PHONY: helm-set-version
+helm-set-version: ## Set the in-repo chart version everywhere it appears (VERSION=x.y.z).
+ifndef VERSION
+	$(error VERSION is required, e.g. make helm-set-version VERSION=1.10.3)
+endif
+	bash hack/helm-set-version.sh $(VERSION)
+
+.PHONY: helm-check-version
+helm-check-version: ## Assert the in-repo chart is self-consistent and not older than the latest release.
+	bash hack/helm-check-version.sh
+
 .PHONY: helm-lint
 helm-lint: ## Lint both Helm charts (aerospike-ce-kubernetes-operator-crds and aerospike-ce-kubernetes-operator).
 	helm lint charts/aerospike-ce-kubernetes-operator-crds
