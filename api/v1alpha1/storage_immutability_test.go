@@ -236,4 +236,54 @@ func TestValidateUpdate_RackStorageImmutability(t *testing.T) {
 			t.Fatalf("ValidateUpdate() error = %v; removing a rack is cleanupRemovedRacks' job, not a storage change", err)
 		}
 	})
+
+	// The rack-ADDITION branch. The loop in validateStorageImmutability iterates
+	// the NEW racks, so a rack present only in the new spec has no old
+	// counterpart and is skipped by `if !ok { continue }`. The removal case above
+	// never visits that branch — the removed rack is absent from the loop
+	// entirely — so it passed with or without the guard.
+	//
+	// Without the guard, a newly added rack is compared against an empty old
+	// storage spec and every volume it carries is reported as "cannot add
+	// volume". That would refuse a legitimate and ordinary operation: scaling out
+	// to a new zone with its own storage class. Adding a rack creates a fresh
+	// StatefulSet, so there is no existing VolumeClaimTemplate for the
+	// immutability rule to protect.
+	t.Run("adding a whole rack that carries storage is allowed", func(t *testing.T) {
+		before := storageCluster(&AerospikeStorageSpec{Volumes: []VolumeSpec{pvVolume(storageDataVol, "10Gi", "fast")}})
+		before.Spec.RackConfig = &RackConfig{Racks: []Rack{{ID: 1, Storage: rackVolume("10Gi")}}}
+
+		after := before.DeepCopy()
+		after.Spec.RackConfig.Racks = append(after.Spec.RackConfig.Racks, Rack{
+			ID: 2,
+			// A different size AND a different storage class, so the comparison
+			// would definitely fire if the new rack were measured against an
+			// empty old spec.
+			Storage: &AerospikeStorageSpec{Volumes: []VolumeSpec{pvVolume(storageDataVol, "50Gi", "slow")}},
+		})
+
+		if _, err := v.ValidateUpdate(context.Background(), before, after); err != nil {
+			t.Fatalf("ValidateUpdate() error = %v; adding a rack creates a new StatefulSet, "+
+				"so there is no existing volumeClaimTemplate for immutability to protect", err)
+		}
+	})
+
+	// And the rack that already existed is still frozen while another is added,
+	// so the guard cannot be mistaken for "skip the check whenever racks change".
+	t.Run("adding a rack does not unfreeze the racks that already existed", func(t *testing.T) {
+		before := storageCluster(&AerospikeStorageSpec{Volumes: []VolumeSpec{pvVolume(storageDataVol, "10Gi", "fast")}})
+		before.Spec.RackConfig = &RackConfig{Racks: []Rack{{ID: 1, Storage: rackVolume("10Gi")}}}
+
+		after := before.DeepCopy()
+		after.Spec.RackConfig.Racks[0].Storage = rackVolume("20Gi")
+		after.Spec.RackConfig.Racks = append(after.Spec.RackConfig.Racks, Rack{ID: 2})
+
+		_, err := v.ValidateUpdate(context.Background(), before, after)
+		if err == nil {
+			t.Fatal("ValidateUpdate() = nil, want an error: rack 1's persistentVolume was resized")
+		}
+		if !strings.Contains(err.Error(), "spec.rackConfig.racks[id=1].storage") {
+			t.Errorf("ValidateUpdate() error = %q, want it to name rack 1's storage", err.Error())
+		}
+	})
 }
