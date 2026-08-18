@@ -82,8 +82,9 @@ type Rack struct {
 	// voluntarily disrupted at once. It overrides spec.maxUnavailable for this
 	// rack's PodDisruptionBudget.
 	//
-	// Leave unset to get the quorum-aware default: a majority of the rack's pods
-	// must stay available (minAvailable = rackSize/2 + 1).
+	// Leave unset to get the default: replication-factor - 1, the number of nodes
+	// Aerospike can lose at once without a partition becoming unavailable,
+	// measured against this rack's effective aerospikeConfig and floored at 1.
 	// +optional
 	MaxUnavailable *intstr.IntOrString `json:"maxUnavailable,omitempty"`
 

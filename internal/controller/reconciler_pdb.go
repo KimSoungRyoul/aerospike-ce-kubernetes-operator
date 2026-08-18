@@ -21,60 +21,133 @@ import (
 	"github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/internal/utils"
 )
 
-// pdbPolicy is the disruption budget the operator wants for one selector. Exactly
-// one of MaxUnavailable / MinAvailable is set, mirroring PodDisruptionBudgetSpec.
+// pdbPolicy is the disruption budget the operator wants for one selector.
 //
-// Both shapes are needed because the two sources express the budget differently:
-// an operator writes spec.maxUnavailable or rack.maxUnavailable, while the
-// quorum-aware default is naturally a minAvailable ("keep a majority up").
-// Converting the default to a maxUnavailable would lose meaning when the rack is
-// scaled, since minAvailable is relative to the live pod count.
+// Only MaxUnavailable is used. The knob users write is spec.maxUnavailable /
+// rack.maxUnavailable, and the default below is naturally expressed the same way,
+// so there is no reason to emit the other shape.
 type pdbPolicy struct {
 	MaxUnavailable *intstr.IntOrString
-	MinAvailable   *intstr.IntOrString
 }
 
-// quorumMinAvailable returns the majority of rackSize: the number of pods that
-// must stay available for the rack to keep a majority.
+// defaultReplicationFactor is Aerospike's own default when a namespace does not
+// state one.
+const defaultReplicationFactor int32 = 2
+
+// minReplicationFactor returns the smallest replication-factor across the config's
+// namespaces, which is the binding constraint: losing N nodes costs availability
+// as soon as N reaches the LEAST-replicated namespace's factor.
 //
-//	rackSize=1 -> 1   rackSize=2 -> 2   rackSize=3 -> 2
-//	rackSize=4 -> 3   rackSize=5 -> 3   rackSize=6 -> 4
-//
-// Note that for rackSize 1 and 2 this permits ZERO voluntary disruption, so a
-// `kubectl drain` of a node hosting one of those pods blocks until the operator
-// raises spec.maxUnavailable or rack.maxUnavailable. That follows directly from
-// the formula and is called out in the PR and the docs rather than smoothed over.
-func quorumMinAvailable(rackSize int32) int32 {
-	if rackSize < 1 {
-		return 0
+// Every integer type a decoder can plausibly produce is accepted, mirroring the
+// webhook's own parsing. Anything unparseable falls back to Aerospike's default
+// rather than guessing, because guessing high would hand out a larger disruption
+// budget than the data can survive.
+func minReplicationFactor(config *ackov1alpha1.AerospikeConfigSpec) int32 {
+	if config == nil || config.Value == nil {
+		return defaultReplicationFactor
 	}
-	return rackSize/2 + 1
+	namespaces, ok := config.Value["namespaces"].([]any)
+	if !ok || len(namespaces) == 0 {
+		return defaultReplicationFactor
+	}
+
+	minRF := int32(0)
+	for _, ns := range namespaces {
+		nsMap, ok := ns.(map[string]any)
+		if !ok {
+			continue
+		}
+		rf := defaultReplicationFactor
+		switch v := nsMap["replication-factor"].(type) {
+		case int:
+			rf = int32(v)
+		case int32:
+			rf = v
+		case int64:
+			rf = int32(v)
+		case float64:
+			rf = int32(v)
+		}
+		if rf < 1 {
+			rf = defaultReplicationFactor
+		}
+		if minRF == 0 || rf < minRF {
+			minRF = rf
+		}
+	}
+	if minRF == 0 {
+		return defaultReplicationFactor
+	}
+	return minRF
+}
+
+// defaultMaxUnavailable returns the disruption budget for a rack that sets none.
+//
+// It is replication-factor - 1: the number of nodes Aerospike can lose at once
+// without a partition becoming unavailable. That is the real constraint in CE.
+//
+// The obvious-looking alternative — a Raft-style majority, minAvailable =
+// rackSize/2 + 1, borrowed from the Percona/Redis operators — does not map onto
+// Aerospike CE, which has no quorum (strong consistency is Enterprise-only), and
+// it deadlocks in practice. getRackSize divides spec.size across racks, so a
+// large cluster still has SMALL racks: with CE's 8-node cap a 3-rack cluster tops
+// out at 3/3/2, and the rack of 2 gets minAvailable 2 — zero voluntary
+// disruption. Enumerated over every CE-legal layout, that rule blocks 12 of 21,
+// including EVERY 3-rack layout at every size. Three racks, one per zone, is the
+// canonical rack-aware topology and precisely the configuration per-rack PDBs
+// exist to serve, so the default would hang kubectl drain, cluster-autoscaler
+// node recycling and managed node-pool upgrades on the clusters most likely to
+// adopt this feature.
+//
+// The floor of 1 is deliberate. replication-factor 1 means every partition has a
+// single copy, so the honest budget is 0 — but a default of 0 is the same
+// deadlock, on a configuration CE users legitimately run for dev. Returning 1
+// keeps today's behaviour there; the webhook warns separately that a
+// single-copy cluster has no redundancy for a PDB to protect.
+func (r *AerospikeClusterReconciler) defaultMaxUnavailable(
+	cluster *ackov1alpha1.AerospikeCluster,
+	rack *ackov1alpha1.Rack,
+) int32 {
+	// The rack's EFFECTIVE config: a rack may override replication-factor, and
+	// the budget has to describe the namespaces that rack actually runs.
+	config := cluster.Spec.AerospikeConfig
+	if rack != nil {
+		config = r.getEffectiveConfig(cluster, rack)
+	}
+	if mu := minReplicationFactor(config) - 1; mu > 1 {
+		return mu
+	}
+	return 1
 }
 
 // effectivePDBPolicy resolves the budget for one rack.
 //
-// Precedence: rack.maxUnavailable > spec.maxUnavailable > quorum-aware default.
+// Precedence: rack.maxUnavailable > spec.maxUnavailable > the
+// replication-factor default.
+//
 // An explicit value is clamped so the budget can never permit every pod in the
 // rack to be evicted at once — a PDB that allows full disruption is not a budget,
 // and the webhook check for this was warning-only, which "appears once in
 // kubectl apply output and is not a control".
-func effectivePDBPolicy(cluster *ackov1alpha1.AerospikeCluster, rack *ackov1alpha1.Rack, rackSize int32) pdbPolicy {
+//
+// The clamp is skipped for a rack of one pod, where the concept degenerates:
+// there is no value that both permits maintenance and prevents full disruption,
+// and clamping to 0 would block drains on the single-pod `minimal` template that
+// works today. An operator who explicitly asks for maxUnavailable >= size is
+// still rejected at admission; this only governs the derived default.
+func (r *AerospikeClusterReconciler) effectivePDBPolicy(
+	cluster *ackov1alpha1.AerospikeCluster,
+	rack *ackov1alpha1.Rack,
+	rackSize int32,
+) pdbPolicy {
 	configured := cluster.Spec.MaxUnavailable
 	if rack != nil && rack.MaxUnavailable != nil {
 		configured = rack.MaxUnavailable
 	}
 
 	if configured == nil {
-		if rackSize < 1 {
-			// Nothing to protect yet — spec.size is unresolved (a templateRef whose
-			// snapshot has not been applied). Emit the historical default rather
-			// than a degenerate minAvailable: 0, which would read as a budget while
-			// permitting everything.
-			mu := intstr.FromInt32(1)
-			return pdbPolicy{MaxUnavailable: &mu}
-		}
-		mi := intstr.FromInt32(quorumMinAvailable(rackSize))
-		return pdbPolicy{MinAvailable: &mi}
+		mu := intstr.FromInt32(r.defaultMaxUnavailable(cluster, rack))
+		return pdbPolicy{MaxUnavailable: &mu}
 	}
 
 	// Percentages are handed to Kubernetes untouched: it resolves them against
@@ -86,7 +159,7 @@ func effectivePDBPolicy(cluster *ackov1alpha1.AerospikeCluster, rack *ackov1alph
 	}
 
 	capped := configured.IntVal
-	if rackSize > 0 && capped > rackSize-1 {
+	if rackSize > 1 && capped > rackSize-1 {
 		capped = rackSize - 1
 	}
 	if capped < 0 {
@@ -128,7 +201,7 @@ func (r *AerospikeClusterReconciler) reconcilePDB(
 		return r.reconcileOnePDB(ctx, cluster,
 			utils.PDBName(cluster.Name),
 			utils.SelectorLabelsForCluster(cluster.Name),
-			effectivePDBPolicy(cluster, &racks[0], rackSize))
+			r.effectivePDBPolicy(cluster, &racks[0], rackSize))
 	}
 
 	// Multi-rack: one PDB per rack. The cluster-wide PDB is removed so the two
@@ -148,7 +221,7 @@ func (r *AerospikeClusterReconciler) reconcilePDB(
 		// label listRackPods selects on throughout the operator.
 		selector := utils.LabelsForRack(cluster.Name, rack.ID)
 		if err := r.reconcileOnePDB(ctx, cluster, name, selector,
-			effectivePDBPolicy(cluster, rack, rackSize)); err != nil {
+			r.effectivePDBPolicy(cluster, rack, rackSize)); err != nil {
 			return err
 		}
 	}
@@ -181,7 +254,6 @@ func (r *AerospikeClusterReconciler) reconcileOnePDB(
 			},
 			Spec: policyv1.PodDisruptionBudgetSpec{
 				MaxUnavailable: policy.MaxUnavailable,
-				MinAvailable:   policy.MinAvailable,
 				Selector: &metav1.LabelSelector{
 					MatchLabels: selectorLabels,
 				},
@@ -200,6 +272,32 @@ func (r *AerospikeClusterReconciler) reconcileOnePDB(
 		return fmt.Errorf("getting PDB %s: %w", pdbName, err)
 	}
 
+	// Ownership check before ANY write. PDB names can collide across clusters in
+	// one namespace: RackPDBName("demo", 1) and PDBName("demo-1") both produce
+	// "demo-1-pdb". Without this, cluster "demo" would silently rewrite cluster
+	// "demo-1"'s PodDisruptionBudget — pointing the selector at demo's pods, so
+	// demo-1 loses all disruption protection; overwriting the cluster label via
+	// maps.Copy, so demo-1 cannot even find its own PDB by label to repair it;
+	// and leaving the victim's ownerRef in place (setOwnerRef runs only on the
+	// create path), so deleting demo-1 garbage-collects a PDB demo believes it
+	// owns.
+	//
+	// Skipping rather than erroring is deliberate. Returning an error here would
+	// fail this cluster's reconcile on every pass and trip the circuit breaker,
+	// stopping rolling restarts and scaling over a PDB. Skipping costs this rack
+	// its disruption budget — which the event says plainly — while the cluster
+	// stays managed. Renaming one of the two clusters is the only real fix and
+	// that is a human decision.
+	if owner := existing.Labels[utils.InstanceLabel]; owner != "" && owner != cluster.Name {
+		log.Error(nil, "PodDisruptionBudget name is already taken by another cluster; skipping",
+			"pdb", pdbName, "ownedBy", owner, "cluster", cluster.Name)
+		r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventPDBNameConflict,
+			"PodDisruptionBudget %s already belongs to cluster %q; this cluster's pods are NOT "+
+				"disruption-protected by it. Rename one of the two clusters to resolve.",
+			pdbName, owner)
+		return nil
+	}
+
 	if !pdbNeedsUpdate(existing, labels, selectorLabels, policy) {
 		return nil
 	}
@@ -208,7 +306,9 @@ func (r *AerospikeClusterReconciler) reconcileOnePDB(
 		existing.Labels = make(map[string]string, len(labels))
 	}
 	maps.Copy(existing.Labels, labels)
-	existing.Spec.MinAvailable = policy.MinAvailable
+	// Clear any MinAvailable an earlier operator (or a hand edit) left behind:
+	// the two fields are mutually exclusive in a PodDisruptionBudgetSpec.
+	existing.Spec.MinAvailable = nil
 	existing.Spec.MaxUnavailable = policy.MaxUnavailable
 	existing.Spec.Selector = &metav1.LabelSelector{MatchLabels: selectorLabels}
 	log.Info("Updating PDB", "name", pdbName)
@@ -304,10 +404,10 @@ func pdbNeedsUpdate(
 	desired pdbPolicy,
 ) bool {
 	desiredSelector := &metav1.LabelSelector{MatchLabels: desiredSelectorLabels}
-	if !intOrStringPtrEqual(existing.Spec.MaxUnavailable, desired.MaxUnavailable) {
+	if existing.Spec.MinAvailable != nil {
 		return true
 	}
-	if !intOrStringPtrEqual(existing.Spec.MinAvailable, desired.MinAvailable) {
+	if !intOrStringPtrEqual(existing.Spec.MaxUnavailable, desired.MaxUnavailable) {
 		return true
 	}
 	if !equality.Semantic.DeepEqual(existing.Spec.Selector, desiredSelector) {

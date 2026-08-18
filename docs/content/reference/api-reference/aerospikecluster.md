@@ -48,7 +48,7 @@ Defines the desired state of an Aerospike CE cluster.
 | `enableDynamicConfigUpdate` | *bool | No | — | Enable runtime config changes via `set-config`. |
 | `rollingUpdateBatchSize` | *int32 | No | `1` | Number of pods to restart in parallel during rolling update. |
 | `disablePDB` | *bool | No | `false` | Disable PodDisruptionBudget creation. |
-| `maxUnavailable` | [IntOrString](https://pkg.go.dev/k8s.io/apimachinery/pkg/util/intstr#IntOrString) | No | majority rule | Max pods that may be voluntarily disrupted. Unset means `minAvailable = rackSize/2 + 1` per rack. A value that would allow every protected pod to be evicted is rejected. |
+| `maxUnavailable` | [IntOrString](https://pkg.go.dev/k8s.io/apimachinery/pkg/util/intstr#IntOrString) | No | `replication-factor - 1` | Max pods that may be voluntarily disrupted. Unset defaults to `replication-factor - 1` (floored at 1), taken from the smallest `replication-factor` across namespaces. A value that would allow every protected pod to be evicted is rejected. |
 | `paused` | *bool | No | `false` | Stop reconciliation when true. |
 | `seedsFinderServices` | [SeedsFinderServices](#seedsfinderservices) | No | — | LoadBalancer service for seed discovery. |
 | `k8sNodeBlockList` | []string | No | — | Node names Aerospike pods must not be scheduled onto. Added as a `kubernetes.io/hostname NotIn` node-affinity requirement. Changing the list rolls the rack, which is what moves pods already running on a listed node. |
@@ -439,7 +439,7 @@ Defines a single rack in the cluster topology.
 | `aerospikeConfig` | [AerospikeConfigSpec](#aerospikeconfigspec) | No | Per-rack Aerospike config override. |
 | `storage` | [AerospikeStorageSpec](#aerospikestoragespec) | No | Per-rack storage override. |
 | `podSpec` | [RackPodSpec](#rackpodspec) | No | Per-rack pod scheduling override. |
-| `maxUnavailable` | [IntOrString](https://pkg.go.dev/k8s.io/apimachinery/pkg/util/intstr#IntOrString) | No | Max pods in THIS rack that may be voluntarily disrupted. Overrides `spec.maxUnavailable` for this rack's PDB. Unset means the majority default. Validated against this rack's pod count, not the cluster size. |
+| `maxUnavailable` | [IntOrString](https://pkg.go.dev/k8s.io/apimachinery/pkg/util/intstr#IntOrString) | No | Max pods in THIS rack that may be voluntarily disrupted. Overrides `spec.maxUnavailable` for this rack's PDB. Unset means `replication-factor - 1`, measured against this rack's effective `aerospikeConfig`. Validated against this rack's pod count, not the cluster size. |
 
 ---
 
