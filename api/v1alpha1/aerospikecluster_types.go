@@ -623,6 +623,28 @@ type AerospikeCluster struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
+	// The two rules below duplicate checks the validating webhook already
+	// performs (validateSizeAndImage, and the rack-count check in validate).
+	// They are repeated in the schema because the webhook cannot see a
+	// `kubectl scale`: for a CustomResource the apiserver converts the object to
+	// an `autoscaling/v1 Scale` before admission runs, so a webhook registered on
+	// `aerospikeclusters/scale` would be handed a Scale rather than an
+	// AerospikeCluster. Schema validation, by contrast, does run on scale writes —
+	// which is why the CE maximum of 8 was already enforced there. Putting these
+	// two in the schema closes the two transitions that took a cluster down
+	// through the scale subresource (#353).
+	//
+	// Both rules mirror the webhook's conditions exactly, including the "size is
+	// supplied by the template later" exemption, so a spec accepted by one is
+	// accepted by the other.
+	//
+	// They are declared on this field rather than on AerospikeClusterSpec so they
+	// apply only to .spec. status.appliedSpec reuses the same Go type, and rules
+	// declared on the type would also validate that status snapshot on every
+	// status write.
+	//
+	// +kubebuilder:validation:XValidation:rule="has(self.templateRef) || (has(self.size) && self.size >= 1)",message="spec.size must be set (1-8) when spec.templateRef is not specified"
+	// +kubebuilder:validation:XValidation:rule="!has(self.rackConfig) || !has(self.rackConfig.racks) || size(self.rackConfig.racks) == 0 || (has(self.templateRef) && (!has(self.size) || self.size == 0)) || (has(self.size) && size(self.rackConfig.racks) <= self.size)",message="rackConfig defines more racks than spec.size; each rack must get at least 1 pod, so the rack count must not exceed spec.size"
 	Spec   AerospikeClusterSpec   `json:"spec"`
 	Status AerospikeClusterStatus `json:"status,omitempty"`
 }
