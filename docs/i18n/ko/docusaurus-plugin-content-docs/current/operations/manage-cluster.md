@@ -815,7 +815,11 @@ spec:
 
 ## HorizontalPodAutoscaler (HPA)
 
-AerospikeCluster는 `scale` 서브리소스를 지원하여 Kubernetes HPA와 통합할 수 있습니다. 오퍼레이터는 HPA 호환성을 위해 `status.selector`와 `status.size`를 노출합니다.
+AerospikeCluster는 `scale` 서브리소스를 지원하여 Kubernetes HPA와 통합할 수 있습니다. 오퍼레이터는 HPA 호환성을 위해 `status.selector`와 `status.replicas`를 노출합니다.
+
+:::note
+서브리소스가 읽는 값은 셀렉터에 매칭되는 전체 pod 수인 `status.replicas`이며, ready pod만 세는 `status.size`가 아닙니다. rolling restart 중에는 `status.size`가 실제 replica 수보다 낮아지므로, 그 값을 HPA에 넘기면 정상 클러스터가 scale down 됩니다. readiness는 `status.size` / `status.health`로, replica 수는 `status.replicas`로 확인하세요.
+:::
 
 ### HPA 생성
 

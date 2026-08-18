@@ -1,0 +1,40 @@
+# Dependency update PRs. Added alongside CodeQL and dependency-review
+# because this repository had no dependency scanning of any kind.
+# See aerospike-ce-ecosystem/project-hub#160.
+version: 2
+updates:
+  # operator module
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      gomod-deps:
+        patterns: ["*"]
+  # second Go module
+  - package-ecosystem: "gomod"
+    directory: "/test/client-test"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      gomod-deps:
+        patterns: ["*"]
+  # Docusaurus site
+  - package-ecosystem: "npm"
+    directory: "/docs"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      npm-deps:
+        patterns: ["*"]
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      github-actions-deps:
+        patterns: ["*"]

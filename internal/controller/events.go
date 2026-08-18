@@ -65,6 +65,12 @@ const (
 
 	// Migration checks
 	EventMigrationCheckFailed = "MigrationCheckFailed"
+	// EventMigrationCheckUnavailable is emitted when the rolling restart proceeds
+	// WITHOUT a confirmed migration answer, after the bounded escape hatch in
+	// isBatchBlocked opens. Distinct from EventMigrationCheckFailed (which means
+	// the batch was held) because this is the only path that deletes pods with
+	// migration state unknown.
+	EventMigrationCheckUnavailable = "MigrationCheckUnavailable"
 
 	// PVC cleanup
 	EventPVCCleanedUp     = "PVCCleanedUp"

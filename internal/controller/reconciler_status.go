@@ -75,6 +75,7 @@ func (r *AerospikeClusterReconciler) updateStatusAndPhase(
 		Phase:       latest.Status.Phase,
 		PhaseReason: latest.Status.PhaseReason,
 		Size:        latest.Status.Size,
+		Replicas:    latest.Status.Replicas,
 		Health:      latest.Status.Health,
 		Generation:  latest.Status.ObservedGeneration,
 		Selector:    latest.Status.Selector,
@@ -345,6 +346,11 @@ func (r *AerospikeClusterReconciler) populateStatus(
 
 	cluster.Status.Pods = podStatuses
 	cluster.Status.Size = readyCount
+	// Replicas backs the scale subresource, so it counts every pod the selector
+	// matches rather than only the ready ones. listClusterPods lists on
+	// utils.SelectorLabelsForCluster, which is exactly the selector published in
+	// Status.Selector below, so the two agree by construction.
+	cluster.Status.Replicas = int32(len(podList.Items))
 	cluster.Status.Health = fmt.Sprintf("%d/%d", readyCount, cluster.Spec.Size)
 	cluster.Status.ObservedGeneration = cluster.Generation
 	// DeepCopy to give Status an independent snapshot. A shallow alias would
@@ -656,6 +662,7 @@ type statusSnapshot struct {
 	Phase       ackov1alpha1.AerospikePhase
 	PhaseReason string
 	Size        int32
+	Replicas    int32
 	Health      string
 	Generation  int64
 	Selector    string
@@ -667,6 +674,11 @@ func statusUnchanged(prev statusSnapshot, latest *ackov1alpha1.AerospikeCluster,
 	return prev.Phase == phase &&
 		prev.PhaseReason == phaseReason &&
 		prev.Size == readyCount &&
+		// Replicas is what the scale subresource reads. It happens to be derivable
+		// from Pods today (both count the same list), but comparing it explicitly
+		// means a future change to how Pods is populated cannot silently leave a
+		// stale replica count published to an HPA.
+		prev.Replicas == latest.Status.Replicas &&
 		prev.Health == latest.Status.Health &&
 		prev.Generation == latest.Generation &&
 		prev.Selector == latest.Status.Selector &&
