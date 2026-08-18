@@ -729,12 +729,30 @@ func (v *AerospikeClusterValidator) validate(cluster *AerospikeCluster) (admissi
 		}
 	}
 
-	// Validate storage
+	// Validate storage — cluster-level, and every rack override.
+	//
+	// A rack's storage is not a decoration: reconcileStatefulSet resolves
+	// rack.Storage OVER cluster.Spec.Storage before calling both BuildVolumes and
+	// BuildVolumeClaimTemplates, so for that rack it IS the storage spec. It was
+	// never validated, on create or update, which let a rack carry input the
+	// cluster level rejects — most sharply a volume with NO source at all, which
+	// every VolumeSource field being +optional makes schema-valid. That is exactly
+	// the input that produces an unbacked mount: BuildVolumes emits the mount for
+	// any volume with an `aerospike` attachment, volumeForSpec falls through to
+	// return nil, and BuildVolumeClaimTemplates skips it, so the kubelet rejects
+	// every pod of that rack.
+	//
+	// validateStorageImmutability cannot close this: pvBackedVolumes indexes only
+	// volumes whose Source.PersistentVolume is non-nil, so a sourceless volume is
+	// invisible to it.
 	if cluster.Spec.Storage != nil {
 		storageErrors, storageWarnings := v.validateStorage(cluster.Spec.Storage)
 		allErrors = append(allErrors, storageErrors...)
 		warnings = append(warnings, storageWarnings...)
 	}
+	rackStorageErrors, rackStorageWarnings := v.validateRackStorage(cluster.Spec.RackConfig)
+	allErrors = append(allErrors, rackStorageErrors...)
+	warnings = append(warnings, rackStorageWarnings...)
 
 	// Validate network port uniqueness
 	if cluster.Spec.AerospikeConfig != nil {
@@ -1836,6 +1854,41 @@ func (v *AerospikeClusterValidator) validateStorage(storage *AerospikeStorageSpe
 		warnings = append(warnings, "storage.localStorageClasses is set but storage.deleteLocalStorageOnRestart is not configured; local PVCs will not be deleted on pod restart")
 	}
 
+	return errors, warnings
+}
+
+// validateRackStorage runs each rack's storage override through the same checks
+// the cluster-level spec gets, with the messages prefixed so they name the rack.
+//
+// Prefixing rather than threading a field path through validateStorage and
+// validateVolume keeps the two paths sharing one implementation — the point of
+// the fix is that a rack override must not be able to diverge from the
+// cluster-level rules, so they must not have separate code to diverge in.
+//
+// Beyond the sourceless-volume case this also picks up, for racks, everything
+// racks were skipping: duplicate volume names, size parseability, cascadeDelete
+// on a non-persistent volume, and the hostPath rules.
+func (v *AerospikeClusterValidator) validateRackStorage(rackConfig *RackConfig) ([]string, admission.Warnings) {
+	if rackConfig == nil {
+		return nil, nil
+	}
+
+	var errors []string
+	var warnings admission.Warnings
+	for i := range rackConfig.Racks {
+		rack := &rackConfig.Racks[i]
+		if rack.Storage == nil {
+			continue
+		}
+		rackErrors, rackWarnings := v.validateStorage(rack.Storage)
+		prefix := fmt.Sprintf("spec.rackConfig.racks[id=%d].", rack.ID)
+		for _, e := range rackErrors {
+			errors = append(errors, prefix+e)
+		}
+		for _, w := range rackWarnings {
+			warnings = append(warnings, prefix+w)
+		}
+	}
 	return errors, warnings
 }
 
