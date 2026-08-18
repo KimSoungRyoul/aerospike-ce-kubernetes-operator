@@ -147,6 +147,12 @@ func InjectAccessAddressPlaceholders(
 		}
 	}
 
+	// Captured BEFORE the policy block below, so the override notices can tell a
+	// value the user wrote from one alternateAccessType derived. The remedy
+	// differs: the first means "your setting was ignored", the second means "your
+	// alternateAccessType was ignored".
+	userAddress, userSetAddress := svcSection["alternate-access-address"]
+
 	// Inject alternate-access-address based on AlternateAccessType
 	if placeholder := placeholderForNetworkType(policy.AlternateAccessType); placeholder != "" {
 		if _, exists := svcSection["alternate-access-address"]; !exists {
@@ -169,9 +175,20 @@ func InjectAccessAddressPlaceholders(
 	// <lb-address>:<stale-port>, a port nothing listens on. Clients then fail to
 	// reach peers via --services-alternate with a connection error, which is
 	// indistinguishable from the port having been dropped.
+	//
+	// The ADDRESS is overridden here too, and just as unconditionally — note that
+	// the policy block above deliberately respects an existing value with
+	// `if !exists`, and this then replaces it regardless. That is correct (a
+	// per-pod LB/NodePort service is the externally reachable endpoint, so it
+	// wins), but a setting quietly ignored is the same user-visible failure as one
+	// quietly lost, so both halves are reported rather than only the port.
 	var overrides []string
 	switch podServiceType {
 	case "LoadBalancer":
+		if note := describeAddressOverride(svcSection, userAddress, userSetAddress,
+			policy.AlternateAccessType, placeholderExternalAddress); note != "" {
+			overrides = append(overrides, note)
+		}
 		svcSection["alternate-access-address"] = placeholderExternalAddress
 		// The LoadBalancer serves the service port, so any alternate-access-port
 		// is wrong by construction here. Removing it makes Aerospike fall back to
@@ -184,6 +201,10 @@ func InjectAccessAddressPlaceholders(
 					"port nothing listens on", old))
 		}
 	case "NodePort":
+		if note := describeAddressOverride(svcSection, userAddress, userSetAddress,
+			policy.AlternateAccessType, placeholderNodeIP); note != "" {
+			overrides = append(overrides, note)
+		}
 		svcSection["alternate-access-address"] = placeholderNodeIP
 		// The operator creates the per-pod NodePort Service and Kubernetes
 		// allocates the port, so the live Service is the only authority on what it
@@ -202,6 +223,36 @@ func InjectAccessAddressPlaceholders(
 	networkSection[SectionService] = svcSection
 	config[SectionNetwork] = networkSection
 	return overrides
+}
+
+// describeAddressOverride reports what replacing alternate-access-address
+// discards, or "" when nothing meaningful is lost.
+//
+// Nothing is lost when the value is already what we are about to write — most
+// commonly alternateAccessType=hostInternal under a NodePort service, where the
+// policy already produced MY_NODE_IP.
+func describeAddressOverride(
+	svcSection map[string]any,
+	userAddress any,
+	userSetAddress bool,
+	alternateAccessType v1alpha1.AerospikeNetworkType,
+	replacement string,
+) string {
+	current, exists := svcSection["alternate-access-address"]
+	if !exists || current == replacement {
+		return ""
+	}
+	if userSetAddress {
+		return fmt.Sprintf(
+			"overrode network.service.alternate-access-address (%v) with %s: the per-pod service is the "+
+				"externally reachable endpoint, so the operator resolves the address from it",
+			userAddress, replacement)
+	}
+	return fmt.Sprintf(
+		"overrode the alternate-access-address derived from "+
+			"spec.aerospikeNetworkPolicy.alternateAccessType=%s (%v) with %s: the per-pod service is the "+
+			"externally reachable endpoint, so it takes precedence over the network policy",
+		alternateAccessType, current, replacement)
 }
 
 // placeholderForNetworkType returns the placeholder string for the given network type.
