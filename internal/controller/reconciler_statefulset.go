@@ -676,6 +676,12 @@ func (r *AerospikeClusterReconciler) detectScaling(
 // and pods would keep stale config. Both are JSON-serializable pointers; a nil
 // value is omitted and hashes stably.
 //
+// K8sNodeBlockList is included for the same reason and matters more: it renders
+// into the pod template's node affinity, and it is reached for during an
+// incident to evacuate a failing node. Unhashed, adding a node to the list would
+// leave needsUpdate false, so the template would never be patched, no pod would
+// roll, and the evacuation would silently do nothing.
+//
 // The hash is written to the pod template as utils.PodSpecHashAnnotation.
 // reconcileRollingRestart compares it against each pod's annotation and rolls
 // (cold-restarts) any pod whose pod-spec hash is stale, so a change to the
@@ -688,6 +694,7 @@ func computePodSpecHash(cluster *ackov1alpha1.AerospikeCluster, rack *ackov1alph
 		Monitoring             *ackov1alpha1.AerospikeMonitoringSpec `json:"monitoring,omitempty"`
 		PodService             *ackov1alpha1.AerospikeServiceSpec    `json:"podService,omitempty"`
 		AerospikeNetworkPolicy *ackov1alpha1.AerospikeNetworkPolicy  `json:"aerospikeNetworkPolicy,omitempty"`
+		K8sNodeBlockList       []string                              `json:"k8sNodeBlockList,omitempty"`
 		RackID                 int                                   `json:"rackID"`
 		PreStopSleepSec        int                                   `json:"preStopSleepSec"`
 	}{
@@ -696,6 +703,7 @@ func computePodSpecHash(cluster *ackov1alpha1.AerospikeCluster, rack *ackov1alph
 		Monitoring:             cluster.Spec.Monitoring,
 		PodService:             cluster.Spec.PodService,
 		AerospikeNetworkPolicy: cluster.Spec.AerospikeNetworkPolicy,
+		K8sNodeBlockList:       cluster.Spec.K8sNodeBlockList,
 		RackID:                 rack.ID,
 		PreStopSleepSec:        podutil.PreStopSleepSeconds,
 	}

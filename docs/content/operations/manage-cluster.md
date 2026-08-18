@@ -578,17 +578,6 @@ spec:
 
 This is useful for development environments or in-memory deployments that don't require persistent work directories.
 
-## Rack ID Override
-
-Enable dynamic rack ID assignment via pod annotations:
-
-```yaml
-spec:
-  enableRackIDOverride: true
-```
-
-When enabled, the operator allows rack IDs to be overridden by pod annotations instead of being strictly managed by the operator. This is useful for manual rack management scenarios.
-
 ## Storage
 
 ### Volume Types

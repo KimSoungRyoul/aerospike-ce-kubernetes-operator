@@ -9,51 +9,6 @@ title: 고급 설정
 
 ---
 
-## EnableRackIDOverride
-
-기본적으로 오퍼레이터는 StatefulSet ordinal과 랙 정의를 기준으로 각 파드의 rack ID를 정합니다. `enableRackIDOverride`를 활성화하면 파드 annotation으로 rack ID를 동적으로 지정할 수 있습니다.
-
-스케일 다운과 업 없이 파드를 다른 랙으로 옮기거나, 외부 orchestration 도구에서 랙 배치를 관리할 때 사용하세요.
-
-```yaml
-apiVersion: acko.io/v1alpha1
-kind: AerospikeCluster
-metadata:
-  name: aerospike-cluster
-spec:
-  size: 4
-  image: aerospike:ce-8.1.1.1
-  enableRackIDOverride: true
-  rackConfig:
-    racks:
-      - id: 1
-        zone: us-east-1a
-      - id: 2
-        zone: us-east-1b
-  aerospikeConfig:
-    service:
-      cluster-name: my-cluster
-    namespaces:
-      - name: test
-        memory-size: 1073741824
-        replication-factor: 2
-        storage-engine:
-          type: memory
-    network:
-      service:
-        port: 3000
-      heartbeat:
-        port: 3002
-      fabric:
-        port: 3001
-```
-
-:::caution
-`enableRackIDOverride`는 수동 랙 할당이 필요한 특정 상황에서만 사용하세요. 대부분의 경우 오퍼레이터의 자동 랙 분배로 충분하며 더 안전합니다.
-:::
-
----
-
 ## ValidationPolicy
 
 `validationPolicy` 필드는 오퍼레이터가 수행하는 검증 확인을 제어합니다. 현재 `skipWorkDirValidate` 옵션 하나를 지원합니다.

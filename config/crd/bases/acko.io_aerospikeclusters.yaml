@@ -237,10 +237,6 @@ spec:
                   EnableDynamicConfigUpdate enables runtime configuration changes
                   without pod restart using Aerospike's set-config command.
                 type: boolean
-              enableRackIDOverride:
-                description: EnableRackIDOverride enables dynamic rack ID assignment
-                  via pod annotations.
-                type: boolean
               headlessService:
                 description: HeadlessService defines custom metadata for the headless
                   service.
@@ -277,8 +273,15 @@ spec:
                   When spec.templateRef is set, image may be omitted and the template's default will be used.
                 type: string
               k8sNodeBlockList:
-                description: K8sNodeBlockList contains Kubernetes node names that
-                  should not run Aerospike pods.
+                description: |-
+                  K8sNodeBlockList contains Kubernetes node names that should not run Aerospike pods.
+
+                  Each name is added as a `kubernetes.io/hostname NotIn` requirement on the
+                  pods' required node affinity, so the scheduler will not place a pod on a
+                  listed node. Changing the list changes the pod template hash and therefore
+                  rolls the rack, which is what moves pods already running on a listed node.
+                  Existing pods are not evicted by this field alone — node affinity is
+                  IgnoredDuringExecution — they move as the rolling restart recreates them.
                 items:
                   type: string
                 type: array
@@ -8788,10 +8791,6 @@ spec:
                       EnableDynamicConfigUpdate enables runtime configuration changes
                       without pod restart using Aerospike's set-config command.
                     type: boolean
-                  enableRackIDOverride:
-                    description: EnableRackIDOverride enables dynamic rack ID assignment
-                      via pod annotations.
-                    type: boolean
                   headlessService:
                     description: HeadlessService defines custom metadata for the headless
                       service.
@@ -8828,8 +8827,15 @@ spec:
                       When spec.templateRef is set, image may be omitted and the template's default will be used.
                     type: string
                   k8sNodeBlockList:
-                    description: K8sNodeBlockList contains Kubernetes node names that
-                      should not run Aerospike pods.
+                    description: |-
+                      K8sNodeBlockList contains Kubernetes node names that should not run Aerospike pods.
+
+                      Each name is added as a `kubernetes.io/hostname NotIn` requirement on the
+                      pods' required node affinity, so the scheduler will not place a pod on a
+                      listed node. Changing the list changes the pod template hash and therefore
+                      rolls the rack, which is what moves pods already running on a listed node.
+                      Existing pods are not evicted by this field alone — node affinity is
+                      IgnoredDuringExecution — they move as the rolling restart recreates them.
                     items:
                       type: string
                     type: array

@@ -51,12 +51,11 @@ Aerospike CE 클러스터의 원하는 상태를 정의합니다.
 | `maxUnavailable` | [IntOrString](https://pkg.go.dev/k8s.io/apimachinery/pkg/util/intstr#IntOrString) | 아니요 | `1` | 중단 중 최대 비가용 파드 수. |
 | `paused` | *bool | 아니요 | `false` | true이면 재조정 중지. |
 | `seedsFinderServices` | [SeedsFinderServices](#seedsfinderservices) | 아니요 | — | 시드 디스커버리용 LoadBalancer 서비스. |
-| `k8sNodeBlockList` | []string | 아니요 | — | 스케줄링에서 제외할 노드 이름. |
+| `k8sNodeBlockList` | []string | 아니요 | — | Aerospike pod을 스케줄링하지 않을 노드 이름. `kubernetes.io/hostname NotIn` node affinity 요구사항으로 추가됩니다. 목록을 변경하면 해당 rack이 rolling restart 되며, 이미 해당 노드에서 실행 중이던 pod은 이때 옮겨집니다. |
 | `operations` | [][OperationSpec](#operationspec) | 아니요 | — | 온디맨드 오퍼레이션 (WarmRestart, PodRestart). 동시에 최대 1개. |
 | `validationPolicy` | [ValidationPolicySpec](#validationpolicyspec) | 아니요 | — | 웹훅 검증 동작 제어. |
 | `headlessService` | [AerospikeServiceSpec](#aerospikeservicespec) | 아니요 | — | Headless 서비스 커스텀 메타데이터. |
 | `podService` | [AerospikeServiceSpec](#aerospikeservicespec) | 아니요 | — | Pod별 서비스 커스텀 메타데이터. 설정 시 파드마다 개별 Service 생성. |
-| `enableRackIDOverride` | *bool | 아니요 | `false` | 파드 어노테이션을 통한 동적 랙 ID 할당 활성화. |
 | `templateRef` | [TemplateRef](#templateref) | 아니요 | — | `AerospikeClusterTemplate` 참조. 설정 시 템플릿 스펙이 생성 시점에 스냅샷으로 저장됨. |
 | `overrides` | [AerospikeClusterTemplateSpec](./aerospikeclustertemplate#aerospikeclustertemplatespec) | 아니요 | — | 참조된 템플릿을 오버라이드하는 필드. 병합 우선순위: overrides > template > 오퍼레이터 기본값. |
 
