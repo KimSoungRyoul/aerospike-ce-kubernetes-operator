@@ -151,7 +151,7 @@ func TestPopulateStatus_ReplicasCountsAllSelectorMatchedPods(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			scheme := replicasTestScheme(t)
 
-			objs := []client.Object{}
+			objs := make([]client.Object, 0, tt.readyPods+tt.notReadyPods+tt.foreignPods)
 			for i := range tt.readyPods {
 				objs = append(objs, replicasTestPod(fmt.Sprintf("%s-0-%d", replicasTestCluster, i), true))
 			}
