@@ -102,8 +102,9 @@ func minReplicationFactor(config *ackov1alpha1.AerospikeConfigSpec) int32 {
 // The floor of 1 is deliberate. replication-factor 1 means every partition has a
 // single copy, so the honest budget is 0 — but a default of 0 is the same
 // deadlock, on a configuration CE users legitimately run for dev. Returning 1
-// keeps today's behaviour there; the webhook warns separately that a
-// single-copy cluster has no redundancy for a PDB to protect.
+// keeps today's behaviour there. Note the budget is then dishonest by one: at
+// replication-factor 1 there is no redundancy for a PDB to protect, and nothing
+// in the webhook says so today.
 func (r *AerospikeClusterReconciler) defaultMaxUnavailable(
 	cluster *ackov1alpha1.AerospikeCluster,
 	rack *ackov1alpha1.Rack,
