@@ -179,7 +179,8 @@ func TestEffectivePDBPolicy(t *testing.T) {
 		{
 			// Floored at 1. RF=1 has no redundancy so the honest budget is 0, but
 			// a default of 0 is a deadlock on a configuration CE users run for
-			// dev; the webhook warns about the missing redundancy instead.
+			// dev. Nothing warns about this today — the docs state it, and the
+			// budget is deliberately permissive rather than correct.
 			name: "replication-factor 1 is floored at one", rackRF: 1, rackSize: 3,
 			want: intstr.FromInt32(1),
 		},
