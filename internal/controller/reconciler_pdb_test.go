@@ -108,7 +108,7 @@ func TestPDBNeedsUpdate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			pdb := base.DeepCopy()
 			tc.mutate(pdb)
-			if got := pdbNeedsUpdate(pdb, desiredLabels, desiredSelector, desiredMaxUnavailable); got != tc.expected {
+			if got := pdbNeedsUpdate(pdb, desiredLabels, desiredSelector, pdbPolicy{MaxUnavailable: &desiredMaxUnavailable}); got != tc.expected {
 				t.Fatalf("pdbNeedsUpdate() = %v, want %v", got, tc.expected)
 			}
 		})

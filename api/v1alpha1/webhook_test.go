@@ -3968,20 +3968,15 @@ func TestValidate_MaxUnavailableExceedsClusterSize(t *testing.T) {
 		},
 	}
 
-	warnings, err := v.validate(cluster)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	// This used to be a warning. A warning shows up once in `kubectl apply`
+	// output and the consequence surfaces much later, during an unrelated node
+	// drain, so it is now a rejection (#94).
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("validate() = nil, want an error for maxUnavailable >= size")
 	}
-
-	found := false
-	for _, w := range warnings {
-		if strings.Contains(w, "maxUnavailable") && strings.Contains(w, "cluster size") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("expected warning about maxUnavailable >= clusterSize, got warnings: %v", warnings)
+	if !strings.Contains(err.Error(), "spec.maxUnavailable") {
+		t.Errorf("validate() error = %q, want it to name spec.maxUnavailable", err.Error())
 	}
 }
 
@@ -3996,20 +3991,12 @@ func TestValidate_MaxUnavailableEqualsClusterSize(t *testing.T) {
 		},
 	}
 
-	warnings, err := v.validate(cluster)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("validate() = nil, want an error for maxUnavailable == size")
 	}
-
-	found := false
-	for _, w := range warnings {
-		if strings.Contains(w, "maxUnavailable") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("expected warning about maxUnavailable >= clusterSize, got warnings: %v", warnings)
+	if !strings.Contains(err.Error(), "spec.maxUnavailable") {
+		t.Errorf("validate() error = %q, want it to name spec.maxUnavailable", err.Error())
 	}
 }
 
@@ -4047,20 +4034,12 @@ func TestValidate_MaxUnavailablePercentage100(t *testing.T) {
 		},
 	}
 
-	warnings, err := v.validate(cluster)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	_, err := v.validate(cluster)
+	if err == nil {
+		t.Fatal("validate() = nil, want an error for maxUnavailable 100%")
 	}
-
-	found := false
-	for _, w := range warnings {
-		if strings.Contains(w, "maxUnavailable") && strings.Contains(w, "100%") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("expected warning about maxUnavailable 100%%, got warnings: %v", warnings)
+	if !strings.Contains(err.Error(), "100%") {
+		t.Errorf("validate() error = %q, want it to mention 100%%", err.Error())
 	}
 }
 

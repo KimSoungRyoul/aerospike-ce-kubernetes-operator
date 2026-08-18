@@ -913,7 +913,58 @@ When using HPA, avoid manually changing `spec.size` — let the autoscaler manag
 
 ## Pod Disruption Budget
 
-By default, the operator creates a PodDisruptionBudget to protect the cluster during maintenance.
+The operator creates PodDisruptionBudgets so voluntary disruption — a node drain, a cluster upgrade — cannot take out more of the cluster than it can survive.
+
+### One PDB per rack
+
+| Topology | PDBs created |
+|---|---|
+| Single rack (no `rackConfig`, or one rack) | one cluster-wide PDB, `<cluster>-pdb` |
+| Multi-rack | one PDB per rack, `<cluster>-<rackID>-pdb` |
+
+A single cluster-wide PDB counts disruptions across every rack. With 3 racks of 2 pods and `maxUnavailable: 1`, Kubernetes allows one eviction at a time — but nothing constrains *which* pods, so a drain can take both pods of the same rack in sequence and leave that rack with nothing. Per-rack budgets make the constraint per-rack.
+
+PDBs for racks removed from `spec.rackConfig.racks` are deleted, and switching between single-rack and multi-rack swaps between the two shapes.
+
+### Default: replication-factor − 1
+
+With no `maxUnavailable` set, each PDB allows `replication-factor - 1` evictions — the number of nodes Aerospike can lose at once without a partition becoming unavailable.
+
+| replication-factor | Evictions allowed |
+|---|---|
+| 1 | 1 (floored — see below) |
+| 2 (Aerospike's default) | 1 |
+| 3 | 2 |
+| 4 | 3 |
+
+The factor is read from `spec.aerospikeConfig.namespaces[].replication-factor`, taking the **smallest** across namespaces, since the least-replicated namespace is the binding constraint. A rack that overrides `aerospikeConfig` is measured against its own effective config.
+
+:::note Why not a majority rule
+A Raft-style `minAvailable = rackSize/2 + 1` does not map onto Aerospike CE, which has no quorum — strong consistency is Enterprise-only. It also deadlocks in practice: `spec.size` is divided across racks, so a large cluster still has small racks, and with CE's 8-node cap a 3-rack cluster tops out at 3/3/2. The rack of 2 would be allowed zero evictions, blocking `kubectl drain`, cluster-autoscaler node recycling and managed node-pool upgrades on the canonical one-rack-per-zone topology this feature exists to serve.
+:::
+
+:::warning replication-factor 1 has nothing to protect
+With a single copy of every partition, losing any node makes its partitions unavailable, so the honest budget is 0. The default is floored at 1 anyway, because a budget of 0 blocks all node maintenance. If you run `replication-factor: 1`, a PDB cannot keep your data available — raise the replication factor or accept that node maintenance costs availability.
+:::
+
+:::info These budgets constrain external disruption only
+A PodDisruptionBudget only governs the Kubernetes **Eviction** API — `kubectl drain`, cluster-autoscaler, the descheduler. The operator does not use that API: it deletes pods directly for rolling restarts and patches `replicas` for scale-down and rack removal. So these budgets do **not** limit the operator's own destructive paths, which have their own migration gates, batching and quiesce. Do not read a PDB as a backstop against the operator.
+:::
+
+### Custom MaxUnavailable
+
+```yaml
+spec:
+  maxUnavailable: 1         # Can be integer or percentage string like "25%"
+  rackConfig:
+    racks:
+      - id: 1
+        maxUnavailable: 2   # Overrides spec.maxUnavailable for this rack only
+```
+
+Precedence: `rack.maxUnavailable` > `spec.maxUnavailable` > the `replication-factor - 1` default.
+
+A value that would allow **every** pod it protects to be evicted at once is rejected at admission — `maxUnavailable: 3` on a 3-pod rack, or any percentage at or above 100%. That is not a budget. To opt out of disruption protection, use `spec.disablePDB: true` explicitly.
 
 ### Disable PDB
 
@@ -922,12 +973,7 @@ spec:
   disablePDB: true
 ```
 
-### Custom MaxUnavailable
-
-```yaml
-spec:
-  maxUnavailable: 1         # Can be integer or percentage string like "25%"
-```
+Removes every PDB the operator manages for the cluster, cluster-wide and per-rack.
 
 ## Host Network
 

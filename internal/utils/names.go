@@ -27,6 +27,14 @@ func PDBName(clusterName string) string {
 	return fmt.Sprintf("%s-pdb", clusterName)
 }
 
+// RackPDBName returns the PodDisruptionBudget name for a single rack. Multi-rack
+// clusters get one PDB per rack so a node drain cannot take out a whole rack —
+// a cluster-wide PDB counts disruptions across every rack, so it permits all of
+// one rack's pods to be evicted together.
+func RackPDBName(clusterName string, rackID int) string {
+	return fmt.Sprintf("%s-%d-pdb", clusterName, rackID)
+}
+
 // PodDNSName returns the fully qualified DNS name for a pod.
 func PodDNSName(podName, serviceName, namespace string) string {
 	return fmt.Sprintf("%s.%s.%s.svc.cluster.local", podName, serviceName, namespace)

@@ -78,6 +78,16 @@ type Rack struct {
 	// +optional
 	RackLabel string `json:"rackLabel,omitempty"`
 
+	// MaxUnavailable is the maximum number of pods in THIS rack that may be
+	// voluntarily disrupted at once. It overrides spec.maxUnavailable for this
+	// rack's PodDisruptionBudget.
+	//
+	// Leave unset to get the default: replication-factor - 1, the number of nodes
+	// Aerospike can lose at once without a partition becoming unavailable,
+	// measured against this rack's effective aerospikeConfig and floored at 1.
+	// +optional
+	MaxUnavailable *intstr.IntOrString `json:"maxUnavailable,omitempty"`
+
 	// Revision is a version identifier for controlled rack migrations.
 	// +optional
 	Revision string `json:"revision,omitempty"`

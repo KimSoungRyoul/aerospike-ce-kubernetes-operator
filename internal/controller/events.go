@@ -40,6 +40,11 @@ const (
 	// PodDisruptionBudget
 	EventPDBCreated = "PDBCreated"
 	EventPDBUpdated = "PDBUpdated"
+	// EventPDBNameConflict is emitted when a PodDisruptionBudget with the name
+	// this cluster wants already carries another cluster's instance label. PDB
+	// names can collide across clusters in one namespace — RackPDBName("demo", 1)
+	// and PDBName("demo-1") are both "demo-1-pdb".
+	EventPDBNameConflict = "PDBNameConflict"
 
 	// Service management
 	EventServiceCreated = "ServiceCreated"

@@ -6471,6 +6471,19 @@ spec:
                             be >= 1; rack ID 0 is reserved.
                           minimum: 1
                           type: integer
+                        maxUnavailable:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          description: |-
+                            MaxUnavailable is the maximum number of pods in THIS rack that may be
+                            voluntarily disrupted at once. It overrides spec.maxUnavailable for this
+                            rack's PodDisruptionBudget.
+
+                            Leave unset to get the default: replication-factor - 1, the number of nodes
+                            Aerospike can lose at once without a partition becoming unavailable,
+                            measured against this rack's effective aerospikeConfig and floored at 1.
+                          x-kubernetes-int-or-string: true
                         nodeName:
                           description: NodeName constrains this rack to a specific
                             Kubernetes node.
@@ -15061,6 +15074,19 @@ spec:
                                 Must be >= 1; rack ID 0 is reserved.
                               minimum: 1
                               type: integer
+                            maxUnavailable:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              description: |-
+                                MaxUnavailable is the maximum number of pods in THIS rack that may be
+                                voluntarily disrupted at once. It overrides spec.maxUnavailable for this
+                                rack's PodDisruptionBudget.
+
+                                Leave unset to get the default: replication-factor - 1, the number of nodes
+                                Aerospike can lose at once without a partition becoming unavailable,
+                                measured against this rack's effective aerospikeConfig and floored at 1.
+                              x-kubernetes-int-or-string: true
                             nodeName:
                               description: NodeName constrains this rack to a specific
                                 Kubernetes node.

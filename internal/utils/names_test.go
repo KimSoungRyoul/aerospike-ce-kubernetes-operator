@@ -45,6 +45,17 @@ func TestPDBName(t *testing.T) {
 	}
 }
 
+func TestRackPDBName(t *testing.T) {
+	if got := RackPDBName("my-cluster", 2); got != "my-cluster-2-pdb" {
+		t.Errorf("RackPDBName = %q, want %q", got, "my-cluster-2-pdb")
+	}
+	// A per-rack name must never collide with the cluster-wide one, or the
+	// multi-rack path would delete the budget it just created.
+	if RackPDBName("my-cluster", 0) == PDBName("my-cluster") {
+		t.Error("RackPDBName collides with PDBName")
+	}
+}
+
 func TestPodDNSName(t *testing.T) {
 	expected := "pod-0.svc.ns.svc.cluster.local"
 	if got := PodDNSName("pod-0", "svc", "ns"); got != expected {

@@ -876,6 +876,46 @@ HPA를 사용할 때는 `spec.size`를 수동으로 변경하지 마세요 — �
 
 기본적으로 오퍼레이터는 유지보수 중 클러스터를 보호하기 위해 PodDisruptionBudget을 생성합니다.
 
+### rack별 PDB
+
+| 토폴로지 | 생성되는 PDB |
+|---|---|
+| 단일 rack (`rackConfig` 없음 또는 rack 1개) | 클러스터 전체 PDB 1개, `<cluster>-pdb` |
+| Multi-rack | rack별 PDB, `<cluster>-<rackID>-pdb` |
+
+클러스터 전체 PDB 하나는 모든 rack에 걸쳐 disruption 수를 셉니다. rack 3개 × pod 2개에 `maxUnavailable: 1`이면 Kubernetes는 한 번에 1개 eviction만 허용하지만, *어떤* pod인지는 제약하지 않으므로 drain이 같은 rack의 pod 2개를 연달아 제거해 해당 rack을 비울 수 있습니다. rack별 PDB는 이 제약을 rack 단위로 만듭니다.
+
+spec에서 제거된 rack의 PDB는 삭제되며, 단일 rack ↔ multi-rack 전환 시 두 형태 사이를 오갑니다.
+
+### 기본값: replication-factor − 1
+
+`maxUnavailable`를 설정하지 않으면 각 PDB는 `replication-factor - 1`개의 eviction을 허용합니다. 파티션이 unavailable 되지 않으면서 Aerospike가 동시에 잃을 수 있는 노드 수입니다.
+
+| replication-factor | 허용되는 eviction |
+|---|---|
+| 1 | 1 (하한 적용 — 아래 참고) |
+| 2 (Aerospike 기본값) | 1 |
+| 3 | 2 |
+| 4 | 3 |
+
+값은 `spec.aerospikeConfig.namespaces[].replication-factor`에서 읽으며, 네임스페이스가 여럿이면 **가장 작은** 값을 씁니다(복제가 가장 적은 네임스페이스가 제약 조건이므로). `aerospikeConfig`를 override 하는 rack은 그 rack의 effective config 기준으로 계산됩니다.
+
+:::note 과반(majority) 규칙을 쓰지 않는 이유
+Raft 스타일의 `minAvailable = rackSize/2 + 1`은 Aerospike CE에 맞지 않습니다 — CE에는 quorum이 없습니다(strong consistency는 Enterprise 전용). 실제로 deadlock도 발생합니다: `spec.size`가 rack들에 나뉘므로 큰 클러스터도 rack은 작고, CE의 8노드 상한에서 3-rack 클러스터는 최대 3/3/2입니다. pod 2개짜리 rack은 eviction이 0이 되어 `kubectl drain`, cluster-autoscaler 노드 교체, managed node-pool 업그레이드가 막힙니다 — 이 기능이 존재하는 이유인 zone당 rack 하나 토폴로지에서 말입니다.
+:::
+
+:::warning replication-factor 1은 보호할 사본이 없습니다
+파티션 사본이 하나뿐이면 어떤 노드를 잃어도 그 파티션은 unavailable 이므로 정직한 budget은 0입니다. 그래도 기본값은 1로 하한을 둡니다 — budget 0은 모든 노드 유지보수를 막기 때문입니다. `replication-factor: 1`을 쓴다면 PDB로 데이터 가용성을 지킬 수 없습니다. replication factor를 올리거나, 노드 유지보수가 가용성을 희생한다는 점을 받아들이세요.
+:::
+
+:::info 이 budget은 외부 disruption에만 적용됩니다
+PodDisruptionBudget은 Kubernetes **Eviction** API만 제어합니다 — `kubectl drain`, cluster-autoscaler, descheduler. 오퍼레이터는 이 API를 쓰지 않습니다: rolling restart는 pod을 직접 삭제하고, scale-down과 rack 제거는 `replicas`를 patch 합니다. 따라서 이 budget은 오퍼레이터 자신의 파괴적 경로를 제한하지 **않으며**, 그쪽은 별도의 migration gate, batching, quiesce를 갖고 있습니다. PDB를 오퍼레이터에 대한 안전장치로 읽지 마세요.
+:::
+
+우선순위: `rack.maxUnavailable` > `spec.maxUnavailable` > `replication-factor - 1` 기본값.
+
+보호 대상 pod을 **전부** eviction 할 수 있게 하는 값(3-pod rack에 `maxUnavailable: 3`, 또는 100% 이상의 퍼센트)은 admission에서 거부됩니다. 그것은 budget이 아닙니다. disruption 보호를 끄려면 `spec.disablePDB: true`를 명시적으로 사용하세요.
+
 ### PDB 비활성화
 
 ```yaml
