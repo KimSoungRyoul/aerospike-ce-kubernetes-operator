@@ -7,6 +7,14 @@ title: Storage Configuration
 
 Use `spec.storage` to provision, initialize, and clean up volumes for namespace data, secondary indexes, and logs.
 
+:::warning Persistent volumes are immutable after creation
+Volumes with a `persistentVolume` source become the StatefulSet's `volumeClaimTemplates`, and Kubernetes does not allow those to change on a running StatefulSet. The webhook therefore **rejects** adding, removing, resizing, or otherwise changing a `persistentVolume`-backed volume on an existing cluster — in `spec.storage` or in a rack's `storage` override.
+
+To change persistent storage, create a new cluster with the storage you want and migrate the data.
+
+Everything else in `spec.storage` remains editable: `emptyDir` / `secret` / `configMap` / `hostPath` volumes, mount paths, `initMethod` / `wipeMethod`, `cascadeDelete`, and the global volume policies. Those changes roll the cluster's pods so they take effect.
+:::
+
 ---
 
 ## Global Volume Policies

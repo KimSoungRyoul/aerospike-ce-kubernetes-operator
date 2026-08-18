@@ -7,6 +7,14 @@ title: 스토리지 설정
 
 `spec.storage`에서 네임스페이스 데이터, secondary index, 로그에 쓸 볼륨의 provisioning, 초기화, 정리 방식을 지정합니다.
 
+:::warning persistent volume은 생성 후 변경할 수 없습니다
+`persistentVolume` source를 쓰는 볼륨은 StatefulSet의 `volumeClaimTemplates`가 되며, Kubernetes는 실행 중인 StatefulSet의 VCT 변경을 허용하지 않습니다. 따라서 webhook은 기존 클러스터에서 `persistentVolume` 기반 볼륨을 추가/제거/크기 변경하거나 그 외 속성을 바꾸는 요청을 **거부**합니다 — `spec.storage`든 rack의 `storage` override든 동일합니다.
+
+persistent storage를 바꾸려면 원하는 스토리지로 새 클러스터를 만들고 데이터를 마이그레이션하세요.
+
+`spec.storage`의 나머지는 계속 수정할 수 있습니다: `emptyDir` / `secret` / `configMap` / `hostPath` 볼륨, mount path, `initMethod` / `wipeMethod`, `cascadeDelete`, 전역 볼륨 정책. 이 변경들은 pod을 rolling restart 하여 반영됩니다.
+:::
+
 ---
 
 ## 글로벌 볼륨 정책
