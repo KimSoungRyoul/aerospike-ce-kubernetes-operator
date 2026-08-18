@@ -57,8 +57,8 @@ jobs:
                 AFFECTED_FILES="${AFFECTED_FILES}- \`${file}\` → **acko-deploy** (CR spec fields)\n"
                 ;;
               internal/controller/reconciler_status.go)
-                AFFECTED_SKILLS="${AFFECTED_SKILLS}acko-operations\nacko-cluster-debugger\n"
-                AFFECTED_FILES="${AFFECTED_FILES}- \`${file}\` → **acko-operations**, **acko-cluster-debugger** (phase names, status fields, events)\n"
+                AFFECTED_SKILLS="${AFFECTED_SKILLS}acko-operations\nacko-debugging\n"
+                AFFECTED_FILES="${AFFECTED_FILES}- \`${file}\` → **acko-operations**, **acko-debugging** (phase names, status fields, events)\n"
                 ;;
               internal/controller/reconciler_restart.go)
                 AFFECTED_SKILLS="${AFFECTED_SKILLS}acko-operations\n"
@@ -92,8 +92,9 @@ jobs:
           $(echo -e "${AFFECTED_FILES}")
 
           ### Next Steps
-          1. The \`skill-impact-review\` label is automatically attached so the Hub Planner can analyze the diff
-          2. After reviewing the analysis, adding the \`start-implement\` label will automatically dispatch to the plugins repo
+          1. The \`skill-impact-review\` label is attached automatically; it is a marker for triage, nothing acts on it
+          2. Review the diff, then open a PR against \`aerospike-ce-ecosystem-plugins\` yourself if a skill needs updating
+          3. Close this issue when the skills match, or as \`not planned\` if they already did
 
           ---
           > This issue was automatically created by the skill-impact-notify workflow in ${SOURCE_REPO}.
