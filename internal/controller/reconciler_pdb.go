@@ -121,7 +121,7 @@ func (r *AerospikeClusterReconciler) reconcilePDB(
 	if !perRack {
 		// Single rack: cluster-wide PDB, unchanged in name and selector. Any
 		// per-rack PDBs left over from a multi-rack topology are removed.
-		if err := r.deleteRackPDBs(ctx, cluster, racks, nil); err != nil {
+		if err := r.deleteRackPDBs(ctx, cluster, nil); err != nil {
 			return err
 		}
 		rackSize := r.getRackSize(cluster, racks, 0)
@@ -155,7 +155,7 @@ func (r *AerospikeClusterReconciler) reconcilePDB(
 
 	// Racks dropped from the spec leave their PDB behind; it would keep
 	// constraining evictions for pods that no longer exist.
-	return r.deleteRackPDBs(ctx, cluster, racks, keep)
+	return r.deleteRackPDBs(ctx, cluster, keep)
 }
 
 // reconcileOnePDB creates or updates a single PodDisruptionBudget.
@@ -257,7 +257,6 @@ func (r *AerospikeClusterReconciler) deleteClusterPDB(
 func (r *AerospikeClusterReconciler) deleteRackPDBs(
 	ctx context.Context,
 	cluster *ackov1alpha1.AerospikeCluster,
-	racks []ackov1alpha1.Rack,
 	keep map[string]bool,
 ) error {
 	pdbList := &policyv1.PodDisruptionBudgetList{}
@@ -296,7 +295,7 @@ func (r *AerospikeClusterReconciler) deleteAllPDBs(
 	if err := r.deleteClusterPDB(ctx, cluster); err != nil {
 		return err
 	}
-	return r.deleteRackPDBs(ctx, cluster, racks, nil)
+	return r.deleteRackPDBs(ctx, cluster, nil)
 }
 
 func pdbNeedsUpdate(
