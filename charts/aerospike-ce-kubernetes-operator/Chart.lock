@@ -1,6 +1,6 @@
 dependencies:
 - name: aerospike-ce-kubernetes-operator-crds
   repository: file://../aerospike-ce-kubernetes-operator-crds
-  version: 1.10.3
-digest: sha256:7f265e52a1737fa7f5f521008d743840ecaeba0a6b668ac0a73c2214bcb02958
-generated: "2026-08-18T11:25:48.046352+09:00"
+  version: 1.11.0
+digest: sha256:8e15d39d942110d257a58f383fbc2128f50fb58ecb855dfc767ae02d952e0447
+generated: "2026-08-18T22:29:06.355142064Z"

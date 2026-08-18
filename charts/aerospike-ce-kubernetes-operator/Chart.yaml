@@ -2,8 +2,8 @@ apiVersion: v2
 name: aerospike-ce-kubernetes-operator
 description: Kubernetes Operator for Aerospike Community Edition clusters
 type: application
-version: 1.10.3
-appVersion: "1.10.3"
+version: 1.11.0
+appVersion: "1.11.0"
 kubeVersion: ">=1.26.0-0"
 home: https://github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator
 sources:
@@ -19,7 +19,7 @@ maintainers:
     url: https://github.com/aerospike-ce-ecosystem
 dependencies:
   - name: aerospike-ce-kubernetes-operator-crds
-    version: "1.10.3"
+    version: "1.11.0"
     # Local reference for development. CI overrides to OCI registry after pushing aerospike-ce-kubernetes-operator-crds.
     repository: "file://../aerospike-ce-kubernetes-operator-crds"
     condition: crds.install

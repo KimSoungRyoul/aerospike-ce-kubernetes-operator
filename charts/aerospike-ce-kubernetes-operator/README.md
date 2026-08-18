@@ -51,7 +51,7 @@ CRDs and the operator are installed together. `crds.install=true` is the default
 
 ```bash
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
-  --version 1.10.3 \
+  --version 1.11.0 \
   --namespace aerospike-operator --create-namespace
 ```
 
@@ -63,11 +63,11 @@ approach for GitOps workflows to control CRD lifecycle independently.
 ```bash
 # Step 1: Install CRDs (once per cluster)
 helm install acko-crds oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator-crds \
-  --version 1.10.3
+  --version 1.11.0
 
 # Step 2: Install operator (skip CRD installation)
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
-  --version 1.10.3 \
+  --version 1.11.0 \
   --set crds.install=false \
   --namespace aerospike-operator --create-namespace
 ```
@@ -128,7 +128,7 @@ helm install acko ./charts/aerospike-ce-kubernetes-operator \
 
 ```bash
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
-  --version 1.10.3 \
+  --version 1.11.0 \
   --namespace aerospike-operator --create-namespace \
   --set serviceMonitor.enabled=true \
   --set prometheusRule.enabled=true \
@@ -169,7 +169,7 @@ for the full reference.
 
 ```bash
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
-  --version 1.10.3 \
+  --version 1.11.0 \
   --namespace aerospike-operator --create-namespace \
   --set cilium.enabled=true
 ```
@@ -181,7 +181,7 @@ The Cluster Manager UI (api + web) is deployed by default. A plain
 
 ```bash
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
-  --version 1.10.3 \
+  --version 1.11.0 \
   --namespace aerospike-operator --create-namespace
 ```
 
@@ -190,7 +190,7 @@ to `false`:
 
 ```bash
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
-  --version 1.10.3 \
+  --version 1.11.0 \
   --namespace aerospike-operator --create-namespace \
   --set ui.api.enabled=false --set ui.web.enabled=false
 ```
@@ -331,7 +331,7 @@ SQLite (default) — nothing to configure:
 
 ```bash
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
-  --version 1.10.3 --namespace aerospike-operator --create-namespace \
+  --version 1.11.0 --namespace aerospike-operator --create-namespace \
   --set ui.database.sqlite.persistence.size=2Gi
 ```
 
@@ -340,7 +340,7 @@ External PostgreSQL — supply the connection URL (or an existing Secret with a
 
 ```bash
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
-  --version 1.10.3 --namespace aerospike-operator --create-namespace \
+  --version 1.11.0 --namespace aerospike-operator --create-namespace \
   --set ui.database.type=postgresql \
   --set ui.database.postgresql.databaseUrl='postgresql://user:pass@db-host:5432/aerospike_manager'
 ```
@@ -350,7 +350,7 @@ Chart-managed PostgreSQL — let the chart run a single-replica PostgreSQL
 
 ```bash
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
-  --version 1.10.3 --namespace aerospike-operator --create-namespace \
+  --version 1.11.0 --namespace aerospike-operator --create-namespace \
   --set ui.database.type=postgresql \
   --set ui.database.postgresql.deploy=true
 ```
@@ -457,7 +457,7 @@ You can customize the UI with per-component image, service, resource, and enviro
 
 ```bash
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
-  --version 1.10.3 \
+  --version 1.11.0 \
   --namespace aerospike-operator --create-namespace \
   --set ui.imageTag=0.30.0 \
   --set ui.api.image.repository=ghcr.io/aerospike-ce-ecosystem/aerospike-cluster-manager-api \
@@ -542,7 +542,7 @@ disabled. For advanced cases you can still inject `COPILOT_*` yourself via
 
 ```bash
 helm install acko oci://ghcr.io/aerospike-ce-ecosystem/charts/aerospike-ce-kubernetes-operator \
-  --version 1.10.3 \
+  --version 1.11.0 \
   --namespace aerospike-operator --create-namespace \
   --set serviceMonitor.enabled=true \
   --set prometheusRule.enabled=true \
@@ -565,7 +565,7 @@ spec:
   source:
     repoURL: ghcr.io/aerospike-ce-ecosystem/charts
     chart: aerospike-ce-kubernetes-operator-crds
-    targetRevision: "1.10.3"
+    targetRevision: "1.11.0"
   syncPolicy:
     automated:
       prune: false   # Never auto-delete CRDs
@@ -580,7 +580,7 @@ spec:
   source:
     repoURL: ghcr.io/aerospike-ce-ecosystem/charts
     chart: aerospike-ce-kubernetes-operator
-    targetRevision: "1.10.3"
+    targetRevision: "1.11.0"
     helm:
       values: |
         crds:
@@ -617,7 +617,7 @@ spec:
   chart:
     spec:
       chart: aerospike-ce-kubernetes-operator-crds
-      version: "1.10.3"
+      version: "1.11.0"
       sourceRef:
         kind: HelmRepository
         name: acko
@@ -638,7 +638,7 @@ spec:
   chart:
     spec:
       chart: aerospike-ce-kubernetes-operator
-      version: "1.10.3"
+      version: "1.11.0"
       sourceRef:
         kind: HelmRepository
         name: acko
