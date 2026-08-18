@@ -237,3 +237,37 @@ func TestValidateUpdate_RackStorageImmutability(t *testing.T) {
 		}
 	})
 }
+
+// TestValidateUpdate_AddingARackWithStorageIsAllowed pins the rack-*addition*
+// branch of the immutability guard, which nothing else covered.
+//
+// The existing cases exercise rack removal, and the comparison loop runs over
+// the racks in the *new* spec — so a removed rack is never visited and those
+// cases pass with or without the `if !ok { continue }` skip. Adding a rack is
+// the direction that actually reaches it.
+//
+// The regression this guards: without that skip, adding a rack that carries its
+// own persistentVolume storage is rejected at admission, because the new rack
+// has no counterpart in the old spec and reads as a PV change. Adding a rack
+// creates a *new* StatefulSet with fresh volumeClaimTemplates, so there is no
+// in-place VCT change to refuse.
+func TestValidateUpdate_AddingARackWithStorageIsAllowed(t *testing.T) {
+	base := func() *AerospikeCluster {
+		return storageCluster(&AerospikeStorageSpec{Volumes: []VolumeSpec{pvVolume(storageDataVol, "10Gi", "fast")}})
+	}
+	rackStorage := &AerospikeStorageSpec{Volumes: []VolumeSpec{pvVolume(storageDataVol, "10Gi", "fast")}}
+
+	before := base()
+	before.Spec.RackConfig = &RackConfig{Racks: []Rack{{ID: 1, Storage: rackStorage}}}
+
+	after := base()
+	after.Spec.RackConfig = &RackConfig{Racks: []Rack{
+		{ID: 1, Storage: rackStorage},
+		{ID: 2, Storage: rackStorage}, // new rack, new StatefulSet, fresh VCTs
+	}}
+
+	v := &AerospikeClusterValidator{}
+	if _, err := v.ValidateUpdate(context.Background(), before, after); err != nil {
+		t.Fatalf("ValidateUpdate() error = %v; adding a rack creates a new StatefulSet, so its storage is not an in-place VCT change", err)
+	}
+}
