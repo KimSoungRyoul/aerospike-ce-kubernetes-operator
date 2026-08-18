@@ -17551,6 +17551,18 @@ spec:
                 description: Pods contains status information for each pod in the
                   cluster.
                 type: object
+              replicas:
+                description: |-
+                  Replicas is the total number of pods matching Selector, ready or not.
+
+                  This is the scale subresource's status field. The subresource contract is
+                  "current replicas", so it has to count every pod the selector matches: an
+                  HPA computes desired replicas from this number, and feeding it a readiness
+                  count makes it shrink a healthy cluster whenever a rolling restart dips
+                  readiness. Size/Health keep the readiness view for humans and printer
+                  columns.
+                format: int32
+                type: integer
               seedsEndpoint:
                 description: |-
                   SeedsEndpoint is the external endpoint (host:port) of the seeds finder
@@ -17560,7 +17572,11 @@ spec:
                 description: Selector is the label selector for HPA compatibility.
                 type: string
               size:
-                description: Size is the current number of ready pods.
+                description: |-
+                  Size is the current number of ready pods.
+
+                  This is a readiness view, NOT a replica count, and it is deliberately not
+                  what the scale subresource reads — see Replicas.
                 format: int32
                 type: integer
               templateSnapshot:
@@ -18570,5 +18586,5 @@ spec:
       scale:
         labelSelectorPath: .status.selector
         specReplicasPath: .spec.size
-        statusReplicasPath: .status.size
+        statusReplicasPath: .status.replicas
       status: {}

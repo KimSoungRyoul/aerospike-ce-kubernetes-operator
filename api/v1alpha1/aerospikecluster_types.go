@@ -406,8 +406,22 @@ type AerospikeClusterStatus struct {
 	Phase AerospikePhase `json:"phase,omitempty"`
 
 	// Size is the current number of ready pods.
+	//
+	// This is a readiness view, NOT a replica count, and it is deliberately not
+	// what the scale subresource reads — see Replicas.
 	// +optional
 	Size int32 `json:"size,omitempty"`
+
+	// Replicas is the total number of pods matching Selector, ready or not.
+	//
+	// This is the scale subresource's status field. The subresource contract is
+	// "current replicas", so it has to count every pod the selector matches: an
+	// HPA computes desired replicas from this number, and feeding it a readiness
+	// count makes it shrink a healthy cluster whenever a rolling restart dips
+	// readiness. Size/Health keep the readiness view for humans and printer
+	// columns.
+	// +optional
+	Replicas int32 `json:"replicas,omitempty"`
 
 	// Health is a human-readable summary of pod readiness in "ready/total" format (e.g. "1/3").
 	// +optional
@@ -603,7 +617,7 @@ type AerospikePodStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:subresource:scale:specpath=.spec.size,statuspath=.status.size,selectorpath=.status.selector
+// +kubebuilder:subresource:scale:specpath=.spec.size,statuspath=.status.replicas,selectorpath=.status.selector
 // +kubebuilder:resource:shortName=asc
 // +kubebuilder:printcolumn:name="RackSize",type=integer,JSONPath=`.spec.size`
 // +kubebuilder:printcolumn:name="Health",type=string,JSONPath=`.status.health`
