@@ -595,10 +595,14 @@ func (r *AerospikeClusterReconciler) reconcileCluster(
 		return ctrl.Result{RequeueAfter: migrationRequeueInterval}, nil
 	}
 
-	// Clean up removed racks
-	if err := r.cleanupRemovedRacks(ctx, cluster, racks); err != nil {
+	// Clean up removed racks. A removed rack is drained one scale-down batch at a
+	// time, gated on migration, so this reports back when it needs another pass.
+	if rackTeardownDeferred, err := r.cleanupRemovedRacks(ctx, cluster, racks); err != nil {
 		metrics.ReconcileErrorsTotal.WithLabelValues(cluster.Namespace, cluster.Name, metrics.ReasonStatefulSet).Inc()
 		return ctrl.Result{}, err
+	} else if rackTeardownDeferred {
+		log.Info("Rack teardown in progress, requeuing")
+		return ctrl.Result{RequeueAfter: migrationRequeueInterval}, nil
 	}
 
 	// Reconcile auxiliary resources: PDB, Monitoring, NetworkPolicy
