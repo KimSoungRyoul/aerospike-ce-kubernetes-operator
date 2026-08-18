@@ -282,6 +282,13 @@ type AerospikeClusterSpec struct {
 	SeedsFinderServices *SeedsFinderServices `json:"seedsFinderServices,omitempty"`
 
 	// K8sNodeBlockList contains Kubernetes node names that should not run Aerospike pods.
+	//
+	// Each name is added as a `kubernetes.io/hostname NotIn` requirement on the
+	// pods' required node affinity, so the scheduler will not place a pod on a
+	// listed node. Changing the list changes the pod template hash and therefore
+	// rolls the rack, which is what moves pods already running on a listed node.
+	// Existing pods are not evicted by this field alone — node affinity is
+	// IgnoredDuringExecution — they move as the rolling restart recreates them.
 	// +optional
 	K8sNodeBlockList []string `json:"k8sNodeBlockList,omitempty"`
 
@@ -303,10 +310,6 @@ type AerospikeClusterSpec struct {
 	// When set, the operator creates an individual Service for each pod.
 	// +optional
 	PodService *AerospikeServiceSpec `json:"podService,omitempty"`
-
-	// EnableRackIDOverride enables dynamic rack ID assignment via pod annotations.
-	// +optional
-	EnableRackIDOverride *bool `json:"enableRackIDOverride,omitempty"`
 
 	// TemplateRef references an AerospikeClusterTemplate to use as a configuration base.
 	// When set, the template's spec is resolved at creation time and stored as a snapshot

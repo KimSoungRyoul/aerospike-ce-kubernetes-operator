@@ -255,11 +255,6 @@ func (in *AerospikeClusterSpec) DeepCopyInto(out *AerospikeClusterSpec) {
 		*out = new(AerospikeServiceSpec)
 		(*in).DeepCopyInto(*out)
 	}
-	if in.EnableRackIDOverride != nil {
-		in, out := &in.EnableRackIDOverride, &out.EnableRackIDOverride
-		*out = new(bool)
-		**out = **in
-	}
 	if in.TemplateRef != nil {
 		in, out := &in.TemplateRef, &out.TemplateRef
 		*out = new(TemplateRef)

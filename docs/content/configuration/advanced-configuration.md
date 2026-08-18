@@ -9,51 +9,6 @@ Use these advanced settings to control Aerospike behavior, pod scheduling, rack-
 
 ---
 
-## EnableRackIDOverride
-
-By default, the operator derives each pod's rack ID from its StatefulSet ordinal and rack definition. Enable `enableRackIDOverride` to assign rack IDs dynamically with pod annotations.
-
-Use this option to move pods between racks without scaling down and back up, or to let an external orchestration tool manage rack placement.
-
-```yaml
-apiVersion: acko.io/v1alpha1
-kind: AerospikeCluster
-metadata:
-  name: aerospike-cluster
-spec:
-  size: 4
-  image: aerospike:ce-8.1.1.1
-  enableRackIDOverride: true
-  rackConfig:
-    racks:
-      - id: 1
-        zone: us-east-1a
-      - id: 2
-        zone: us-east-1b
-  aerospikeConfig:
-    service:
-      cluster-name: my-cluster
-    namespaces:
-      - name: test
-        memory-size: 1073741824
-        replication-factor: 2
-        storage-engine:
-          type: memory
-    network:
-      service:
-        port: 3000
-      heartbeat:
-        port: 3002
-      fabric:
-        port: 3001
-```
-
-:::caution
-Use `enableRackIDOverride` only when you have a specific need for manual rack assignment. In most cases, the operator's automatic rack distribution is sufficient and safer.
-:::
-
----
-
 ## ValidationPolicy
 
 The `validationPolicy` field controls which validation checks the operator performs. Currently it supports one option: `skipWorkDirValidate`.

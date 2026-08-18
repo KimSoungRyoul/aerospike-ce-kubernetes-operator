@@ -20,6 +20,11 @@ const (
 	aerospikeConfigVolumeName  = "aerospike-config"
 	defaultTerminationGraceSec = int64(60)
 
+	// hostnameLabelKey is the well-known node label carrying the node's name. It
+	// is used as the anti-affinity topology key and as the selector key for both
+	// rack.nodeName affinity and spec.k8sNodeBlockList.
+	hostnameLabelKey = "kubernetes.io/hostname"
+
 	// AerospikeReadinessGateConditionType is the custom pod condition type injected
 	// when spec.podSpec.readinessGateEnabled=true. The operator patches this condition
 	// to True once Aerospike has joined the cluster mesh and all data migrations are complete.
@@ -173,6 +178,12 @@ func BuildPodTemplateSpec(
 		}
 	}
 
+	// The node block list is applied last, on purpose. It is an operational
+	// safety valve — "do not schedule onto this node" — so nothing below it may
+	// discard it, and applyRackPodSpecOverrides replaces podSpec.Affinity
+	// wholesale when rack.podSpec.affinity is set.
+	applyK8sNodeBlockList(&podSpec, cluster.Spec.K8sNodeBlockList)
+
 	return corev1.PodTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{
 			Labels:      labels,
@@ -268,7 +279,7 @@ func applyRackAffinity(podSpec *corev1.PodSpec, rack *v1alpha1.Rack) {
 
 	if rack.NodeName != "" {
 		terms = append(terms, corev1.NodeSelectorRequirement{
-			Key:      "kubernetes.io/hostname",
+			Key:      hostnameLabelKey,
 			Operator: corev1.NodeSelectorOpIn,
 			Values:   []string{rack.NodeName},
 		})
@@ -299,6 +310,53 @@ func applyRackAffinity(podSpec *corev1.PodSpec, rack *v1alpha1.Rack) {
 	}
 }
 
+// applyK8sNodeBlockList keeps pods off the named Kubernetes nodes by adding a
+// `kubernetes.io/hostname NotIn <names>` requirement to the pod's required node
+// affinity.
+//
+// The requirement is appended to EVERY existing NodeSelectorTerm rather than
+// added as a term of its own. NodeSelectorTerms are OR'd, so a separate term
+// would let a pod land on a blocked node by satisfying one of the other terms —
+// the opposite of what a block list means. MatchExpressions within a single term
+// are AND'd, which is the semantics wanted here, so the block joins each term
+// that already exists (e.g. the rack's zone/region affinity) and stands alone
+// only when there is no other affinity to join.
+func applyK8sNodeBlockList(podSpec *corev1.PodSpec, blockList []string) {
+	if len(blockList) == 0 {
+		return
+	}
+
+	blocked := corev1.NodeSelectorRequirement{
+		Key:      hostnameLabelKey,
+		Operator: corev1.NodeSelectorOpNotIn,
+		Values:   blockList,
+	}
+
+	if podSpec.Affinity == nil {
+		podSpec.Affinity = &corev1.Affinity{}
+	}
+	if podSpec.Affinity.NodeAffinity == nil {
+		podSpec.Affinity.NodeAffinity = &corev1.NodeAffinity{}
+	}
+	required := podSpec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+	if required == nil {
+		required = &corev1.NodeSelector{}
+		podSpec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = required
+	}
+
+	if len(required.NodeSelectorTerms) == 0 {
+		required.NodeSelectorTerms = []corev1.NodeSelectorTerm{
+			{MatchExpressions: []corev1.NodeSelectorRequirement{blocked}},
+		}
+		return
+	}
+
+	for i := range required.NodeSelectorTerms {
+		required.NodeSelectorTerms[i].MatchExpressions = append(
+			required.NodeSelectorTerms[i].MatchExpressions, blocked)
+	}
+}
+
 // shouldInjectAntiAffinity returns true if pod anti-affinity should be injected
 // to prevent multiple Aerospike pods from scheduling on the same node.
 func shouldInjectAntiAffinity(cluster *v1alpha1.AerospikeCluster) bool {
@@ -325,7 +383,7 @@ func injectPodAntiAffinity(podSpec *corev1.PodSpec, clusterName string) {
 		LabelSelector: &metav1.LabelSelector{
 			MatchLabels: utils.SelectorLabelsForCluster(clusterName),
 		},
-		TopologyKey: "kubernetes.io/hostname",
+		TopologyKey: hostnameLabelKey,
 	}
 
 	if podSpec.Affinity == nil {

@@ -51,12 +51,11 @@ Defines the desired state of an Aerospike CE cluster.
 | `maxUnavailable` | [IntOrString](https://pkg.go.dev/k8s.io/apimachinery/pkg/util/intstr#IntOrString) | No | majority rule | Max pods that may be voluntarily disrupted. Unset means `minAvailable = rackSize/2 + 1` per rack. A value that would allow every protected pod to be evicted is rejected. |
 | `paused` | *bool | No | `false` | Stop reconciliation when true. |
 | `seedsFinderServices` | [SeedsFinderServices](#seedsfinderservices) | No | — | LoadBalancer service for seed discovery. |
-| `k8sNodeBlockList` | []string | No | — | Node names to exclude from scheduling. |
+| `k8sNodeBlockList` | []string | No | — | Node names Aerospike pods must not be scheduled onto. Added as a `kubernetes.io/hostname NotIn` node-affinity requirement. Changing the list rolls the rack, which is what moves pods already running on a listed node. |
 | `operations` | [][OperationSpec](#operationspec) | No | — | On-demand operations (WarmRestart, PodRestart). Max 1 at a time. |
 | `validationPolicy` | [ValidationPolicySpec](#validationpolicyspec) | No | — | Controls webhook validation behavior. |
 | `headlessService` | [AerospikeServiceSpec](#aerospikeservicespec) | No | — | Custom metadata for the headless service. |
 | `podService` | [AerospikeServiceSpec](#aerospikeservicespec) | No | — | Custom metadata for per-pod services. Creates individual Service per pod when set. |
-| `enableRackIDOverride` | *bool | No | `false` | Enable dynamic rack ID assignment via pod annotations. |
 | `templateRef` | [TemplateRef](#templateref) | No | — | Reference to an `AerospikeClusterTemplate`. When set, the template spec is resolved and stored as a snapshot at creation time. |
 | `overrides` | [AerospikeClusterTemplateSpec](./aerospikeclustertemplate#aerospikeclustertemplatespec) | No | — | Fields that override the referenced template. Merge priority: overrides > template > operator defaults. |
 
