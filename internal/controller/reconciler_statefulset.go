@@ -134,7 +134,7 @@ func (r *AerospikeClusterReconciler) reconcileStatefulSet(
 	// This prevents data loss when pods are removed before their partitions
 	// have been fully migrated to remaining nodes.
 	if scaleDown {
-		migrating, err := r.isMigrationInProgress(ctx, cluster)
+		migrating, err := r.checkMigrationInProgress(ctx, cluster)
 		if err != nil {
 			// Connection failure: treat as migrating to avoid scale-down during
 			// an unreachable cluster state (network blip, DNS delay, etc.).
@@ -568,7 +568,7 @@ func (r *AerospikeClusterReconciler) cleanupRemovedRacks(
 	// work touches no live data.
 	migrationBlocked := false
 	if needsDrain {
-		migrating, migErr := r.isMigrationInProgress(ctx, cluster)
+		migrating, migErr := r.checkMigrationInProgress(ctx, cluster)
 		switch {
 		case migErr != nil:
 			log.V(1).Info("Could not check migration status before rack teardown, deferring",
@@ -652,17 +652,25 @@ func (r *AerospikeClusterReconciler) cleanupRemovedRacks(
 		// reconcile will re-enter this loop (StatefulSet may already be
 		// fully gone but the orphan PVCs/ConfigMap survive and are handled
 		// by the cleanup path keyed off rackID below).
+		//
+		// These two branches deliberately do NOT set `deferred`. The caller turns
+		// `deferred` into an early return for the whole reconcile, which is right
+		// for the drain above — that is a data-safety hold and nothing else should
+		// proceed while it is in force. It is wrong here: this is per-rack storage
+		// cleanup that touches no live data, and one pod stuck terminating in a
+		// removed rack would otherwise wedge rolling restart, ACL sync, PDB,
+		// monitoring and on-demand operations for every surviving rack,
+		// indefinitely. A plain `continue` is the pre-existing behaviour and the
+		// next reconcile revisits it.
 		pods, listErr := r.listRackPods(ctx, cluster, rackID)
 		if listErr != nil {
 			log.V(1).Info("listRackPods failed for removed rack; deferring PVC/ConfigMap cleanup to next reconcile",
 				"statefulset", stsName, "err", listErr)
-			deferred = true
 			continue
 		}
 		if len(pods) > 0 {
 			log.V(1).Info("Pods for removed rack still terminating; deferring PVC and ConfigMap cleanup to next reconcile",
 				"statefulset", stsName, "remainingPods", len(pods))
-			deferred = true
 			continue
 		}
 

@@ -103,10 +103,12 @@ func teardownSts(rackID int, replicas int32) *appsv1.StatefulSet {
 	}
 }
 
-// teardownPod builds a ready pod for the rack, so quiesceNodeBeforeDeletion does
-// not short-circuit on readiness and checkScaleDownReadiness can count it.
-func teardownPod(rackID, ordinal int) *corev1.Pod {
+// teardownPod builds a ready pod of the rack being REMOVED — the only rack these
+// tests need pods for. Ready so quiesceNodeBeforeDeletion does not short-circuit
+// on readiness and checkScaleDownReadiness can count it.
+func teardownPod(ordinal int) *corev1.Pod {
 	clusterName := teardownCluster
+	rackID := teardownGoneRack
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("%s-%d", utils.StatefulSetName(clusterName, rackID), ordinal),
@@ -167,9 +169,9 @@ func TestCleanupRemovedRacks_DoesNotDeleteWhenMigrationCheckFails(t *testing.T) 
 	r, recorder := teardownReconciler(t, cluster,
 		teardownSts(teardownKeptRack, 3),
 		teardownSts(teardownGoneRack, 3),
-		teardownPod(teardownGoneRack, 0),
-		teardownPod(teardownGoneRack, 1),
-		teardownPod(teardownGoneRack, 2),
+		teardownPod(0),
+		teardownPod(1),
+		teardownPod(2),
 	)
 
 	// Sanity: the migration check really does fail here.
@@ -266,7 +268,7 @@ func TestDrainRemovedRack_ScalesInBatchesAndQuiesces(t *testing.T) {
 			objs := make([]client.Object, 0, 2+int(tt.replicas))
 			objs = append(objs, cluster, sts)
 			for i := range int(tt.replicas) {
-				objs = append(objs, teardownPod(teardownGoneRack, i))
+				objs = append(objs, teardownPod(i))
 			}
 			r, recorder := teardownReconciler(t, objs...)
 
@@ -384,5 +386,175 @@ func TestCleanupRemovedRacks_NoMigrationCheckWhenNothingToDrain(t *testing.T) {
 	}
 	if stsExists(t, r.Client, goneName) {
 		t.Error("drained rack's StatefulSet was not deleted")
+	}
+}
+
+// --- the seam between cleanupRemovedRacks and drainRemovedRack ---
+//
+// Mutation testing found that no test ever executed cleanupRemovedRacks →
+// drainRemovedRack: the 3-replica cases errored the migration check and took the
+// `continue`, the 0-replica cases skipped the drain, and TestDrainRemovedRack_*
+// called the drain directly. Replacing the drain call with `drained, drainErr :=
+// true, error(nil)` — restoring the pre-#342 "delete outright" behaviour — left
+// the suite green.
+//
+// These tests drive the whole path through r.migrationCheck, so the gate, the
+// drain call and the readiness gate are all reachable.
+
+// teardownReconcilerWithMigration builds a reconciler whose migration probe
+// returns a fixed answer instead of opening an Aerospike client.
+// The migration-check-FAILS case deliberately drives the real probe instead of
+// this seam, so a future change that made the check succeed cannot silently turn
+// that regression test into a no-op. This helper therefore only ever answers
+// successfully.
+func teardownReconcilerWithMigration(
+	t *testing.T,
+	migrating bool,
+	objs ...client.Object,
+) (*AerospikeClusterReconciler, *record.FakeRecorder) {
+	t.Helper()
+	r, recorder := teardownReconciler(t, objs...)
+	r.migrationCheck = func(context.Context, *ackov1alpha1.AerospikeCluster) (bool, error) {
+		return migrating, nil
+	}
+	return r, recorder
+}
+
+// TestCleanupRemovedRacks_DrainsThroughTheFullPath kills the mutant that skips
+// the drain: with migration clear, cleanupRemovedRacks must SCALE the removed
+// rack, not delete it.
+func TestCleanupRemovedRacks_DrainsThroughTheFullPath(t *testing.T) {
+	batchOfOne := intstr.FromInt32(1)
+	cluster := teardownClusterSpec(false, &batchOfOne)
+	goneName := utils.StatefulSetName(teardownCluster, teardownGoneRack)
+
+	objs := make([]client.Object, 0, 6)
+	objs = append(objs, cluster, teardownSts(teardownKeptRack, 3), teardownSts(teardownGoneRack, 3))
+	for i := range 3 {
+		objs = append(objs, teardownPod(i))
+	}
+	r, _ := teardownReconcilerWithMigration(t, false, objs...)
+
+	deferred, err := r.cleanupRemovedRacks(context.Background(), cluster, cluster.Spec.RackConfig.Racks)
+	if err != nil {
+		t.Fatalf("cleanupRemovedRacks() error = %v", err)
+	}
+	if !deferred {
+		t.Error("cleanupRemovedRacks() deferred = false; a rack mid-drain must requeue")
+	}
+
+	if !stsExists(t, r.Client, goneName) {
+		t.Fatal("removed rack's StatefulSet was deleted instead of drained; " +
+			"that terminates every node in the rack at once")
+	}
+	if got := stsReplicas(t, r.Client, goneName); got != 2 {
+		t.Errorf("removed rack replicas = %d, want 2 (one scale-down batch applied)", got)
+	}
+}
+
+// TestCleanupRemovedRacks_MigrationInProgressHoldsTheRack kills the mutant that
+// drops the `case migrating:` arm. Distinct from the check-errors test: here the
+// probe answers successfully and says migration IS running.
+func TestCleanupRemovedRacks_MigrationInProgressHoldsTheRack(t *testing.T) {
+	cluster := teardownClusterSpec(false, nil)
+	goneName := utils.StatefulSetName(teardownCluster, teardownGoneRack)
+
+	r, recorder := teardownReconcilerWithMigration(t, true,
+		cluster,
+		teardownSts(teardownKeptRack, 3),
+		teardownSts(teardownGoneRack, 3),
+	)
+
+	deferred, err := r.cleanupRemovedRacks(context.Background(), cluster, cluster.Spec.RackConfig.Racks)
+	if err != nil {
+		t.Fatalf("cleanupRemovedRacks() error = %v", err)
+	}
+	if !deferred {
+		t.Error("cleanupRemovedRacks() deferred = false while migration is running")
+	}
+	if !stsExists(t, r.Client, goneName) {
+		t.Fatal("removed rack's StatefulSet was deleted while partitions were still moving")
+	}
+	if got := stsReplicas(t, r.Client, goneName); got != 3 {
+		t.Errorf("removed rack replicas = %d, want 3 (untouched while migrating)", got)
+	}
+	if events := drainRecorderEvents(recorder); !containsEvent(events, EventScaleDownDeferred) {
+		t.Errorf("expected a %s event, got %v", EventScaleDownDeferred, events)
+	}
+
+	stored := &ackov1alpha1.AerospikeCluster{}
+	if err := r.Get(context.Background(),
+		types.NamespacedName{Name: cluster.Name, Namespace: ctrlTestNamespace}, stored); err != nil {
+		t.Fatalf("Get cluster: %v", err)
+	}
+	if stored.Status.Phase != ackov1alpha1.AerospikePhaseWaitingForMigration {
+		t.Errorf("phase = %q, want %q", stored.Status.Phase, ackov1alpha1.AerospikePhaseWaitingForMigration)
+	}
+}
+
+// TestCleanupRemovedRacks_ReadinessGateHoldsTheBatch kills the mutant that drops
+// the checkScaleDownReadiness call inside the drain. The pods that would REMAIN
+// after this batch are not ready, so the batch must not proceed.
+func TestCleanupRemovedRacks_ReadinessGateHoldsTheBatch(t *testing.T) {
+	batchOfOne := intstr.FromInt32(1)
+	cluster := teardownClusterSpec(false, &batchOfOne)
+	goneName := utils.StatefulSetName(teardownCluster, teardownGoneRack)
+
+	// Ordinals 0 and 1 survive this batch (target = 2) but are NOT ready.
+	notReady := func(ordinal int) *corev1.Pod {
+		pod := teardownPod(ordinal)
+		pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionFalse}}
+		return pod
+	}
+	r, recorder := teardownReconcilerWithMigration(t, false,
+		cluster,
+		teardownSts(teardownKeptRack, 3),
+		teardownSts(teardownGoneRack, 3),
+		notReady(0), notReady(1),
+		teardownPod(2),
+	)
+
+	deferred, err := r.cleanupRemovedRacks(context.Background(), cluster, cluster.Spec.RackConfig.Racks)
+	if err != nil {
+		t.Fatalf("cleanupRemovedRacks() error = %v", err)
+	}
+	if !deferred {
+		t.Error("cleanupRemovedRacks() deferred = false while the readiness gate is holding")
+	}
+	if got := stsReplicas(t, r.Client, goneName); got != 3 {
+		t.Errorf("removed rack replicas = %d, want 3; the readiness gate must hold the batch", got)
+	}
+	if events := drainRecorderEvents(recorder); !containsEvent(events, EventScaleDownDeferred) {
+		t.Errorf("expected a %s event from the readiness gate, got %v", EventScaleDownDeferred, events)
+	}
+}
+
+// TestCleanupRemovedRacks_TerminatingPodsDoNotWedgeTheReconcile pins that the
+// per-rack PVC/ConfigMap cleanup deferrals do NOT propagate to the caller.
+//
+// reconciler.go turns `deferred` into an early return for the WHOLE reconcile.
+// That is right for the drain, which is a data-safety hold. It is wrong for
+// storage cleanup: one pod stuck terminating in a removed rack would otherwise
+// stop rolling restart, ACL sync, PDB, monitoring and on-demand operations for
+// every surviving rack, indefinitely.
+func TestCleanupRemovedRacks_TerminatingPodsDoNotWedgeTheReconcile(t *testing.T) {
+	cluster := teardownClusterSpec(false, nil)
+
+	// The rack is already fully drained and its StatefulSet deleted; one pod is
+	// still terminating, which is the only thing holding up PVC cleanup.
+	r, _ := teardownReconcilerWithMigration(t, false,
+		cluster,
+		teardownSts(teardownKeptRack, 3),
+		teardownSts(teardownGoneRack, 0),
+		teardownPod(0),
+	)
+
+	deferred, err := r.cleanupRemovedRacks(context.Background(), cluster, cluster.Spec.RackConfig.Racks)
+	if err != nil {
+		t.Fatalf("cleanupRemovedRacks() error = %v", err)
+	}
+	if deferred {
+		t.Error("cleanupRemovedRacks() deferred = true because a pod is still terminating; " +
+			"that wedges the entire cluster reconcile over per-rack storage cleanup")
 	}
 }
