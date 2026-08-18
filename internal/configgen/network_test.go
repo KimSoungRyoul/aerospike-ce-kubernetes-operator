@@ -6,11 +6,6 @@ import (
 	v1alpha1 "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/api/v1alpha1"
 )
 
-const (
-	placeholderPodIP  = "MY_POD_IP"
-	placeholderNodeIP = "MY_NODE_IP"
-)
-
 func TestInjectAccessAddressPlaceholders_NilPolicy(t *testing.T) {
 	config := map[string]any{
 		"network": map[string]any{

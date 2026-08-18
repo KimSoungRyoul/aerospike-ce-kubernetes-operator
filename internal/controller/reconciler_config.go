@@ -71,7 +71,13 @@ func (r *AerospikeClusterReconciler) reconcileConfigMap(
 	if cluster.Spec.PodService != nil {
 		podSvcType = cluster.Spec.PodService.ServiceType
 	}
-	configgen.InjectAccessAddressPlaceholders(effectiveConfig.Value, cluster.Spec.AerospikeNetworkPolicy, podSvcType)
+	// Any user-specified access value the operator had to override is reported
+	// rather than dropped in silence — a setting that is quietly ignored is the
+	// same user-visible failure as one that is quietly lost.
+	for _, override := range configgen.InjectAccessAddressPlaceholders(
+		effectiveConfig.Value, cluster.Spec.AerospikeNetworkPolicy, podSvcType) {
+		log.Info("Overrode an explicit external-access setting", "rack", rack.ID, "detail", override)
+	}
 
 	// Collect all pod names across all racks for mesh seed injection
 	racks := r.getRacks(cluster)

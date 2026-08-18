@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	ackov1alpha1 "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/api/v1alpha1"
@@ -317,5 +318,85 @@ func TestReconcileConfigMapDoesNotMutateClusterSpec(t *testing.T) {
 	}
 	if cm.Data["aerospike.conf"] == "" {
 		t.Fatal("generated ConfigMap has no aerospike.conf data")
+	}
+}
+
+// TestReconcileConfigMap_LoadBalancerDropsStaleAlternatePort covers the SEAM,
+// not the helper: reconcileConfigMap -> InjectAccessAddressPlaceholders -> the
+// rendered aerospike.conf that actually lands in the ConfigMap.
+//
+// The recurring defect in this codebase has been a helper that is tested while
+// its call site is not, so a mutation restoring the original bug leaves CI
+// green. Here the bug is a user-set alternate-access-port surviving a switch to
+// a LoadBalancer per-pod service: the init container substitutes
+// MY_EXTERNAL_PORT only on the NodePort path, so every peer would advertise
+// <lb-address>:<stale-port> — a port nothing listens on.
+func TestReconcileConfigMap_LoadBalancerDropsStaleAlternatePort(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme(client-go) error = %v", err)
+	}
+	if err := ackov1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme(acko) error = %v", err)
+	}
+
+	cluster := &ackov1alpha1.AerospikeCluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "demo", Namespace: "default"},
+		Spec: ackov1alpha1.AerospikeClusterSpec{
+			Size: 1,
+			// A LoadBalancer per-pod service, with a stale alternate-access-port
+			// left over from a NodePort setup.
+			PodService: &ackov1alpha1.AerospikeServiceSpec{ServiceType: "LoadBalancer"},
+			AerospikeNetworkPolicy: &ackov1alpha1.AerospikeNetworkPolicy{
+				AccessType:          ackov1alpha1.AerospikeNetworkTypePod,
+				AlternateAccessType: ackov1alpha1.AerospikeNetworkTypeHostInternal,
+			},
+			AerospikeConfig: &ackov1alpha1.AerospikeConfigSpec{
+				Value: map[string]any{
+					"service": map[string]any{"cluster-name": "demo"},
+					"network": map[string]any{
+						"service": map[string]any{
+							"address":               "any",
+							"port":                  3000,
+							"alternate-access-port": 30000,
+						},
+						"heartbeat": map[string]any{"mode": "mesh", "port": 3002},
+					},
+				},
+			},
+		},
+	}
+
+	reconciler := &AerospikeClusterReconciler{
+		Client:   fake.NewClientBuilder().WithScheme(scheme).WithObjects(cluster).Build(),
+		Scheme:   scheme,
+		Recorder: record.NewFakeRecorder(8),
+	}
+
+	rack := &ackov1alpha1.Rack{ID: 0}
+	effective := reconciler.getEffectiveConfig(cluster, rack)
+	if err := reconciler.reconcileConfigMap(context.Background(), cluster, rack, effective); err != nil {
+		t.Fatalf("reconcileConfigMap() error = %v", err)
+	}
+
+	cm := &corev1.ConfigMap{}
+	if err := reconciler.Get(context.Background(),
+		types.NamespacedName{Name: utils.ConfigMapName(cluster.Name, rack.ID), Namespace: "default"},
+		cm); err != nil {
+		t.Fatalf("Get ConfigMap: %v", err)
+	}
+	conf := cm.Data["aerospike.conf"]
+
+	if strings.Contains(conf, "alternate-access-port") {
+		t.Errorf("rendered aerospike.conf still carries alternate-access-port under a LoadBalancer; "+
+			"peers would advertise a port nothing listens on:\n%s", conf)
+	}
+	if !strings.Contains(conf, "alternate-access-address MY_EXTERNAL_ADDRESS") {
+		t.Errorf("rendered aerospike.conf is missing the LoadBalancer address placeholder:\n%s", conf)
+	}
+	// The spec itself must be untouched — the override is local to config generation.
+	svc := cluster.Spec.AerospikeConfig.Value["network"].(map[string]any)["service"].(map[string]any)
+	if _, ok := svc["alternate-access-port"]; !ok {
+		t.Error("the user's spec was mutated; the override must be local to ConfigMap generation")
 	}
 }
