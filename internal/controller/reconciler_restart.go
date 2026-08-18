@@ -72,8 +72,23 @@ type migrationCheckState struct {
 	firstSeen time.Time
 }
 
+// onDemandOperationRackID is the rack id the on-demand operations path passes to
+// isBatchBlocked. It is a sentinel, NOT a real rack: that path targets an
+// explicit pod list that can span racks, so no single rack owns its budget.
+//
+// It has to be distinct from every real rack id. Rack 0 is not usable here —
+// getRacks returns a default rack with ID 0 for a cluster without rackConfig, so
+// keying the operations path on 0 made it share one escape-hatch budget with the
+// default rack: a rolling restart that had already spent four of its five
+// failures would let the operations path open the hatch on its first. Rack ids
+// are validated >= 1 when set explicitly and default to 0, so a negative value
+// cannot collide with either.
+const onDemandOperationRackID = -1
+
 // migrationCheckKey identifies a rack's failure state. The cluster UID is part
-// of the key so a delete-and-recreate of the same name starts fresh.
+// of the key so a delete-and-recreate of the same name starts fresh, and the
+// rack id keeps each rack's budget separate — including the on-demand
+// operations path, which uses onDemandOperationRackID rather than a real rack.
 func migrationCheckKey(cluster *ackov1alpha1.AerospikeCluster, rackID int) string {
 	return fmt.Sprintf("%s/%d", cluster.UID, rackID)
 }
@@ -149,9 +164,11 @@ func (r *AerospikeClusterReconciler) reconcileRollingRestart(
 	// from the template still needs a restart even when its config hash matches.
 	desiredHash := ""
 	desiredPodSpecHash := ""
+	desiredStorageHash := ""
 	if sts.Spec.Template.Annotations != nil {
 		desiredHash = sts.Spec.Template.Annotations[utils.ConfigHashAnnotation]
 		desiredPodSpecHash = sts.Spec.Template.Annotations[utils.PodSpecHashAnnotation]
+		desiredStorageHash = sts.Spec.Template.Annotations[utils.StorageHashAnnotation]
 	}
 
 	if desiredHash == "" {
@@ -184,7 +201,7 @@ func (r *AerospikeClusterReconciler) reconcileRollingRestart(
 	}
 
 	podsToRestart, configChanged := r.selectPodsToRestart(
-		ctx, cluster, rackPods, desiredHash, desiredPodSpecHash, maxIgnorablePods)
+		ctx, cluster, rackPods, desiredHash, desiredPodSpecHash, desiredStorageHash, maxIgnorablePods)
 
 	if len(podsToRestart) == 0 {
 		cluster.Status.PendingRestartPods = nil
@@ -295,7 +312,7 @@ func (r *AerospikeClusterReconciler) selectPodsToRestart(
 	ctx context.Context,
 	cluster *ackov1alpha1.AerospikeCluster,
 	rackPods []corev1.Pod,
-	desiredHash, desiredPodSpecHash string,
+	desiredHash, desiredPodSpecHash, desiredStorageHash string,
 	maxIgnorablePods int32,
 ) ([]*corev1.Pod, bool) {
 	log := logf.FromContext(ctx)
@@ -332,15 +349,27 @@ func (r *AerospikeClusterReconciler) selectPodsToRestart(
 
 		currentHash := ""
 		currentPodSpecHash := ""
+		currentStorageHash := ""
 		if pod.Annotations != nil {
 			currentHash = pod.Annotations[utils.ConfigHashAnnotation]
 			currentPodSpecHash = pod.Annotations[utils.PodSpecHashAnnotation]
+			currentStorageHash = pod.Annotations[utils.StorageHashAnnotation]
 		}
 
 		configMismatch := currentHash != desiredHash
 		podSpecMismatch := desiredPodSpecHash != "" && currentPodSpecHash != desiredPodSpecHash
+		// currentStorageHash == "" means the pod predates utils.StorageHashAnnotation
+		// — it was created by an operator that did not stamp one. Its storage state
+		// is unknowable, so it is treated as MATCHING rather than stale: the
+		// alternative restarts every pod of every cluster on operator upgrade, each
+		// with a full data migration, which is what made folding storage into the
+		// pod-spec hash unsafe in the first place. The pod picks the annotation up
+		// the next time it is recreated for any other reason, and storage changes
+		// roll it correctly from then on.
+		storageMismatch := desiredStorageHash != "" && currentStorageHash != "" &&
+			currentStorageHash != desiredStorageHash
 
-		if configMismatch || podSpecMismatch {
+		if configMismatch || podSpecMismatch || storageMismatch {
 			podsToRestart = append(podsToRestart, pod)
 		}
 		if configMismatch {

@@ -119,7 +119,7 @@ func TestSelectPodsToRestart(t *testing.T) {
 
 			selected, configChanged := reconciler.selectPodsToRestart(
 				context.Background(), cluster, []corev1.Pod{pod},
-				desiredHash, desiredPodSpecHash, 0)
+				desiredHash, desiredPodSpecHash, "", 0)
 
 			if got := len(selected) == 1; got != tc.wantSelected {
 				t.Errorf("selected = %v, want %v (selected=%d)", got, tc.wantSelected, len(selected))
@@ -149,7 +149,7 @@ func TestSelectPodsToRestart_EmptyDesiredPodSpecHash(t *testing.T) {
 	}
 
 	selected, configChanged := reconciler.selectPodsToRestart(
-		context.Background(), cluster, []corev1.Pod{pod}, "cfg-SAME", "", 0)
+		context.Background(), cluster, []corev1.Pod{pod}, "cfg-SAME", "", "", 0)
 
 	if len(selected) != 0 {
 		t.Errorf("expected no pod selected when desiredPodSpecHash is empty, got %d", len(selected))

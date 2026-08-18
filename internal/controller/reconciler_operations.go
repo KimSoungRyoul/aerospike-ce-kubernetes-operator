@@ -118,8 +118,9 @@ func (r *AerospikeClusterReconciler) reconcileOperations(
 	// the batch is blocked we requeue (inProgress=true) WITHOUT advancing to the
 	// next pod or persisting further "completed" pods. We only gate when work
 	// actually remains, so a finished operation can still reach its terminal
-	// phase below. rackID 0 is logging-only in isBatchBlocked; the migration
-	// check is cluster-wide and the readiness-gate check inspects these pods.
+	// phase below. The migration check is cluster-wide and the readiness-gate
+	// check inspects these pods; see operationBatchBlocked for why this path uses
+	// a sentinel rack id rather than 0.
 	if r.operationBatchBlocked(ctx, cluster, pods, completedSet, failedSet) {
 		return true, nil
 	}
@@ -273,8 +274,12 @@ func finalizeOperationPhase(
 // The guard is only consulted when work actually remains (some target pod is
 // neither completed nor failed); a finished operation can therefore still reach
 // its terminal phase instead of being held behind a blocked-batch requeue.
-// rackID 0 is logging-only inside isBatchBlocked; the migration probe is
-// cluster-wide and the readiness-gate check inspects the supplied pods.
+// The rack id passed to isBatchBlocked is onDemandOperationRackID, a sentinel
+// rather than a real rack: this path targets an explicit pod list that can span
+// racks, so no single rack owns it. It is NOT logging-only — isBatchBlocked keys
+// its migration-check escape-hatch budget on it, and passing 0 made this path
+// share a budget with the default rack that getRacks returns for a cluster
+// without rackConfig.
 func (r *AerospikeClusterReconciler) operationBatchBlocked(
 	ctx context.Context,
 	cluster *ackov1alpha1.AerospikeCluster,
@@ -291,7 +296,7 @@ func (r *AerospikeClusterReconciler) operationBatchBlocked(
 	if !outstanding {
 		return false
 	}
-	return r.isBatchBlocked(ctx, cluster, 0, derefPods(pods))
+	return r.isBatchBlocked(ctx, cluster, onDemandOperationRackID, derefPods(pods))
 }
 
 // derefPods converts a slice of pod pointers into a slice of pod values, as

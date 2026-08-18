@@ -220,3 +220,37 @@ func TestMigrationCheckFailures_KeyedPerRackAndCluster(t *testing.T) {
 		t.Errorf("recreated cluster failures = %d, want 1; state must be keyed on UID", failures)
 	}
 }
+
+// TestMigrationCheckKey_OperationsPathHasItsOwnBudget pins that the on-demand
+// operations path does not share an escape-hatch budget with a real rack.
+//
+// operationBatchBlocked used to pass rackID 0, and getRacks returns a default
+// rack with ID 0 for a cluster without rackConfig — so with the rack id half of
+// migrationCheckKey, a rolling restart that had already spent four of its five
+// failures let the operations path open the hatch on its first failure, deleting
+// pods with migration state unknown.
+func TestMigrationCheckKey_OperationsPathHasItsOwnBudget(t *testing.T) {
+	r, cluster, _ := migrationGateReconciler(t)
+
+	// The default rack burns its whole budget.
+	for range maxMigrationCheckFailures {
+		r.recordMigrationCheckFailure(cluster, 0)
+	}
+	if got := r.migrationCheckFailures[migrationCheckKey(cluster, 0)].failures; got != maxMigrationCheckFailures {
+		t.Fatalf("setup: default rack failures = %d, want %d", got, maxMigrationCheckFailures)
+	}
+
+	failures, _, hatchOpen := r.recordMigrationCheckFailure(cluster, onDemandOperationRackID)
+	if failures != 1 {
+		t.Errorf("operations-path failures = %d, want 1; it must not inherit the default rack's budget", failures)
+	}
+	if hatchOpen {
+		t.Error("escape hatch opened on the operations path's first failure")
+	}
+
+	// And the sentinel must not be a rack id the operator can actually produce.
+	if onDemandOperationRackID >= 0 {
+		t.Errorf("onDemandOperationRackID = %d; must be negative so it cannot collide with a real rack",
+			onDemandOperationRackID)
+	}
+}
