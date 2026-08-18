@@ -130,6 +130,38 @@ func TestBuildPodTemplateSpec_K8sNodeBlockList(t *testing.T) {
 			wantZoneTermToo: true,
 		},
 		{
+			// The load-bearing case for the "append to EVERY term" rule.
+			// NodeSelectorTerms are OR'd, so a pod satisfying term 2 is schedulable
+			// regardless of term 1. Appending the block to only the first term —
+			// which every single-term fixture above would still accept — would let
+			// the pod land on a blocked node via the second.
+			name:      "block joins every term when there are several",
+			blockList: []string{blockedNodeA},
+			podSpec: &v1alpha1.AerospikePodSpec{
+				Affinity: &corev1.Affinity{
+					NodeAffinity: &corev1.NodeAffinity{
+						RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+							NodeSelectorTerms: []corev1.NodeSelectorTerm{
+								{MatchExpressions: []corev1.NodeSelectorRequirement{{
+									Key:      zoneTopologyKey,
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{blockTestZone},
+								}}},
+								{MatchExpressions: []corev1.NodeSelectorRequirement{{
+									Key:      zoneTopologyKey,
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{"us-east-1b"},
+								}}},
+							},
+						},
+					},
+				},
+			},
+			wantTerms:       2,
+			wantBlocked:     []string{blockedNodeA},
+			wantZoneTermToo: true,
+		},
+		{
 			// applyPodSpecSettings also replaces podSpec.Affinity wholesale.
 			name:      "cluster podSpec affinity does not discard the block",
 			blockList: []string{blockedNodeB},

@@ -91,14 +91,16 @@ func replicasTestScheme(t *testing.T) *runtime.Scheme {
 
 func TestPopulateStatus_ReplicasCountsAllSelectorMatchedPods(t *testing.T) {
 	tests := []struct {
-		name         string
-		specSize     int32
-		readyPods    int
-		notReadyPods int
-		foreignPods  int
-		wantReplicas int32
-		wantSize     int32
-		wantHealth   string
+		name            string
+		specSize        int32
+		readyPods       int
+		notReadyPods    int
+		foreignPods     int
+		terminatingPods int
+		failedPods      int
+		wantReplicas    int32
+		wantSize        int32
+		wantHealth      string
 	}{
 		{
 			name:         "converged cluster: replicas equals ready count",
@@ -145,6 +147,46 @@ func TestPopulateStatus_ReplicasCountsAllSelectorMatchedPods(t *testing.T) {
 			wantSize:     1,
 			wantHealth:   "1/1",
 		},
+		{
+			// A terminating pod has already had its slot released; counting it
+			// inflates what an HPA reads as currentReplicas.
+			// Size is deliberately NOT changed to match: it is a readiness view,
+			// and a pod still Running with Ready=True is still serving until the
+			// kubelet stops it. So Size can briefly exceed Replicas here, which is
+			// correct for what each field means — Replicas is "what the workload
+			// has", Size is "what is serving right now". Narrowing readiness would
+			// also move ConditionReady, Health and the scale-down readiness gate,
+			// which is a separate change.
+			name:            "terminating pods are not counted as replicas",
+			specSize:        3,
+			readyPods:       2,
+			terminatingPods: 1,
+			wantReplicas:    2,
+			wantSize:        3,
+			wantHealth:      "3/3",
+		},
+		{
+			// A Failed pod will never run again.
+			name:         "failed pods are not counted as replicas",
+			specSize:     3,
+			readyPods:    2,
+			failedPods:   1,
+			wantReplicas: 2,
+			wantSize:     2,
+			wantHealth:   "2/3",
+		},
+		{
+			// Not-ready is NOT the same as not-a-replica: a Pending or unready pod
+			// is a replica the workload has, it is just not serving. That
+			// distinction is what status.size and status.health carry.
+			name:         "not-ready pods are still counted as replicas",
+			specSize:     3,
+			readyPods:    1,
+			notReadyPods: 2,
+			wantReplicas: 3,
+			wantSize:     1,
+			wantHealth:   "1/3",
+		},
 	}
 
 	for _, tt := range tests {
@@ -161,6 +203,20 @@ func TestPopulateStatus_ReplicasCountsAllSelectorMatchedPods(t *testing.T) {
 			}
 			for i := range tt.foreignPods {
 				objs = append(objs, replicasTestForeignPod(fmt.Sprintf("%s-%d", replicasTestForeign, i)))
+			}
+			for i := range tt.terminatingPods {
+				pod := replicasTestPod(fmt.Sprintf("%s-0-t%d", replicasTestCluster, i), true)
+				// A terminating pod needs a finalizer, or the fake client drops it
+				// on create instead of leaving it with a DeletionTimestamp.
+				pod.Finalizers = []string{"acko.io/test-hold"}
+				now := metav1.Now()
+				pod.DeletionTimestamp = &now
+				objs = append(objs, pod)
+			}
+			for i := range tt.failedPods {
+				pod := replicasTestPod(fmt.Sprintf("%s-0-f%d", replicasTestCluster, i), false)
+				pod.Status.Phase = corev1.PodFailed
+				objs = append(objs, pod)
 			}
 
 			cluster := &ackov1alpha1.AerospikeCluster{

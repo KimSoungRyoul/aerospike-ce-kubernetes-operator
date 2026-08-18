@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -12,6 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	ackov1alpha1 "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/api/v1alpha1"
+	"github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/internal/utils"
 )
 
 // --- the rolling restart's migration gate fails closed ---
@@ -146,6 +148,11 @@ func TestIsBatchBlocked_MigrationCheckError_EscapeHatchIsBounded(t *testing.T) {
 					migrationCheckKey(cluster, migrationGateRack): {
 						failures:  tt.priorFailures,
 						firstSeen: time.Now().Add(-tt.firstSeenAgo),
+						// A live entry is touched on every failing reconcile, so
+						// lastSeen is recent even when firstSeen is old. Leaving it
+						// zero would make the TTL sweep drop the entry and silently
+						// reset the budget the case is trying to exercise.
+						lastSeen: time.Now(),
 					},
 				}
 			}
@@ -218,5 +225,145 @@ func TestMigrationCheckFailures_KeyedPerRackAndCluster(t *testing.T) {
 	recreated.UID = "cluster-uid-demo-recreated"
 	if failures, _, _ := r.recordMigrationCheckFailure(recreated, 0); failures != 1 {
 		t.Errorf("recreated cluster failures = %d, want 1; state must be keyed on UID", failures)
+	}
+}
+
+// TestMigrationCheckKey_OperationsPathHasItsOwnBudget pins that the on-demand
+// operations path does not share an escape-hatch budget with a real rack.
+//
+// operationBatchBlocked used to pass rackID 0, and getRacks returns a default
+// rack with ID 0 for a cluster without rackConfig — so with the rack id half of
+// migrationCheckKey, a rolling restart that had already spent four of its five
+// failures let the operations path open the hatch on its first failure, deleting
+// pods with migration state unknown.
+func TestMigrationCheckKey_OperationsPathHasItsOwnBudget(t *testing.T) {
+	r, cluster, _ := migrationGateReconciler(t)
+
+	// The default rack burns its whole budget.
+	for range maxMigrationCheckFailures {
+		r.recordMigrationCheckFailure(cluster, 0)
+	}
+	if got := r.migrationCheckFailures[migrationCheckKey(cluster, 0)].failures; got != maxMigrationCheckFailures {
+		t.Fatalf("setup: default rack failures = %d, want %d", got, maxMigrationCheckFailures)
+	}
+
+	failures, _, hatchOpen := r.recordMigrationCheckFailure(cluster, onDemandOperationRackID)
+	if failures != 1 {
+		t.Errorf("operations-path failures = %d, want 1; it must not inherit the default rack's budget", failures)
+	}
+	if hatchOpen {
+		t.Error("escape hatch opened on the operations path's first failure")
+	}
+
+	// And the sentinel must not be a rack id the operator can actually produce.
+	if onDemandOperationRackID >= 0 {
+		t.Errorf("onDemandOperationRackID = %d; must be negative so it cannot collide with a real rack",
+			onDemandOperationRackID)
+	}
+}
+
+// TestCleanupRemovedRacks_EvictsMigrationBudgetOnRackRemoval closes the rack-ID
+// reuse hole: migrationCheckKey is UID + rackID, so it names a SLOT, not an
+// incarnation. Clearing only happened on an answering check, so a rack removed
+// with a spent budget bequeathed it to any future rack that reused the ID — which
+// could then open the escape hatch on its FIRST failure and delete pods with
+// migration state unknown.
+func TestCleanupRemovedRacks_EvictsMigrationBudgetOnRackRemoval(t *testing.T) {
+	scheme := runtime.NewScheme()
+	for _, add := range []func(*runtime.Scheme) error{
+		ackov1alpha1.AddToScheme, corev1.AddToScheme, appsv1.AddToScheme,
+	} {
+		if err := add(scheme); err != nil {
+			t.Fatalf("AddToScheme() error = %v", err)
+		}
+	}
+
+	const goneRack = 2
+	cluster := &ackov1alpha1.AerospikeCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "demo", Namespace: ctrlTestNamespace, UID: "cluster-uid-evict",
+		},
+		Spec: ackov1alpha1.AerospikeClusterSpec{
+			Size:  3,
+			Image: "aerospike:ce-8.1.1.1",
+			// Rack 2 is gone from the spec; only rack 1 remains.
+			RackConfig: &ackov1alpha1.RackConfig{Racks: []ackov1alpha1.Rack{{ID: 1}}},
+		},
+	}
+	zero := int32(0)
+	goneSts := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      utils.StatefulSetName(cluster.Name, goneRack),
+			Namespace: ctrlTestNamespace,
+			Labels:    utils.LabelsForCluster(cluster.Name),
+		},
+		Spec: appsv1.StatefulSetSpec{Replicas: &zero},
+	}
+
+	r := &AerospikeClusterReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).
+			WithStatusSubresource(&ackov1alpha1.AerospikeCluster{}).
+			WithObjects(cluster, goneSts).Build(),
+		Scheme:   scheme,
+		Recorder: record.NewFakeRecorder(16),
+	}
+
+	// The departing rack spends its entire budget.
+	for range maxMigrationCheckFailures {
+		r.recordMigrationCheckFailure(cluster, goneRack)
+	}
+	if _, ok := r.migrationCheckFailures[migrationCheckKey(cluster, goneRack)]; !ok {
+		t.Fatal("setup: no budget recorded for the departing rack")
+	}
+
+	if _, err := r.cleanupRemovedRacks(context.Background(), cluster, cluster.Spec.RackConfig.Racks); err != nil {
+		t.Fatalf("cleanupRemovedRacks() error = %v", err)
+	}
+
+	if _, ok := r.migrationCheckFailures[migrationCheckKey(cluster, goneRack)]; ok {
+		t.Fatal("removed rack's migration budget survived; a rack re-created with the same ID inherits it")
+	}
+
+	// A rack re-created with the same ID must start from a full budget.
+	failures, _, hatchOpen := r.recordMigrationCheckFailure(cluster, goneRack)
+	if failures != 1 {
+		t.Errorf("re-created rack failures = %d, want 1", failures)
+	}
+	if hatchOpen {
+		t.Error("re-created rack opened the escape hatch on its first failure")
+	}
+}
+
+// TestMigrationCheckState_AgesOutUntouchedEntries pins the leak fix: entries are
+// only ever removed by an answering check, so a deleted cluster's entries would
+// live for the operator's lifetime. An entry nothing has touched for the TTL is
+// swept; an actively failing one — touched every reconcile — is not, even though
+// its firstSeen is deliberately older than the grace period.
+func TestMigrationCheckState_AgesOutUntouchedEntries(t *testing.T) {
+	r, cluster, _ := migrationGateReconciler(t)
+	stale := migrationCheckKey(cluster, 7)
+
+	r.migrationCheckFailures = map[string]*migrationCheckState{
+		stale: {
+			failures:  3,
+			firstSeen: time.Now().Add(-2 * migrationCheckStateTTL),
+			lastSeen:  time.Now().Add(-2 * migrationCheckStateTTL),
+		},
+	}
+
+	// Recording against a DIFFERENT rack triggers the sweep.
+	r.recordMigrationCheckFailure(cluster, 0)
+
+	if _, ok := r.migrationCheckFailures[stale]; ok {
+		t.Error("an entry untouched for longer than the TTL was not swept")
+	}
+
+	// A long-running failure that is still being touched must survive, or the
+	// sweep would silently reset a budget that is at the hatch threshold.
+	live := migrationCheckKey(cluster, 0)
+	r.migrationCheckFailures[live].firstSeen = time.Now().Add(-2 * migrationCheckStateTTL)
+	r.recordMigrationCheckFailure(cluster, 0)
+	if _, ok := r.migrationCheckFailures[live]; !ok {
+		t.Error("an actively-failing entry was swept because its firstSeen was old")
 	}
 }

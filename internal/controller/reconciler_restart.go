@@ -70,10 +70,37 @@ const (
 type migrationCheckState struct {
 	failures  int
 	firstSeen time.Time
+	// lastSeen is when this entry was last touched. An actively failing rack is
+	// touched every restartRequeueInterval; an entry for a deleted cluster never
+	// is, which is what makes it safe to age out. firstSeen cannot serve here —
+	// an entry sitting at the hatch threshold is deliberately older than the
+	// grace period and must not be swept.
+	lastSeen time.Time
 }
 
+// migrationCheckStateTTL is how long an untouched entry survives. Well above any
+// realistic requeue gap, and only reached by entries whose rack or cluster is
+// gone. Without it the map grows for the operator's lifetime, since a deleted
+// cluster's entries are never cleared by the success path.
+const migrationCheckStateTTL = time.Hour
+
+// onDemandOperationRackID is the rack id the on-demand operations path passes to
+// isBatchBlocked. It is a sentinel, NOT a real rack: that path targets an
+// explicit pod list that can span racks, so no single rack owns its budget.
+//
+// It has to be distinct from every real rack id. Rack 0 is not usable here —
+// getRacks returns a default rack with ID 0 for a cluster without rackConfig, so
+// keying the operations path on 0 made it share one escape-hatch budget with the
+// default rack: a rolling restart that had already spent four of its five
+// failures would let the operations path open the hatch on its first. Rack ids
+// are validated >= 1 when set explicitly and default to 0, so a negative value
+// cannot collide with either.
+const onDemandOperationRackID = -1
+
 // migrationCheckKey identifies a rack's failure state. The cluster UID is part
-// of the key so a delete-and-recreate of the same name starts fresh.
+// of the key so a delete-and-recreate of the same name starts fresh, and the
+// rack id keeps each rack's budget separate — including the on-demand
+// operations path, which uses onDemandOperationRackID rather than a real rack.
 func migrationCheckKey(cluster *ackov1alpha1.AerospikeCluster, rackID int) string {
 	return fmt.Sprintf("%s/%d", cluster.UID, rackID)
 }
@@ -93,18 +120,31 @@ func (r *AerospikeClusterReconciler) recordMigrationCheckFailure(
 	if r.migrationCheckFailures == nil {
 		r.migrationCheckFailures = make(map[string]*migrationCheckState)
 	}
+	r.sweepMigrationCheckStateLocked(now)
+
 	state, ok := r.migrationCheckFailures[key]
 	if !ok {
 		state = &migrationCheckState{firstSeen: now}
 		r.migrationCheckFailures[key] = state
 	}
 	state.failures++
+	state.lastSeen = now
 
 	elapsed = now.Sub(state.firstSeen)
 	// Both bounds must be satisfied. The count alone can be spent in a minute of
 	// fast requeues; the duration alone would open on a single slow failure.
 	hatchOpen = state.failures >= maxMigrationCheckFailures && elapsed >= migrationCheckFailureGrace
 	return state.failures, elapsed, hatchOpen
+}
+
+// sweepMigrationCheckStateLocked drops entries nothing has touched for
+// migrationCheckStateTTL. Caller must hold migrationCheckMu.
+func (r *AerospikeClusterReconciler) sweepMigrationCheckStateLocked(now time.Time) {
+	for key, state := range r.migrationCheckFailures {
+		if now.Sub(state.lastSeen) > migrationCheckStateTTL {
+			delete(r.migrationCheckFailures, key)
+		}
+	}
 }
 
 // clearMigrationCheckFailures forgets a rack's failure state after a check that
@@ -149,9 +189,11 @@ func (r *AerospikeClusterReconciler) reconcileRollingRestart(
 	// from the template still needs a restart even when its config hash matches.
 	desiredHash := ""
 	desiredPodSpecHash := ""
+	desiredStorageHash := ""
 	if sts.Spec.Template.Annotations != nil {
 		desiredHash = sts.Spec.Template.Annotations[utils.ConfigHashAnnotation]
 		desiredPodSpecHash = sts.Spec.Template.Annotations[utils.PodSpecHashAnnotation]
+		desiredStorageHash = sts.Spec.Template.Annotations[utils.StorageHashAnnotation]
 	}
 
 	if desiredHash == "" {
@@ -184,7 +226,7 @@ func (r *AerospikeClusterReconciler) reconcileRollingRestart(
 	}
 
 	podsToRestart, configChanged := r.selectPodsToRestart(
-		ctx, cluster, rackPods, desiredHash, desiredPodSpecHash, maxIgnorablePods)
+		ctx, cluster, rackPods, desiredHash, desiredPodSpecHash, desiredStorageHash, maxIgnorablePods)
 
 	if len(podsToRestart) == 0 {
 		cluster.Status.PendingRestartPods = nil
@@ -295,7 +337,7 @@ func (r *AerospikeClusterReconciler) selectPodsToRestart(
 	ctx context.Context,
 	cluster *ackov1alpha1.AerospikeCluster,
 	rackPods []corev1.Pod,
-	desiredHash, desiredPodSpecHash string,
+	desiredHash, desiredPodSpecHash, desiredStorageHash string,
 	maxIgnorablePods int32,
 ) ([]*corev1.Pod, bool) {
 	log := logf.FromContext(ctx)
@@ -332,16 +374,50 @@ func (r *AerospikeClusterReconciler) selectPodsToRestart(
 
 		currentHash := ""
 		currentPodSpecHash := ""
+		currentStorageHash := ""
 		if pod.Annotations != nil {
 			currentHash = pod.Annotations[utils.ConfigHashAnnotation]
 			currentPodSpecHash = pod.Annotations[utils.PodSpecHashAnnotation]
+			currentStorageHash = pod.Annotations[utils.StorageHashAnnotation]
 		}
 
 		configMismatch := currentHash != desiredHash
 		podSpecMismatch := desiredPodSpecHash != "" && currentPodSpecHash != desiredPodSpecHash
+		// currentStorageHash == "" means the pod predates utils.StorageHashAnnotation
+		// — it was created by an operator that did not stamp one. Its storage state
+		// is unknowable, so it is NOT treated as stale: the alternative restarts
+		// every pod of every cluster on operator upgrade, each with a full data
+		// migration, which is what made folding storage into the pod-spec hash
+		// unsafe in the first place.
+		//
+		// Not-stale is not the same as leave-alone, though. Such a pod is adopted
+		// below, so the blind spot lasts one reconcile rather than until something
+		// unrelated happens to restart the pod.
+		storageUnknown := desiredStorageHash != "" && currentStorageHash == ""
+		storageMismatch := desiredStorageHash != "" && currentStorageHash != "" &&
+			currentStorageHash != desiredStorageHash
 
-		if configMismatch || podSpecMismatch {
+		switch {
+		case configMismatch || podSpecMismatch || storageMismatch:
 			podsToRestart = append(podsToRestart, pod)
+		case storageUnknown:
+			// The pod matches on everything the operator that created it knew
+			// about, and it is not being restarted for any other reason, so stamp
+			// the storage hash on it WITHOUT a restart. From here on a storage
+			// edit moves the hash and rolls the pod normally.
+			//
+			// Adopting records "this pod matches the current storage spec". That
+			// is accurate for the pod as the old operator left it — but note it
+			// cannot detect storage that had ALREADY drifted before the upgrade,
+			// because that drift was silently discarded (the bug #340 fixed) and
+			// left no trace in any annotation. Such a pod converges the next time
+			// anything restarts it. Adoption does not make that worse; it fixes
+			// every storage edit made from now on, which is the case that
+			// otherwise never converged at all.
+			if err := r.adoptStorageHash(ctx, pod, desiredStorageHash); err != nil {
+				log.V(1).Info("Could not stamp the storage hash on a pre-upgrade pod; will retry next reconcile",
+					"pod", pod.Name, "error", err)
+			}
 		}
 		if configMismatch {
 			configChanged = true
@@ -596,6 +672,24 @@ func (r *AerospikeClusterReconciler) updatePodConfigHash(ctx context.Context, po
 		podCopy.Annotations = make(map[string]string)
 	}
 	podCopy.Annotations[utils.ConfigHashAnnotation] = hash
+	return r.Patch(ctx, podCopy, client.MergeFrom(pod))
+}
+
+// adoptStorageHash stamps utils.StorageHashAnnotation onto a pod that predates
+// it and otherwise matches the StatefulSet template.
+//
+// This is an annotation patch, NOT a restart. Without it, a pod that existed at
+// upgrade time would never be selected for a storage edit — indefinitely, not
+// transiently: a stable cluster with no config or image change keeps its pods for
+// months, so #340's guarantee would not hold for the entire pre-upgrade fleet and
+// the original symptom (storage edit silently discarded, phase=Completed) would
+// persist across it.
+func (r *AerospikeClusterReconciler) adoptStorageHash(ctx context.Context, pod *corev1.Pod, hash string) error {
+	podCopy := pod.DeepCopy()
+	if podCopy.Annotations == nil {
+		podCopy.Annotations = make(map[string]string)
+	}
+	podCopy.Annotations[utils.StorageHashAnnotation] = hash
 	return r.Patch(ctx, podCopy, client.MergeFrom(pod))
 }
 
@@ -892,9 +986,12 @@ func (r *AerospikeClusterReconciler) isBatchBlocked(
 			"elapsed", elapsed, "failureThreshold", maxMigrationCheckFailures,
 			"graceThreshold", migrationCheckFailureGrace)
 		r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventMigrationCheckUnavailable,
-			"Rolling restart rack %d proceeding WITHOUT a migration check: %d consecutive failures over %s "+
-				"(thresholds %d and %s). Last error: %v",
-			rackID, failures, elapsed.Round(time.Second), maxMigrationCheckFailures, migrationCheckFailureGrace, err)
+			"Rolling restart rack %d proceeding with MIGRATION STATE UNKNOWN. The migration check has not "+
+				"answered for %d consecutive attempts over %s, so the operator cannot tell whether partitions "+
+				"are still moving; restarting a pod now may make partitions unavailable. This is a deadlock "+
+				"escape, not a safety signal — the elapsed time bounds how long the CHECK has been failing, "+
+				"not how long migration has been running. Last error: %v",
+			rackID, failures, elapsed.Round(time.Second), err)
 		return false
 	}
 

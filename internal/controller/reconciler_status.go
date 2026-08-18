@@ -322,6 +322,7 @@ func (r *AerospikeClusterReconciler) populateStatus(
 	servicePort := int32(getServicePort(cluster))
 	podStatuses := make(map[string]ackov1alpha1.AerospikePodStatus, len(podList.Items))
 	readyCount := int32(0)
+	replicaCount := int32(0)
 
 	for i := range podList.Items {
 		pod := &podList.Items[i]
@@ -342,15 +343,23 @@ func (r *AerospikeClusterReconciler) populateStatus(
 		if ps.IsRunningAndReady {
 			readyCount++
 		}
+		if countsAsReplica(pod) {
+			replicaCount++
+		}
 	}
 
 	cluster.Status.Pods = podStatuses
 	cluster.Status.Size = readyCount
-	// Replicas backs the scale subresource, so it counts every pod the selector
+	// Replicas backs the scale subresource, so it counts the pods the selector
 	// matches rather than only the ready ones. listClusterPods lists on
 	// utils.SelectorLabelsForCluster, which is exactly the selector published in
 	// Status.Selector below, so the two agree by construction.
-	cluster.Status.Replicas = int32(len(podList.Items))
+	//
+	// Terminating and Failed pods are excluded — see countsAsReplica. Counting
+	// the raw list inflated what an HPA reads as currentReplicas, which is the
+	// same class of bug as reporting the ready count: a wrong current value makes
+	// the autoscaler compute a wrong desired one.
+	cluster.Status.Replicas = replicaCount
 	cluster.Status.Health = fmt.Sprintf("%d/%d", readyCount, cluster.Spec.Size)
 	cluster.Status.ObservedGeneration = cluster.Generation
 	// DeepCopy to give Status an independent snapshot. A shallow alias would
@@ -366,6 +375,28 @@ func (r *AerospikeClusterReconciler) populateStatus(
 	setCondition(cluster, ackov1alpha1.ConditionReady, readyCount == cluster.Spec.Size, "AllPodsReady", fmt.Sprintf("%d/%d pods ready", readyCount, cluster.Spec.Size))
 
 	return readyCount, nil
+}
+
+// countsAsReplica reports whether a pod should be counted in Status.Replicas,
+// the value the scale subresource publishes as the current replica count.
+//
+// Two exclusions, both cases where the pod is not a replica the workload has:
+//
+//   - DeletionTimestamp set. The pod is terminating; the StatefulSet has already
+//     released the slot and a replacement is on its way or not coming at all.
+//     kube-controller-manager's own replica accounting for Deployments does the
+//     same thing.
+//   - Phase Failed. The pod will never run again and is only waiting to be
+//     garbage-collected.
+//
+// Pending and Running-but-not-ready pods ARE counted: they are replicas the
+// workload genuinely has, just not ready ones. That distinction is what
+// Status.Size and Status.Health carry.
+func countsAsReplica(pod *corev1.Pod) bool {
+	if pod.DeletionTimestamp != nil {
+		return false
+	}
+	return pod.Status.Phase != corev1.PodFailed
 }
 
 // buildPodStatus constructs an AerospikePodStatus for a single pod.
