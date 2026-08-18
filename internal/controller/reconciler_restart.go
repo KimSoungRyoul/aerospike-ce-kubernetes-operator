@@ -29,6 +29,95 @@ import (
 // state is skipped from the rolling restart to avoid blocking healthy pods.
 const maxPodUnstableDuration = 10 * time.Minute
 
+const (
+	// maxMigrationCheckFailures is how many consecutive migration-check failures
+	// the rolling restart tolerates before it is allowed to proceed without a
+	// confirmed answer. See migrationCheckState for why the escape hatch exists
+	// and why a count alone is not enough to open it.
+	maxMigrationCheckFailures = 5
+
+	// migrationCheckFailureGrace is the minimum time the failures must have
+	// persisted before the escape hatch opens, on top of the count. Batches
+	// requeue every restartRequeueInterval (15s), so a count alone could be spent
+	// in about a minute — far too fast to distinguish a genuinely unreachable
+	// cluster from the normal turbulence of a rollout.
+	migrationCheckFailureGrace = maxPodUnstableDuration
+)
+
+// migrationCheckState tracks consecutive migration-check failures for one rack.
+//
+// Background: both destructive paths gate on isMigrationInProgress, and the
+// sensor underneath is deliberately fail-closed — an errored, absent or
+// unparseable migrate_partitions_remaining counts as migrating, and an
+// unreachable node is recorded with a positive sentinel rather than dropped
+// (aero_info.go). The scale-down path preserves that caution and treats a check
+// error as "migrating". The rolling restart used to discard it and delete the
+// next batch anyway, which is exactly backwards: the window in which the cluster
+// is least reachable is a rolling restart, so the fail-open branch fired when it
+// was most dangerous (#341).
+//
+// The restart path does have one thing scale-down does not: a restart can be the
+// remedy. If a bad config left every pod crash-looping, the cluster is
+// unreachable *because* of the thing the restart would fix, and blocking forever
+// is its own outage. So the gate fails closed with a bounded escape hatch rather
+// than unconditionally.
+//
+// State is in-memory rather than in status on purpose. It is a debounce, not a
+// fact about the cluster, and losing it is safe in the direction that matters:
+// an operator restart resets the counter, so the gate returns to fail-closed and
+// the clock starts again. Leader election means only one replica reconciles a
+// given cluster.
+type migrationCheckState struct {
+	failures  int
+	firstSeen time.Time
+}
+
+// migrationCheckKey identifies a rack's failure state. The cluster UID is part
+// of the key so a delete-and-recreate of the same name starts fresh.
+func migrationCheckKey(cluster *ackov1alpha1.AerospikeCluster, rackID int) string {
+	return fmt.Sprintf("%s/%d", cluster.UID, rackID)
+}
+
+// recordMigrationCheckFailure increments the rack's consecutive failure count
+// and reports whether the escape hatch is now open.
+func (r *AerospikeClusterReconciler) recordMigrationCheckFailure(
+	cluster *ackov1alpha1.AerospikeCluster,
+	rackID int,
+) (failures int, elapsed time.Duration, hatchOpen bool) {
+	key := migrationCheckKey(cluster, rackID)
+	now := time.Now()
+
+	r.migrationCheckMu.Lock()
+	defer r.migrationCheckMu.Unlock()
+
+	if r.migrationCheckFailures == nil {
+		r.migrationCheckFailures = make(map[string]*migrationCheckState)
+	}
+	state, ok := r.migrationCheckFailures[key]
+	if !ok {
+		state = &migrationCheckState{firstSeen: now}
+		r.migrationCheckFailures[key] = state
+	}
+	state.failures++
+
+	elapsed = now.Sub(state.firstSeen)
+	// Both bounds must be satisfied. The count alone can be spent in a minute of
+	// fast requeues; the duration alone would open on a single slow failure.
+	hatchOpen = state.failures >= maxMigrationCheckFailures && elapsed >= migrationCheckFailureGrace
+	return state.failures, elapsed, hatchOpen
+}
+
+// clearMigrationCheckFailures forgets a rack's failure state after a check that
+// returned an answer, so the next outage starts from a full budget.
+func (r *AerospikeClusterReconciler) clearMigrationCheckFailures(
+	cluster *ackov1alpha1.AerospikeCluster,
+	rackID int,
+) {
+	r.migrationCheckMu.Lock()
+	defer r.migrationCheckMu.Unlock()
+	delete(r.migrationCheckFailures, migrationCheckKey(cluster, rackID))
+}
+
 // reconcileRollingRestart checks if pods need restart due to config changes or
 // pod-spec changes (image, podSpec, podService, networkPolicy). A pod is
 // selected when its config-hash OR its pod-spec-hash differs from the
@@ -753,10 +842,14 @@ func filterUnrestarted(allPending []string, failedPods []string, restarted int32
 
 // isBatchBlocked returns true when the next restart batch should wait:
 //   - readiness gates are enabled and a previously restarted pod has not yet satisfied its gate, OR
-//   - readiness gates are disabled and a migration check confirms migration is active.
+//   - readiness gates are disabled and a migration check reports migration active
+//     OR fails to report at all.
 //
-// Connection failures from migration checks are treated as non-blocking (logged as warnings)
-// to avoid deadlocking the restart when the cluster is temporarily unreachable.
+// A migration check that errors blocks, matching the scale-down path in
+// reconciler_statefulset.go: the same unreachable-cluster signal must not produce
+// opposite postures in the two paths that destroy pods. The block is bounded —
+// see migrationCheckState — so a cluster that is unreachable *because* of the
+// config the restart would fix is not deadlocked forever.
 func (r *AerospikeClusterReconciler) isBatchBlocked(
 	ctx context.Context,
 	cluster *ackov1alpha1.AerospikeCluster,
@@ -778,15 +871,36 @@ func (r *AerospikeClusterReconciler) isBatchBlocked(
 	// Direct migration check when readiness gates are not enabled.
 	migrating, err := r.isMigrationInProgress(ctx, cluster)
 	if err != nil {
-		// Connection failure: log a warning but proceed. The cluster may be
-		// unreachable during the early phase of a rolling restart (e.g. first pod
-		// is still coming up). Blocking here could deadlock the restart.
-		log.V(1).Info("Migration check failed during rolling restart, proceeding with caution",
-			"error", err, "rack", rackID)
-		r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventMigrationCheckFailed,
-			"Rolling restart rack %d: migration check failed (%v), proceeding", rackID, err)
+		// Fail closed. An unreachable cluster means partitions may still be
+		// moving, and deleting the next batch inside that window is how a
+		// replication-factor-2 cluster loses records outright.
+		failures, elapsed, hatchOpen := r.recordMigrationCheckFailure(cluster, rackID)
+		if !hatchOpen {
+			log.Info("Migration check failed during rolling restart, holding the next batch",
+				"error", err, "rack", rackID, "consecutiveFailures", failures)
+			r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventMigrationCheckFailed,
+				"Rolling restart rack %d held: migration check failed (%v); %d consecutive failures over %s",
+				rackID, err, failures, elapsed.Round(time.Second))
+			return true
+		}
+
+		// Escape hatch. Deliberately loud: this is the one path that destroys
+		// pods without a confirmed migration answer, and an operator needs to be
+		// able to find it after the fact.
+		log.Info("Migration check has failed persistently, proceeding with the rolling restart without a migration answer",
+			"error", err, "rack", rackID, "consecutiveFailures", failures,
+			"elapsed", elapsed, "failureThreshold", maxMigrationCheckFailures,
+			"graceThreshold", migrationCheckFailureGrace)
+		r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventMigrationCheckUnavailable,
+			"Rolling restart rack %d proceeding WITHOUT a migration check: %d consecutive failures over %s "+
+				"(thresholds %d and %s). Last error: %v",
+			rackID, failures, elapsed.Round(time.Second), maxMigrationCheckFailures, migrationCheckFailureGrace, err)
 		return false
 	}
+
+	// The check answered, so the next outage starts from a full budget.
+	r.clearMigrationCheckFailures(cluster, rackID)
+
 	if migrating {
 		log.Info("Data migration in progress, delaying next restart batch", "rack", rackID)
 		r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventRollingRestartDeferred,

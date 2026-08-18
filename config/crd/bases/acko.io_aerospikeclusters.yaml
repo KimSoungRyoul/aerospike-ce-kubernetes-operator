@@ -80,8 +80,26 @@ spec:
           metadata:
             type: object
           spec:
-            description: AerospikeClusterSpec defines the desired state of an Aerospike
-              CE cluster.
+            description: |-
+              The two rules below duplicate checks the validating webhook already
+              performs (validateSizeAndImage, and the rack-count check in validate).
+              They are repeated in the schema because the webhook cannot see a
+              `kubectl scale`: for a CustomResource the apiserver converts the object to
+              an `autoscaling/v1 Scale` before admission runs, so a webhook registered on
+              `aerospikeclusters/scale` would be handed a Scale rather than an
+              AerospikeCluster. Schema validation, by contrast, does run on scale writes —
+              which is why the CE maximum of 8 was already enforced there. Putting these
+              two in the schema closes the two transitions that took a cluster down
+              through the scale subresource (#353).
+
+              Both rules mirror the webhook's conditions exactly, including the "size is
+              supplied by the template later" exemption, so a spec accepted by one is
+              accepted by the other.
+
+              They are declared on this field rather than on AerospikeClusterSpec so they
+              apply only to .spec. status.appliedSpec reuses the same Go type, and rules
+              declared on the type would also validate that status snapshot on every
+              status write.
             properties:
               aerospikeAccessControl:
                 description: AerospikeAccessControl defines ACL roles and users for
@@ -8625,6 +8643,14 @@ spec:
                     type: boolean
                 type: object
             type: object
+            x-kubernetes-validations:
+            - message: spec.size must be set (1-8) when spec.templateRef is not specified
+              rule: has(self.templateRef) || (has(self.size) && self.size >= 1)
+            - message: rackConfig defines more racks than spec.size; each rack must
+                get at least 1 pod, so the rack count must not exceed spec.size
+              rule: '!has(self.rackConfig) || !has(self.rackConfig.racks) || size(self.rackConfig.racks)
+                == 0 || (has(self.templateRef) && (!has(self.size) || self.size ==
+                0)) || (has(self.size) && size(self.rackConfig.racks) <= self.size)'
           status:
             description: AerospikeClusterStatus defines the observed state of the
               Aerospike CE cluster.
@@ -17574,6 +17600,18 @@ spec:
                 description: Pods contains status information for each pod in the
                   cluster.
                 type: object
+              replicas:
+                description: |-
+                  Replicas is the total number of pods matching Selector, ready or not.
+
+                  This is the scale subresource's status field. The subresource contract is
+                  "current replicas", so it has to count every pod the selector matches: an
+                  HPA computes desired replicas from this number, and feeding it a readiness
+                  count makes it shrink a healthy cluster whenever a rolling restart dips
+                  readiness. Size/Health keep the readiness view for humans and printer
+                  columns.
+                format: int32
+                type: integer
               seedsEndpoint:
                 description: |-
                   SeedsEndpoint is the external endpoint (host:port) of the seeds finder
@@ -17583,7 +17621,11 @@ spec:
                 description: Selector is the label selector for HPA compatibility.
                 type: string
               size:
-                description: Size is the current number of ready pods.
+                description: |-
+                  Size is the current number of ready pods.
+
+                  This is a readiness view, NOT a replica count, and it is deliberately not
+                  what the scale subresource reads — see Replicas.
                 format: int32
                 type: integer
               templateSnapshot:
@@ -18593,5 +18635,5 @@ spec:
       scale:
         labelSelectorPath: .status.selector
         specReplicasPath: .spec.size
-        statusReplicasPath: .status.size
+        statusReplicasPath: .status.replicas
       status: {}

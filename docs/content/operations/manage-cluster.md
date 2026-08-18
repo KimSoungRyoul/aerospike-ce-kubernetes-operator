@@ -865,7 +865,11 @@ spec:
 
 ## HorizontalPodAutoscaler (HPA)
 
-AerospikeCluster supports the `scale` subresource, which enables integration with Kubernetes HPA. The operator exposes `status.selector` and `status.size` for HPA compatibility.
+AerospikeCluster supports the `scale` subresource, which enables integration with Kubernetes HPA. The operator exposes `status.selector` and `status.replicas` for HPA compatibility.
+
+:::note
+The subresource reads `status.replicas` — the total number of pods matching the selector — not `status.size`, which counts only *ready* pods. During a rolling restart `status.size` dips below the real replica count; feeding that number to an HPA would make it scale a healthy cluster down. Use `status.size` / `status.health` to read readiness, and `status.replicas` when you mean the replica count.
+:::
 
 ### Create an HPA
 

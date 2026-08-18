@@ -126,7 +126,8 @@ Aerospike CE 클러스터의 관측된 상태입니다.
 | 필드 | 타입 | 설명 |
 |---|---|---|
 | `phase` | string | 클러스터 단계: `InProgress`, `Completed`, `Error`, `ScalingUp`, `ScalingDown`, `RollingRestart`, `ACLSync`, `Paused`, `Deleting`. |
-| `size` | int32 | 현재 클러스터 크기. |
+| `size` | int32 | 현재 **ready** 상태인 pod 수. 사람이 읽는 readiness 뷰이며, scale 서브리소스가 읽는 값이 아닙니다. |
+| `replicas` | int32 | `selector`에 매칭되는 전체 pod 수 (ready 여부 무관). `scale` 서브리소스의 status 필드이므로 HPA/KEDA가 이 값을 읽습니다. |
 | `conditions` | [][Condition](https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/conditions/) | 클러스터 상태의 최신 관측. |
 | `pods` | map[string][AerospikePodStatus](#aerospikepodstatus) | 파드별 상태 정보, 파드 이름으로 키 지정. |
 | `observedGeneration` | int64 | 컨트롤러가 관측한 가장 최근 세대. |
