@@ -406,8 +406,22 @@ type AerospikeClusterStatus struct {
 	Phase AerospikePhase `json:"phase,omitempty"`
 
 	// Size is the current number of ready pods.
+	//
+	// This is a readiness view, NOT a replica count, and it is deliberately not
+	// what the scale subresource reads — see Replicas.
 	// +optional
 	Size int32 `json:"size,omitempty"`
+
+	// Replicas is the total number of pods matching Selector, ready or not.
+	//
+	// This is the scale subresource's status field. The subresource contract is
+	// "current replicas", so it has to count every pod the selector matches: an
+	// HPA computes desired replicas from this number, and feeding it a readiness
+	// count makes it shrink a healthy cluster whenever a rolling restart dips
+	// readiness. Size/Health keep the readiness view for humans and printer
+	// columns.
+	// +optional
+	Replicas int32 `json:"replicas,omitempty"`
 
 	// Health is a human-readable summary of pod readiness in "ready/total" format (e.g. "1/3").
 	// +optional
@@ -603,7 +617,7 @@ type AerospikePodStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:subresource:scale:specpath=.spec.size,statuspath=.status.size,selectorpath=.status.selector
+// +kubebuilder:subresource:scale:specpath=.spec.size,statuspath=.status.replicas,selectorpath=.status.selector
 // +kubebuilder:resource:shortName=asc
 // +kubebuilder:printcolumn:name="RackSize",type=integer,JSONPath=`.spec.size`
 // +kubebuilder:printcolumn:name="Health",type=string,JSONPath=`.status.health`
@@ -623,6 +637,28 @@ type AerospikeCluster struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
+	// The two rules below duplicate checks the validating webhook already
+	// performs (validateSizeAndImage, and the rack-count check in validate).
+	// They are repeated in the schema because the webhook cannot see a
+	// `kubectl scale`: for a CustomResource the apiserver converts the object to
+	// an `autoscaling/v1 Scale` before admission runs, so a webhook registered on
+	// `aerospikeclusters/scale` would be handed a Scale rather than an
+	// AerospikeCluster. Schema validation, by contrast, does run on scale writes —
+	// which is why the CE maximum of 8 was already enforced there. Putting these
+	// two in the schema closes the two transitions that took a cluster down
+	// through the scale subresource (#353).
+	//
+	// Both rules mirror the webhook's conditions exactly, including the "size is
+	// supplied by the template later" exemption, so a spec accepted by one is
+	// accepted by the other.
+	//
+	// They are declared on this field rather than on AerospikeClusterSpec so they
+	// apply only to .spec. status.appliedSpec reuses the same Go type, and rules
+	// declared on the type would also validate that status snapshot on every
+	// status write.
+	//
+	// +kubebuilder:validation:XValidation:rule="has(self.templateRef) || (has(self.size) && self.size >= 1)",message="spec.size must be set (1-8) when spec.templateRef is not specified"
+	// +kubebuilder:validation:XValidation:rule="!has(self.rackConfig) || !has(self.rackConfig.racks) || size(self.rackConfig.racks) == 0 || (has(self.templateRef) && (!has(self.size) || self.size == 0)) || (has(self.size) && size(self.rackConfig.racks) <= self.size)",message="rackConfig defines more racks than spec.size; each rack must get at least 1 pod, so the rack count must not exceed spec.size"
 	Spec   AerospikeClusterSpec   `json:"spec"`
 	Status AerospikeClusterStatus `json:"status,omitempty"`
 }

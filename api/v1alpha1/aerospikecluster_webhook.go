@@ -20,6 +20,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -288,6 +290,26 @@ func (v *AerospikeClusterValidator) ValidateUpdate(ctx context.Context, oldClust
 			oldRef.Name, newRef.Name)
 	}
 
+	// PersistentVolume-backed storage is immutable.
+	//
+	// Those volumes become the StatefulSet's VolumeClaimTemplates, and VCTs are
+	// immutable on a live StatefulSet — reconcileStatefulSet deliberately never
+	// patches them. The pod template, however, IS replaced whenever anything else
+	// makes needsUpdate true, and BuildVolumes emits a volumeMount for every
+	// volume carrying an `aerospike` attachment regardless of its source. So a
+	// storage edit that adds a persistentVolume-backed volume, landing together
+	// with any other change, writes a pod template referencing a volume name that
+	// no VolumeClaimTemplate provides. The kubelet rejects every such pod, and
+	// under the OnDelete strategy the operator deletes pods to roll them and none
+	// come back — the cluster drains to zero.
+	//
+	// Refusing the edit at admission is the only place this can be stopped: by the
+	// time the reconciler sees it, the StatefulSet cannot be fixed without being
+	// recreated.
+	if err := validateStorageImmutability(oldCluster, cluster); err != nil {
+		return nil, err
+	}
+
 	// Don't allow changing operations while one is InProgress
 	if oldCluster.Status.OperationStatus != nil &&
 		oldCluster.Status.OperationStatus.Phase == AerospikePhaseInProgress {
@@ -353,6 +375,125 @@ func (v *AerospikeClusterValidator) ValidateUpdate(ctx context.Context, oldClust
 // ValidateDelete implements admission.Validator[*AerospikeCluster].
 func (v *AerospikeClusterValidator) ValidateDelete(ctx context.Context, cluster *AerospikeCluster) (admission.Warnings, error) {
 	return nil, nil
+}
+
+// validateStorageImmutability rejects changes to PersistentVolume-backed volumes
+// in spec.storage or in any rack's storage override, because those volumes are
+// the StatefulSet's VolumeClaimTemplates and VCTs cannot be changed in place.
+//
+// Only the PV-backed volumes are frozen. Everything else in spec.storage —
+// emptyDir/secret/configMap/hostPath volumes, mount paths, initMethod/wipeMethod,
+// cascadeDelete, the volume policies — renders into the pod template only, and
+// those edits now roll pods correctly because computePodSpecHash covers storage.
+func validateStorageImmutability(oldCluster, cluster *AerospikeCluster) error {
+	if err := comparePVVolumes("spec.storage", oldCluster.Spec.Storage, cluster.Spec.Storage); err != nil {
+		return err
+	}
+
+	// A rack's storage override feeds the same BuildVolumeClaimTemplates call for
+	// that rack's StatefulSet, so it is under the same constraint. Racks are keyed
+	// by ID; a rack present on only one side is an add or remove of the whole
+	// rack, which the rack-ID guard and cleanupRemovedRacks handle, so it is
+	// skipped here rather than reported as a storage change.
+	oldRacks := racksByID(oldCluster.Spec.RackConfig)
+	for id, newRack := range racksByID(cluster.Spec.RackConfig) {
+		oldRack, ok := oldRacks[id]
+		if !ok {
+			continue
+		}
+		field := fmt.Sprintf("spec.rackConfig.racks[id=%d].storage", id)
+		if err := comparePVVolumes(field, oldRack.Storage, newRack.Storage); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// racksByID indexes racks by ID, tolerating a nil rackConfig.
+func racksByID(rackConfig *RackConfig) map[int]*Rack {
+	if rackConfig == nil {
+		return nil
+	}
+	out := make(map[int]*Rack, len(rackConfig.Racks))
+	for i := range rackConfig.Racks {
+		out[rackConfig.Racks[i].ID] = &rackConfig.Racks[i]
+	}
+	return out
+}
+
+// comparePVVolumes reports the first difference between the PersistentVolume-backed
+// volumes of two storage specs, as an error naming the field the user edited.
+func comparePVVolumes(field string, oldStorage, newStorage *AerospikeStorageSpec) error {
+	oldPVs := pvBackedVolumes(oldStorage)
+	newPVs := pvBackedVolumes(newStorage)
+
+	// Report names deterministically; map iteration order is random and this text
+	// ends up in a user-facing admission error.
+	for _, name := range slices.Sorted(maps.Keys(newPVs)) {
+		oldPV, existed := oldPVs[name]
+		if !existed {
+			return fmt.Errorf(
+				"%s is immutable for persistentVolume-backed volumes: cannot add volume %q. "+
+					"These volumes become the StatefulSet's volumeClaimTemplates, which Kubernetes does not allow "+
+					"changing on a running StatefulSet. Create a new cluster with the desired storage and migrate data",
+				field, name)
+		}
+		if !persistentVolumeSpecsEqual(oldPV, newPVs[name]) {
+			return fmt.Errorf(
+				"%s is immutable for persistentVolume-backed volumes: cannot change volume %q. "+
+					"These volumes become the StatefulSet's volumeClaimTemplates, which Kubernetes does not allow "+
+					"changing on a running StatefulSet. Create a new cluster with the desired storage and migrate data",
+				field, name)
+		}
+	}
+
+	for _, name := range slices.Sorted(maps.Keys(oldPVs)) {
+		if _, stillThere := newPVs[name]; !stillThere {
+			return fmt.Errorf(
+				"%s is immutable for persistentVolume-backed volumes: cannot remove volume %q. "+
+					"These volumes become the StatefulSet's volumeClaimTemplates, which Kubernetes does not allow "+
+					"changing on a running StatefulSet. Create a new cluster with the desired storage and migrate data",
+				field, name)
+		}
+	}
+
+	return nil
+}
+
+// pvBackedVolumes indexes a storage spec's PersistentVolume-backed volumes by name.
+func pvBackedVolumes(storage *AerospikeStorageSpec) map[string]*PersistentVolumeSpec {
+	if storage == nil {
+		return nil
+	}
+	out := make(map[string]*PersistentVolumeSpec, len(storage.Volumes))
+	for i := range storage.Volumes {
+		if pv := storage.Volumes[i].Source.PersistentVolume; pv != nil {
+			out[storage.Volumes[i].Name] = pv
+		}
+	}
+	return out
+}
+
+// persistentVolumeSpecsEqual compares two PersistentVolumeSpecs, treating Size
+// as a quantity rather than a string so that a purely cosmetic rewrite (10Gi ->
+// 10240Mi) is not reported as a change. Unparseable sizes fall back to a string
+// comparison; BuildVolumeClaimTemplates would fail on those anyway.
+func persistentVolumeSpecsEqual(a, b *PersistentVolumeSpec) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if a.Size != b.Size {
+		aq, aErr := resource.ParseQuantity(a.Size)
+		bq, bErr := resource.ParseQuantity(b.Size)
+		if aErr != nil || bErr != nil || aq.Cmp(bq) != 0 {
+			return false
+		}
+	}
+
+	aRest, bRest := *a, *b
+	aRest.Size, bRest.Size = "", ""
+	return reflect.DeepEqual(aRest, bRest)
 }
 
 // effectiveRackIDs returns the set of rack IDs the cluster will actually run,
