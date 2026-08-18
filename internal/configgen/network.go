@@ -1,10 +1,26 @@
 package configgen
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
 	v1alpha1 "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/api/v1alpha1"
+)
+
+// Access-address placeholders. These strings are a CONTRACT with the init
+// container: aerospike-init.sh substitutes each one at pod startup, so a change
+// here without a matching change there silently leaves the literal placeholder
+// in aerospike.conf.
+//
+// Note that MY_EXTERNAL_PORT is substituted on the NodePort path only — a
+// LoadBalancer serves the service port itself, so no port placeholder is emitted
+// for it. See InjectAccessAddressPlaceholders.
+const (
+	placeholderPodIP           = "MY_POD_IP"
+	placeholderNodeIP          = "MY_NODE_IP"
+	placeholderExternalAddress = "MY_EXTERNAL_ADDRESS"
+	placeholderExternalPort    = "MY_EXTERNAL_PORT"
 )
 
 // generateNetworkSection generates the network stanza with mesh seeds injected
@@ -102,19 +118,26 @@ func generateHeartbeatSubsection(
 //
 // When podServiceType is LoadBalancer or NodePort, additional placeholders
 // (MY_EXTERNAL_ADDRESS, MY_EXTERNAL_PORT) are injected for external access.
-func InjectAccessAddressPlaceholders(config map[string]any, policy *v1alpha1.AerospikeNetworkPolicy, podServiceType string) {
+//
+// Returns a description of any user-specified value the operator overrode, so
+// the caller can say so rather than discarding it silently.
+func InjectAccessAddressPlaceholders(
+	config map[string]any,
+	policy *v1alpha1.AerospikeNetworkPolicy,
+	podServiceType string,
+) []string {
 	if policy == nil {
-		return
+		return nil
 	}
 
 	networkSection, ok := config[SectionNetwork].(map[string]any)
 	if !ok {
-		return
+		return nil
 	}
 
 	svcSection, ok := networkSection[SectionService].(map[string]any)
 	if !ok {
-		return
+		return nil
 	}
 
 	// Inject access-address based on AccessType
@@ -136,25 +159,58 @@ func InjectAccessAddressPlaceholders(config map[string]any, policy *v1alpha1.Aer
 	// container resolves at startup by querying the pod's own Kubernetes Service.
 	// This takes precedence over the network policy's alternateAccessType because
 	// the per-pod LB/NodePort services provide the externally reachable endpoints.
-	if podServiceType == "LoadBalancer" {
-		svcSection["alternate-access-address"] = "MY_EXTERNAL_ADDRESS"
-	}
-	if podServiceType == "NodePort" {
-		svcSection["alternate-access-address"] = "MY_NODE_IP"
-		svcSection["alternate-access-port"] = "MY_EXTERNAL_PORT"
+	//
+	// The two branches MUST agree about the port, and they used not to. The init
+	// container substitutes MY_EXTERNAL_PORT only on the NodePort path
+	// (aerospike-init.sh); on the LoadBalancer path it resolves the address alone,
+	// because a LoadBalancer serves the service port itself. So a user-specified
+	// alternate-access-port — perfectly reasonable to have set while using
+	// NodePort — survived a switch to LoadBalancer and made every peer advertise
+	// <lb-address>:<stale-port>, a port nothing listens on. Clients then fail to
+	// reach peers via --services-alternate with a connection error, which is
+	// indistinguishable from the port having been dropped.
+	var overrides []string
+	switch podServiceType {
+	case "LoadBalancer":
+		svcSection["alternate-access-address"] = placeholderExternalAddress
+		// The LoadBalancer serves the service port, so any alternate-access-port
+		// is wrong by construction here. Removing it makes Aerospike fall back to
+		// the service port, which is what the LoadBalancer actually listens on.
+		if old, exists := svcSection["alternate-access-port"]; exists {
+			delete(svcSection, "alternate-access-port")
+			overrides = append(overrides, fmt.Sprintf(
+				"removed network.service.alternate-access-port (%v): a LoadBalancer per-pod service "+
+					"serves the service port, so an explicit alternate-access-port would advertise a "+
+					"port nothing listens on", old))
+		}
+	case "NodePort":
+		svcSection["alternate-access-address"] = placeholderNodeIP
+		// The operator creates the per-pod NodePort Service and Kubernetes
+		// allocates the port, so the live Service is the only authority on what it
+		// is; the init container reads it back. A user-specified value is
+		// therefore overridden rather than trusted — but it is reported, not
+		// discarded in silence.
+		if old, exists := svcSection["alternate-access-port"]; exists && old != placeholderExternalPort {
+			overrides = append(overrides, fmt.Sprintf(
+				"overrode network.service.alternate-access-port (%v) with the allocated nodePort: the "+
+					"operator creates the per-pod NodePort service, so the live service is the "+
+					"authority on its port", old))
+		}
+		svcSection["alternate-access-port"] = placeholderExternalPort
 	}
 
 	networkSection[SectionService] = svcSection
 	config[SectionNetwork] = networkSection
+	return overrides
 }
 
 // placeholderForNetworkType returns the placeholder string for the given network type.
 func placeholderForNetworkType(t v1alpha1.AerospikeNetworkType) string {
 	switch t {
 	case v1alpha1.AerospikeNetworkTypeHostInternal, v1alpha1.AerospikeNetworkTypeHostExternal:
-		return "MY_NODE_IP"
+		return placeholderNodeIP
 	case v1alpha1.AerospikeNetworkTypePod:
-		return "MY_POD_IP"
+		return placeholderPodIP
 	case v1alpha1.AerospikeNetworkTypeConfiguredIP:
 		// configuredIP addresses are injected via pod annotations at startup,
 		// not via config template placeholders. Returning "" intentionally skips
