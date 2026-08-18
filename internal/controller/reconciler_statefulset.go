@@ -676,6 +676,15 @@ func (r *AerospikeClusterReconciler) detectScaling(
 // and pods would keep stale config. Both are JSON-serializable pointers; a nil
 // value is omitted and hashes stably.
 //
+// Storage is included because it renders into the pod template too: BuildVolumes
+// produces the inline volumes and every aerospike volumeMount from it. Without
+// it, a storage-only edit left needsUpdate false and was discarded silently
+// while the cluster reported phase=Completed with storage that did not match the
+// spec. The VolumeClaimTemplate half of a storage edit cannot be applied at all
+// — VCTs are immutable on a live StatefulSet — so ValidateUpdate now rejects
+// VCT-affecting changes outright, and what remains here is the mount-only half,
+// which hashing makes take effect.
+//
 // K8sNodeBlockList is included for the same reason and matters more: it renders
 // into the pod template's node affinity, and it is reached for during an
 // incident to evacuate a failing node. Unhashed, adding a node to the list would
@@ -688,12 +697,21 @@ func (r *AerospikeClusterReconciler) detectScaling(
 // hashed fields actually propagates to running pods rather than only updating
 // the StatefulSet template.
 func computePodSpecHash(cluster *ackov1alpha1.AerospikeCluster, rack *ackov1alpha1.Rack) string {
+	// The effective storage spec, resolved the same way reconcileStatefulSet
+	// resolves it, so the hash describes the storage this rack's pod template was
+	// actually built from rather than the cluster-level spec a rack overrode.
+	storageSpec := cluster.Spec.Storage
+	if rack.Storage != nil {
+		storageSpec = rack.Storage
+	}
+
 	input := struct {
 		Image                  string                                `json:"image"`
 		PodSpec                *ackov1alpha1.AerospikePodSpec        `json:"podSpec,omitempty"`
 		Monitoring             *ackov1alpha1.AerospikeMonitoringSpec `json:"monitoring,omitempty"`
 		PodService             *ackov1alpha1.AerospikeServiceSpec    `json:"podService,omitempty"`
 		AerospikeNetworkPolicy *ackov1alpha1.AerospikeNetworkPolicy  `json:"aerospikeNetworkPolicy,omitempty"`
+		Storage                *ackov1alpha1.AerospikeStorageSpec    `json:"storage,omitempty"`
 		K8sNodeBlockList       []string                              `json:"k8sNodeBlockList,omitempty"`
 		RackID                 int                                   `json:"rackID"`
 		PreStopSleepSec        int                                   `json:"preStopSleepSec"`
@@ -703,6 +721,7 @@ func computePodSpecHash(cluster *ackov1alpha1.AerospikeCluster, rack *ackov1alph
 		Monitoring:             cluster.Spec.Monitoring,
 		PodService:             cluster.Spec.PodService,
 		AerospikeNetworkPolicy: cluster.Spec.AerospikeNetworkPolicy,
+		Storage:                storageSpec,
 		K8sNodeBlockList:       cluster.Spec.K8sNodeBlockList,
 		RackID:                 rack.ID,
 		PreStopSleepSec:        podutil.PreStopSleepSeconds,

@@ -4,6 +4,8 @@ import (
 	"maps"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+
 	ackov1alpha1 "github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator/api/v1alpha1"
 )
 
@@ -373,6 +375,89 @@ func TestMapsEqual_DifferentLengths(t *testing.T) {
 	b := map[string]string{"k1": "v1", "k2": "v2"}
 	if maps.Equal(a, b) {
 		t.Error("maps with different lengths should not be equal")
+	}
+}
+
+// TestComputePodSpecHash_ChangesWithStorage pins that a storage edit rolls pods.
+//
+// spec.storage renders into the pod template via BuildVolumes — the inline
+// volumes and every aerospike volumeMount come from it. Unhashed, a storage-only
+// edit left needsUpdate false in reconcileStatefulSet, so the StatefulSet
+// template was never patched and the edit was discarded silently while the
+// cluster reported phase=Completed (#340). Fails without Storage in
+// computePodSpecHash.
+func TestComputePodSpecHash_ChangesWithStorage(t *testing.T) {
+	rack := &ackov1alpha1.Rack{ID: 0}
+	withStorage := func(s *ackov1alpha1.AerospikeStorageSpec) *ackov1alpha1.AerospikeCluster {
+		return &ackov1alpha1.AerospikeCluster{
+			Spec: ackov1alpha1.AerospikeClusterSpec{
+				Image:   "aerospike:ce-8.1.1.1",
+				Storage: s,
+			},
+		}
+	}
+	emptyDirAt := func(name, path string) *ackov1alpha1.AerospikeStorageSpec {
+		return &ackov1alpha1.AerospikeStorageSpec{
+			Volumes: []ackov1alpha1.VolumeSpec{{
+				Name:      name,
+				Source:    ackov1alpha1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+				Aerospike: &ackov1alpha1.AerospikeVolumeAttachment{Path: path},
+			}},
+		}
+	}
+
+	none := computePodSpecHash(withStorage(nil), rack)
+	oneVolume := computePodSpecHash(withStorage(emptyDirAt("data", "/opt/aerospike/data")), rack)
+	movedMount := computePodSpecHash(withStorage(emptyDirAt("data", "/opt/aerospike/moved")), rack)
+	renamed := computePodSpecHash(withStorage(emptyDirAt("other", "/opt/aerospike/data")), rack)
+
+	if none == oneVolume {
+		t.Error("hash should change when a volume is added to an empty storage spec")
+	}
+	if oneVolume == movedMount {
+		t.Error("hash should change when a volume's mount path changes")
+	}
+	if oneVolume == renamed {
+		t.Error("hash should change when a volume is renamed")
+	}
+	if got := computePodSpecHash(withStorage(emptyDirAt("data", "/opt/aerospike/data")), rack); got != oneVolume {
+		t.Errorf("hash should stay stable for unchanged storage: %q != %q", got, oneVolume)
+	}
+}
+
+// TestComputePodSpecHash_UsesRackStorageOverride pins that the hash describes the
+// storage the rack's pod template was actually built from. reconcileStatefulSet
+// resolves rack.Storage over cluster.Spec.Storage; hashing the cluster-level spec
+// instead would leave a rack-override edit undetected.
+func TestComputePodSpecHash_UsesRackStorageOverride(t *testing.T) {
+	clusterStorage := &ackov1alpha1.AerospikeStorageSpec{
+		Volumes: []ackov1alpha1.VolumeSpec{{
+			Name:      "data",
+			Source:    ackov1alpha1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+			Aerospike: &ackov1alpha1.AerospikeVolumeAttachment{Path: "/opt/aerospike/data"},
+		}},
+	}
+	cluster := &ackov1alpha1.AerospikeCluster{
+		Spec: ackov1alpha1.AerospikeClusterSpec{
+			Image:   "aerospike:ce-8.1.1.1",
+			Storage: clusterStorage,
+		},
+	}
+
+	rackOverride := func(path string) *ackov1alpha1.Rack {
+		return &ackov1alpha1.Rack{ID: 1, Storage: &ackov1alpha1.AerospikeStorageSpec{
+			Volumes: []ackov1alpha1.VolumeSpec{{
+				Name:      "data",
+				Source:    ackov1alpha1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+				Aerospike: &ackov1alpha1.AerospikeVolumeAttachment{Path: path},
+			}},
+		}}
+	}
+
+	before := computePodSpecHash(cluster, rackOverride("/opt/aerospike/data"))
+	after := computePodSpecHash(cluster, rackOverride("/opt/aerospike/moved"))
+	if before == after {
+		t.Error("hash should change when a rack's storage override changes")
 	}
 }
 
