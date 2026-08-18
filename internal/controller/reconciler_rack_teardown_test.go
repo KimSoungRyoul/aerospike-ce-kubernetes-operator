@@ -91,7 +91,8 @@ func teardownClusterSpec(withACL bool, batchSize *intstr.IntOrString) *ackov1alp
 	return cluster
 }
 
-func teardownSts(clusterName string, rackID int, replicas int32) *appsv1.StatefulSet {
+func teardownSts(rackID int, replicas int32) *appsv1.StatefulSet {
+	clusterName := teardownCluster
 	return &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      utils.StatefulSetName(clusterName, rackID),
@@ -104,7 +105,8 @@ func teardownSts(clusterName string, rackID int, replicas int32) *appsv1.Statefu
 
 // teardownPod builds a ready pod for the rack, so quiesceNodeBeforeDeletion does
 // not short-circuit on readiness and checkScaleDownReadiness can count it.
-func teardownPod(clusterName string, rackID, ordinal int) *corev1.Pod {
+func teardownPod(rackID, ordinal int) *corev1.Pod {
+	clusterName := teardownCluster
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("%s-%d", utils.StatefulSetName(clusterName, rackID), ordinal),
@@ -163,11 +165,11 @@ func TestCleanupRemovedRacks_DoesNotDeleteWhenMigrationCheckFails(t *testing.T) 
 	goneName := utils.StatefulSetName(teardownCluster, teardownGoneRack)
 
 	r, recorder := teardownReconciler(t, cluster,
-		teardownSts(teardownCluster, teardownKeptRack, 3),
-		teardownSts(teardownCluster, teardownGoneRack, 3),
-		teardownPod(teardownCluster, teardownGoneRack, 0),
-		teardownPod(teardownCluster, teardownGoneRack, 1),
-		teardownPod(teardownCluster, teardownGoneRack, 2),
+		teardownSts(teardownKeptRack, 3),
+		teardownSts(teardownGoneRack, 3),
+		teardownPod(teardownGoneRack, 0),
+		teardownPod(teardownGoneRack, 1),
+		teardownPod(teardownGoneRack, 2),
 	)
 
 	// Sanity: the migration check really does fail here.
@@ -202,8 +204,8 @@ func TestCleanupRemovedRacks_KeptRackUntouched(t *testing.T) {
 	keptName := utils.StatefulSetName(teardownCluster, teardownKeptRack)
 
 	r, _ := teardownReconciler(t, cluster,
-		teardownSts(teardownCluster, teardownKeptRack, 3),
-		teardownSts(teardownCluster, teardownGoneRack, 3),
+		teardownSts(teardownKeptRack, 3),
+		teardownSts(teardownGoneRack, 3),
 	)
 
 	if _, err := r.cleanupRemovedRacks(context.Background(), cluster, cluster.Spec.RackConfig.Racks); err != nil {
@@ -259,11 +261,12 @@ func TestDrainRemovedRack_ScalesInBatchesAndQuiesces(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cluster := teardownClusterSpec(false, tt.batchSize)
-			sts := teardownSts(teardownCluster, teardownGoneRack, tt.replicas)
+			sts := teardownSts(teardownGoneRack, tt.replicas)
 
-			objs := []client.Object{cluster, sts}
+			objs := make([]client.Object, 0, 2+int(tt.replicas))
+			objs = append(objs, cluster, sts)
 			for i := range int(tt.replicas) {
-				objs = append(objs, teardownPod(teardownCluster, teardownGoneRack, i))
+				objs = append(objs, teardownPod(teardownGoneRack, i))
 			}
 			r, recorder := teardownReconciler(t, objs...)
 
@@ -336,8 +339,8 @@ func TestCleanupRemovedRacks_DeletesOnceDrained(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: cmName, Namespace: ctrlTestNamespace},
 	}
 	r, _ := teardownReconciler(t, cluster,
-		teardownSts(teardownCluster, teardownKeptRack, 3),
-		teardownSts(teardownCluster, teardownGoneRack, 0),
+		teardownSts(teardownKeptRack, 3),
+		teardownSts(teardownGoneRack, 0),
 		configMap,
 	)
 
@@ -368,8 +371,8 @@ func TestCleanupRemovedRacks_NoMigrationCheckWhenNothingToDrain(t *testing.T) {
 	goneName := utils.StatefulSetName(teardownCluster, teardownGoneRack)
 
 	r, _ := teardownReconciler(t, cluster,
-		teardownSts(teardownCluster, teardownKeptRack, 3),
-		teardownSts(teardownCluster, teardownGoneRack, 0),
+		teardownSts(teardownKeptRack, 3),
+		teardownSts(teardownGoneRack, 0),
 	)
 
 	deferred, err := r.cleanupRemovedRacks(context.Background(), cluster, cluster.Spec.RackConfig.Racks)
