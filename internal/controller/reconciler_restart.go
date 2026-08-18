@@ -869,7 +869,7 @@ func (r *AerospikeClusterReconciler) isBatchBlocked(
 	}
 
 	// Direct migration check when readiness gates are not enabled.
-	migrating, err := r.isMigrationInProgress(ctx, cluster)
+	migrating, err := r.checkMigrationInProgress(ctx, cluster)
 	if err != nil {
 		// Fail closed. An unreachable cluster means partitions may still be
 		// moving, and deleting the next batch inside that window is how a

@@ -116,6 +116,30 @@ type AerospikeClusterReconciler struct {
 	// See migrationCheckState in reconciler_restart.go.
 	migrationCheckFailures map[string]*migrationCheckState
 	migrationCheckMu       sync.Mutex
+
+	// migrationCheck overrides the data-migration probe used by the three paths
+	// that destroy pods: scale-down, rolling restart, and rack teardown. Nil in
+	// production, where checkMigrationInProgress calls isMigrationInProgress.
+	//
+	// It exists because that probe opens a real Aerospike client, so without a
+	// seam every unit test of those paths can only ever exercise the "check
+	// failed" branch — the gated logic behind a successful check is unreachable.
+	// Mutation testing found exactly that: replacing the whole drain call in
+	// cleanupRemovedRacks with a no-op left the suite green, because no test ever
+	// got past the migration gate to reach it.
+	migrationCheck func(context.Context, *ackov1alpha1.AerospikeCluster) (bool, error)
+}
+
+// checkMigrationInProgress reports whether data migration is running, through
+// the injectable seam. Production leaves migrationCheck nil.
+func (r *AerospikeClusterReconciler) checkMigrationInProgress(
+	ctx context.Context,
+	cluster *ackov1alpha1.AerospikeCluster,
+) (bool, error) {
+	if r.migrationCheck != nil {
+		return r.migrationCheck(ctx, cluster)
+	}
+	return r.isMigrationInProgress(ctx, cluster)
 }
 
 // RBAC markers
@@ -601,10 +625,14 @@ func (r *AerospikeClusterReconciler) reconcileCluster(
 		return ctrl.Result{RequeueAfter: migrationRequeueInterval}, nil
 	}
 
-	// Clean up removed racks
-	if err := r.cleanupRemovedRacks(ctx, cluster, racks); err != nil {
+	// Clean up removed racks. A removed rack is drained one scale-down batch at a
+	// time, gated on migration, so this reports back when it needs another pass.
+	if rackTeardownDeferred, err := r.cleanupRemovedRacks(ctx, cluster, racks); err != nil {
 		metrics.ReconcileErrorsTotal.WithLabelValues(cluster.Namespace, cluster.Name, metrics.ReasonStatefulSet).Inc()
 		return ctrl.Result{}, err
+	} else if rackTeardownDeferred {
+		log.Info("Rack teardown in progress, requeuing")
+		return ctrl.Result{RequeueAfter: migrationRequeueInterval}, nil
 	}
 
 	// Reconcile auxiliary resources: PDB, Monitoring, NetworkPolicy

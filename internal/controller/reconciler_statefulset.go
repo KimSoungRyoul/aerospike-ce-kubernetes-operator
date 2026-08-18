@@ -134,7 +134,7 @@ func (r *AerospikeClusterReconciler) reconcileStatefulSet(
 	// This prevents data loss when pods are removed before their partitions
 	// have been fully migrated to remaining nodes.
 	if scaleDown {
-		migrating, err := r.isMigrationInProgress(ctx, cluster)
+		migrating, err := r.checkMigrationInProgress(ctx, cluster)
 		if err != nil {
 			// Connection failure: treat as migrating to avoid scale-down during
 			// an unreachable cluster state (network blip, DNS delay, etc.).
@@ -486,42 +486,145 @@ func (r *AerospikeClusterReconciler) buildStatefulSet(
 	return sts
 }
 
-// cleanupRemovedRacks deletes StatefulSets for racks that no longer exist in the spec.
+// cleanupRemovedRacks tears down StatefulSets for racks that no longer exist in
+// the spec, and returns whether the teardown was deferred (the caller requeues).
+//
+// The rack is DRAINED before its StatefulSet is deleted. Deleting the object
+// outright — which is what this did — terminates every Aerospike node in the
+// rack at once, with no migration gate, no quiesce and no batching, while the
+// scale-down path in this same file has all three. Dropping a rack from
+// spec.rackConfig.racks is a plausible operator action (3 racks to 2, retiring a
+// zone) and it was the one topology change that bypassed every safety mechanism
+// the operator otherwise implements carefully (#342).
+//
+// The drain reuses the scale-down machinery rather than reimplementing it, so
+// the two paths cannot drift: the same isMigrationInProgress gate with the same
+// fail-closed posture, the same getScaleDownBatchSize, the same
+// checkScaleDownReadiness, and quiesceNodeBeforeDeletion on the pods going away.
+//
+// Once the rack is at zero replicas and its pods are gone, the original
+// foreground-propagation delete and deferred PVC/ConfigMap cleanup run unchanged.
 func (r *AerospikeClusterReconciler) cleanupRemovedRacks(
 	ctx context.Context,
 	cluster *ackov1alpha1.AerospikeCluster,
 	currentRacks []ackov1alpha1.Rack,
-) error {
+) (bool, error) {
 	log := logf.FromContext(ctx)
 
 	stsList, err := r.listClusterStatefulSets(ctx, cluster)
 	if err != nil {
-		return err
+		return false, err
 	}
+
+	deferred := false
 
 	currentRackNames := make(map[string]bool)
 	for _, rack := range currentRacks {
 		currentRackNames[utils.StatefulSetName(cluster.Name, rack.ID)] = true
 	}
 
-	// Note: when a rack is removed, its per-rack Storage spec is no longer in the CR.
-	// We fall back to the cluster-level storage spec for cascadeDelete resolution.
+	// Collect the racks that are going away, parsing each rackID up front: the
+	// drain needs it to list and quiesce the rack's pods, and the cleanup needs it
+	// for the ConfigMap name, so it is resolved before anything destructive runs.
 	//
-	// Ordering is critical for safety:
-	//   1. Delete the StatefulSet first so pods begin graceful termination.
-	//   2. Wait for all rack pods to terminate. Deleting PVCs while pods are
-	//      still running risks data loss (Aerospike may flush to a backing
-	//      store that is being unmounted) and crashes pods that are still
-	//      accepting transactions.
-	//   3. Only then delete cascade-delete PVCs and the rack ConfigMap.
+	// A StatefulSet whose name suffix is not numeric is skipped rather than
+	// failing the reconcile: it is not an operator-managed rack StatefulSet, so it
+	// is not ours to clean up, and a hard error would abort the whole pass for
+	// every other rack over one unrecognized name.
+	type removedRack struct {
+		sts    *appsv1.StatefulSet
+		rackID int
+	}
+	var removedRacks []removedRack
+	needsDrain := false
 	for i := range stsList.Items {
 		sts := &stsList.Items[i]
 		if currentRackNames[sts.Name] {
 			continue
 		}
+		rackIDStr := strings.TrimPrefix(sts.Name, cluster.Name+"-")
+		rackID, convErr := strconv.Atoi(rackIDStr)
+		if convErr != nil {
+			log.V(1).Info("Skipping StatefulSet with unparseable rackID suffix; not an operator-managed rack",
+				"statefulset", sts.Name, "err", convErr)
+			continue
+		}
+		removedRacks = append(removedRacks, removedRack{sts: sts, rackID: rackID})
+		if sts.DeletionTimestamp.IsZero() && statefulSetReplicas(sts) > 0 {
+			needsDrain = true
+		}
+	}
+	if len(removedRacks) == 0 {
+		return false, nil
+	}
 
-		log.Info("Deleting removed rack StatefulSet", "name", sts.Name)
+	// Migration gate, once per pass rather than per rack: whether partitions are
+	// moving is a cluster-wide question and every call opens an Aerospike client.
+	//
+	// Fail closed on a check error, matching reconcileStatefulSet's scale-down
+	// branch. An unreachable cluster means partitions may still be moving, and
+	// terminating a whole rack inside that window is how the surviving copies of a
+	// partition are lost. Racks already drained are still cleaned up below — that
+	// work touches no live data.
+	migrationBlocked := false
+	if needsDrain {
+		migrating, migErr := r.checkMigrationInProgress(ctx, cluster)
+		switch {
+		case migErr != nil:
+			log.V(1).Info("Could not check migration status before rack teardown, deferring",
+				"error", migErr)
+			r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventScaleDownDeferred,
+				"Rack teardown deferred: migration check failed (%v)", migErr)
+			migrationBlocked = true
+		case migrating:
+			log.Info("Data migration in progress, deferring rack teardown")
+			r.Recorder.Eventf(cluster, corev1.EventTypeWarning, EventScaleDownDeferred,
+				"Rack teardown deferred: data migration in progress")
+			metrics.ScaleDownDeferralsTotal.WithLabelValues(cluster.Namespace, cluster.Name).Inc()
+			if phaseErr := r.setPhase(ctx, cluster, ackov1alpha1.AerospikePhaseWaitingForMigration,
+				"Rack teardown deferred: data migration in progress"); phaseErr != nil {
+				if !errors.IsConflict(phaseErr) {
+					return false, phaseErr
+				}
+				log.V(1).Info("Conflict setting WaitingForMigration phase, continuing reconcile")
+			}
+			migrationBlocked = true
+		}
+	}
+
+	// Note: when a rack is removed, its per-rack Storage spec is no longer in the CR.
+	// We fall back to the cluster-level storage spec for cascadeDelete resolution.
+	//
+	// Ordering is critical for safety:
+	//   0. Drain the rack to zero replicas first, batched and quiesced exactly
+	//      like a scale-down. Only then is deleting the StatefulSet safe.
+	//   1. Delete the StatefulSet so any remaining pods begin graceful termination.
+	//   2. Wait for all rack pods to terminate. Deleting PVCs while pods are
+	//      still running risks data loss (Aerospike may flush to a backing
+	//      store that is being unmounted) and crashes pods that are still
+	//      accepting transactions.
+	//   3. Only then delete cascade-delete PVCs and the rack ConfigMap.
+	for _, rr := range removedRacks {
+		sts, rackID := rr.sts, rr.rackID
 		stsName := sts.Name
+
+		// Step 0: drain before deleting. Skipped once the StatefulSet is already
+		// being deleted — at that point the teardown is in flight and the pods are
+		// terminating under the API server's control, not the operator's.
+		if sts.DeletionTimestamp.IsZero() && statefulSetReplicas(sts) > 0 {
+			if migrationBlocked {
+				deferred = true
+				continue
+			}
+			drained, drainErr := r.drainRemovedRack(ctx, cluster, sts, rackID)
+			if drainErr != nil {
+				return false, drainErr
+			}
+			if !drained {
+				deferred = true
+				continue
+			}
+		}
 
 		// Step 1: Delete the StatefulSet with Foreground propagation so the
 		// StatefulSet object remains visible (with deletionTimestamp) until
@@ -531,9 +634,10 @@ func (r *AerospikeClusterReconciler) cleanupRemovedRacks(
 		// propagation, the sts disappears immediately and orphan PVCs would
 		// never be revisited, leaking storage.
 		if sts.DeletionTimestamp.IsZero() {
+			log.Info("Deleting drained rack StatefulSet", "name", stsName)
 			fg := metav1.DeletePropagationForeground
 			if err := r.Delete(ctx, sts, &client.DeleteOptions{PropagationPolicy: &fg}); err != nil && !errors.IsNotFound(err) {
-				return err
+				return false, err
 			}
 		}
 
@@ -543,25 +647,21 @@ func (r *AerospikeClusterReconciler) cleanupRemovedRacks(
 		// hostage and, if it times out, the StatefulSet is already gone so
 		// the next reconcile will not see this stsName again, leaking PVCs.
 		//
-		// Instead, we check once: if pods are still terminating, return nil
-		// without deleting PVCs/ConfigMap. The list-Pods on the next
+		// Instead, we check once: if pods are still terminating, skip the
+		// PVC/ConfigMap deletion for this rack. The list-Pods on the next
 		// reconcile will re-enter this loop (StatefulSet may already be
 		// fully gone but the orphan PVCs/ConfigMap survive and are handled
 		// by the cleanup path keyed off rackID below).
 		//
-		// If the rackID cannot be parsed from the STS name we skip this
-		// StatefulSet rather than failing: a non-numeric suffix means this is
-		// not an operator-managed rack StatefulSet, so it is not ours to clean
-		// up. Returning a hard error here would abort the entire reconcile for
-		// every other rack over a single unrecognized name.
-		rackIDStr := strings.TrimPrefix(stsName, cluster.Name+"-")
-		rackID, convErr := strconv.Atoi(rackIDStr)
-		if convErr != nil {
-			log.V(1).Info("Skipping StatefulSet with unparseable rackID suffix; not an operator-managed rack",
-				"statefulset", stsName, "err", convErr)
-			continue
-		}
-
+		// These two branches deliberately do NOT set `deferred`. The caller turns
+		// `deferred` into an early return for the whole reconcile, which is right
+		// for the drain above — that is a data-safety hold and nothing else should
+		// proceed while it is in force. It is wrong here: this is per-rack storage
+		// cleanup that touches no live data, and one pod stuck terminating in a
+		// removed rack would otherwise wedge rolling restart, ACL sync, PDB,
+		// monitoring and on-demand operations for every surviving rack,
+		// indefinitely. A plain `continue` is the pre-existing behaviour and the
+		// next reconcile revisits it.
 		pods, listErr := r.listRackPods(ctx, cluster, rackID)
 		if listErr != nil {
 			log.V(1).Info("listRackPods failed for removed rack; deferring PVC/ConfigMap cleanup to next reconcile",
@@ -595,7 +695,89 @@ func (r *AerospikeClusterReconciler) cleanupRemovedRacks(
 		}
 	}
 
-	return nil
+	return deferred, nil
+}
+
+// drainRemovedRack scales a removed rack's StatefulSet down towards zero, one
+// scale-down batch per reconcile, and reports whether the rack has reached zero
+// replicas and is therefore safe to delete.
+//
+// It is the scale-down path applied to a rack that is going away entirely: the
+// same getScaleDownBatchSize, the same checkScaleDownReadiness, plus quiesce on
+// the pods being removed so they shed master partitions before termination
+// instead of dropping them. The migration gate lives in the caller, which runs
+// it once per pass for the whole cluster.
+//
+// Returns (true, nil) only when the StatefulSet is already at zero replicas.
+// Every other outcome returns (false, nil) — the rack is left alone this pass
+// and the caller requeues. Errors are reserved for genuine failures.
+func (r *AerospikeClusterReconciler) drainRemovedRack(
+	ctx context.Context,
+	cluster *ackov1alpha1.AerospikeCluster,
+	sts *appsv1.StatefulSet,
+	rackID int,
+) (bool, error) {
+	log := logf.FromContext(ctx)
+
+	currentReplicas := statefulSetReplicas(sts)
+	if currentReplicas <= 0 {
+		return true, nil
+	}
+
+	// One batch per pass, all the way to zero. The total is currentReplicas
+	// because the whole rack is going away.
+	batchSize := r.getScaleDownBatchSize(cluster, currentReplicas)
+	targetReplicas := max(currentReplicas-batchSize, 0)
+
+	// Readiness gate on the pods that will remain. At targetReplicas == 0 this
+	// passes trivially, which is correct: there is no remaining pod whose
+	// readiness could protect anything.
+	deferred, err := r.checkScaleDownReadiness(ctx, cluster, rackID, targetReplicas)
+	if err != nil {
+		return false, err
+	}
+	if deferred {
+		return false, nil
+	}
+
+	// Quiesce the pods this batch removes so they shed master partitions before
+	// termination. Best-effort by design: quiesceNodeBeforeDeletion logs and
+	// emits an event on failure rather than blocking the teardown, and skips
+	// pods that are not ready.
+	rackPods, listErr := r.listRackPods(ctx, cluster, rackID)
+	if listErr != nil {
+		log.V(1).Info("listRackPods failed before rack teardown batch, deferring",
+			"rack", rackID, "err", listErr)
+		return false, nil
+	}
+	for i := range rackPods {
+		if podOrdinal(rackPods[i].Name) >= int(targetReplicas) {
+			r.quiesceNodeBeforeDeletion(ctx, cluster, &rackPods[i])
+		}
+	}
+
+	stsSnapshot := sts.DeepCopy()
+	sts.Spec.Replicas = &targetReplicas
+	log.Info("Draining removed rack", "statefulset", sts.Name, "rack", rackID,
+		"currentReplicas", currentReplicas, "targetReplicas", targetReplicas)
+	if err := r.Patch(ctx, sts, client.MergeFrom(stsSnapshot)); err != nil {
+		return false, fmt.Errorf("scaling down removed rack StatefulSet %s: %w", sts.Name, err)
+	}
+	r.Recorder.Eventf(cluster, corev1.EventTypeNormal, EventRackScaled,
+		"Rack %d being removed: scaled from %d to %d replicas", rackID, currentReplicas, targetReplicas)
+
+	// Never delete on the same pass that scaled down; the pods are still
+	// terminating and the next pass re-evaluates from observed state.
+	return false, nil
+}
+
+// statefulSetReplicas reads a StatefulSet's desired replica count, treating an
+// unset value as zero.
+func statefulSetReplicas(sts *appsv1.StatefulSet) int32 {
+	if sts == nil || sts.Spec.Replicas == nil {
+		return 0
+	}
+	return *sts.Spec.Replicas
 }
 
 // getScaleDownBatchSize returns the effective scale-down batch size.
