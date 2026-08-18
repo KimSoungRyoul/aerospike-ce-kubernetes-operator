@@ -110,6 +110,12 @@ type AerospikeClusterReconciler struct {
 	// KubeClientset is a cached kubernetes.Clientset for pod exec operations.
 	KubeClientset kubernetes.Interface
 	kubeClientMu  sync.Mutex
+
+	// migrationCheckFailures counts consecutive migration-check failures per
+	// rack so the rolling restart can fail closed without deadlocking forever.
+	// See migrationCheckState in reconciler_restart.go.
+	migrationCheckFailures map[string]*migrationCheckState
+	migrationCheckMu       sync.Mutex
 }
 
 // RBAC markers
