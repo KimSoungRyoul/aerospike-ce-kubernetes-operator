@@ -316,7 +316,7 @@ func TestCleanupRemovedRacks_EvictsMigrationBudgetOnRackRemoval(t *testing.T) {
 		t.Fatal("setup: no budget recorded for the departing rack")
 	}
 
-	if err := r.cleanupRemovedRacks(context.Background(), cluster, cluster.Spec.RackConfig.Racks); err != nil {
+	if _, err := r.cleanupRemovedRacks(context.Background(), cluster, cluster.Spec.RackConfig.Racks); err != nil {
 		t.Fatalf("cleanupRemovedRacks() error = %v", err)
 	}
 
