@@ -62,3 +62,19 @@ jobs:
 
       - name: Run Helm lint
         run: make helm-lint
+
+      # Guards #347: the in-repo chart sat at 1.3.2/1.3.1 for seven minors while
+      # the release moved on, so `helm install ./charts/...` — the path the README
+      # documents — deployed a stale operator. The publish workflow rewrites the
+      # version from the tag, so nothing in CI ever exercised the committed values.
+      - name: Check chart version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Resolve the latest published release so the staleness assertion is
+          # enforced rather than skipped. A repo with no releases yet leaves this
+          # empty and the script degrades to the consistency checks only.
+          LATEST_RELEASE_TAG="$(gh release view --json tagName -q .tagName 2>/dev/null || true)"
+          export LATEST_RELEASE_TAG
+          echo "Latest release: ${LATEST_RELEASE_TAG:-<none>}"
+          make helm-check-version

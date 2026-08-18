@@ -14,6 +14,11 @@ on:
     paths-ignore:
       - '**/*.md'
       - 'docs/**'
+      # charts/** stays ignored on purpose: this suite deploys the operator with
+      # `make install` + `make deploy` (kustomize over config/), never with the
+      # Helm chart — see test/e2e/e2e_suite_test.go:100-108. Running it on chart
+      # changes would cost a 30-minute Kind run and exercise none of the chart.
+      # Chart changes are guarded by the version check in lint.yml instead.
       - 'charts/**'
 
 concurrency:
