@@ -460,3 +460,42 @@ func TestComputeStorageHash_UsesRackStorageOverride(t *testing.T) {
 		t.Error("hash should change when a rack's storage override changes")
 	}
 }
+
+// TestComputePodSpecHash_ChangesWithK8sNodeBlockList pins that editing
+// spec.k8sNodeBlockList rolls the rack.
+//
+// The block list renders into the pod template's node affinity, but node
+// affinity is IgnoredDuringExecution: it only decides where a pod is PLACED.
+// Unhashed, adding a node to the list would leave needsUpdate false in
+// reconcileStatefulSet, the template would never be patched, no pod would be
+// recreated, and the evacuation would silently do nothing — which is how #344
+// started. Fails without K8sNodeBlockList in computePodSpecHash.
+func TestComputePodSpecHash_ChangesWithK8sNodeBlockList(t *testing.T) {
+	rack := &ackov1alpha1.Rack{ID: 0}
+	base := func(blockList []string) *ackov1alpha1.AerospikeCluster {
+		return &ackov1alpha1.AerospikeCluster{
+			Spec: ackov1alpha1.AerospikeClusterSpec{
+				Image:            "aerospike:ce-8.1.1.1",
+				K8sNodeBlockList: blockList,
+			},
+		}
+	}
+
+	empty := computePodSpecHash(base(nil), rack)
+	oneNode := computePodSpecHash(base([]string{"node-a"}), rack)
+	twoNodes := computePodSpecHash(base([]string{"node-a", "node-b"}), rack)
+	differentNode := computePodSpecHash(base([]string{"node-b"}), rack)
+
+	if empty == oneNode {
+		t.Error("hash should change when a node is added to an empty k8sNodeBlockList")
+	}
+	if oneNode == twoNodes {
+		t.Error("hash should change when a second node is added to k8sNodeBlockList")
+	}
+	if oneNode == differentNode {
+		t.Error("hash should change when the blocked node changes")
+	}
+	if got := computePodSpecHash(base([]string{"node-a"}), rack); got != oneNode {
+		t.Errorf("hash should stay stable for an unchanged block list: %q != %q", got, oneNode)
+	}
+}

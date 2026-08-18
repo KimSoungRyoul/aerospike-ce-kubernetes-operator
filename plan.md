@@ -98,7 +98,7 @@ Each item includes the official AKO documentation URL, CRD YAML examples, and a 
 | **Validation** | ValidationPolicy (skipWorkDirValidate) | Done (P0, PR #7) |
 | **Service** | Headless Service custom annotations/labels | Done (P0, PR #7) |
 | **Service** | Per-pod Service creation (spec.podService) | Done (P0, PR #7) |
-| **Config** | EnableRackIDOverride (pod annotation-based rack ID) | Done (P0, PR #7) |
+| **Config** | EnableRackIDOverride (pod annotation-based rack ID) | **Removed (#344)** — only the CRD field ever landed; rack-id is Enterprise-only, so CE cannot implement it |
 | **Storage** | Global Volume Policy (filesystemVolumePolicy / blockVolumePolicy) | Done (P1, PR #10) |
 | **Storage** | WipeMethod (6 options: none, deleteFiles, dd, blkdiscard, headerCleanup, blkdiscardWithHeaderCleanup) | Done (P1, PR #10) |
 | **Storage** | HostPath volume source (with webhook warning) | Done (P1, PR #10) |
@@ -233,14 +233,17 @@ spec:
 - `internal/podutil/pod.go` — RackLabel node affinity injection
 - `api/v1alpha1/aerospikececluster_webhook.go` — RackLabel uniqueness validation
 
-#### 6. EnableRackIDOverride ✅
+#### 6. EnableRackIDOverride — removed (#344)
 > AKO CRD Reference
 
 - [x] Add `spec.enableRackIDOverride` field
-- [x] Dynamic rack ID assignment logic based on pod annotation
+- [ ] ~~Dynamic rack ID assignment logic based on pod annotation~~ — never implemented
 
-**Implementation files**:
-- `api/v1alpha1/aerospikececluster_types.go` — `EnableRackIDOverride` field
+The field was added and marked done, but nothing ever read it. The logic it was
+meant to enable writes `rack-id` into `aerospike.conf`, which is Enterprise-only
+(`internal/template/resolver.go`, `enterpriseOnlyNamespaceKeysCE`), so CE cannot
+implement it at all. The field was removed in #344 rather than left advertised
+and inert.
 
 ---
 
