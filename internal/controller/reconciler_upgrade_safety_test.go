@@ -251,3 +251,89 @@ func TestReconcileStatefulSet_UpgradeAddsStorageAnnotationWithoutRestarting(t *t
 		t.Errorf("storage annotation = %q, want %q", got, want)
 	}
 }
+
+// TestSelectPodsToRestart_AdoptsStorageAnnotationWithoutRestarting closes the
+// blind spot review found: a pre-upgrade pod carries no storage annotation, so it
+// is never selected for a storage edit — and nothing bounds how long that lasts.
+// A stable cluster with no config or image change keeps those pods for months, so
+// #340's guarantee would not hold for the entire pre-upgrade fleet.
+//
+// The pod is now stamped with the desired hash, WITHOUT a restart, the first time
+// it is seen matching on everything else.
+func TestSelectPodsToRestart_AdoptsStorageAnnotationWithoutRestarting(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := ackov1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("acko AddToScheme() error = %v", err)
+	}
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatalf("corev1 AddToScheme() error = %v", err)
+	}
+
+	cluster := upgradeTestCluster(upgradeTestStorage("/opt/aerospike/data"))
+	pod := upgradePod("demo-0-0", "cfg", "spec", "")
+	r := &AerospikeClusterReconciler{
+		Client:   fake.NewClientBuilder().WithScheme(scheme).WithObjects(cluster, &pod).Build(),
+		Scheme:   scheme,
+		Recorder: record.NewFakeRecorder(8),
+	}
+
+	selected, _ := r.selectPodsToRestart(context.Background(), cluster, []corev1.Pod{pod},
+		"cfg", "spec", "storage-A", 0)
+	if len(selected) != 0 {
+		t.Fatalf("pod queued for restart = %d, want 0; adoption must not cost a restart", len(selected))
+	}
+
+	live := &corev1.Pod{}
+	if err := r.Get(context.Background(),
+		types.NamespacedName{Name: pod.Name, Namespace: ctrlTestNamespace}, live); err != nil {
+		t.Fatalf("Get pod: %v", err)
+	}
+	if got := live.Annotations[utils.StorageHashAnnotation]; got != "storage-A" {
+		t.Fatalf("storage annotation = %q, want %q; without it this pod would never roll for a storage edit",
+			got, "storage-A")
+	}
+
+	// Having been adopted, the very next storage edit must now roll it — this is
+	// the guarantee the blind spot was swallowing.
+	selected, _ = r.selectPodsToRestart(context.Background(), cluster, []corev1.Pod{*live},
+		"cfg", "spec", "storage-B", 0)
+	if len(selected) != 1 {
+		t.Errorf("adopted pod queued for a storage edit = %d, want 1", len(selected))
+	}
+}
+
+// TestSelectPodsToRestart_DoesNotAdoptWhenAlreadyRestarting pins that adoption is
+// skipped for a pod being restarted anyway: the replacement picks the annotation
+// up from the template, so patching the doomed pod is a pointless write.
+func TestSelectPodsToRestart_DoesNotAdoptWhenAlreadyRestarting(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := ackov1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("acko AddToScheme() error = %v", err)
+	}
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatalf("corev1 AddToScheme() error = %v", err)
+	}
+
+	cluster := upgradeTestCluster(upgradeTestStorage("/opt/aerospike/data"))
+	pod := upgradePod("demo-0-0", "cfg-old", "spec", "")
+	r := &AerospikeClusterReconciler{
+		Client:   fake.NewClientBuilder().WithScheme(scheme).WithObjects(cluster, &pod).Build(),
+		Scheme:   scheme,
+		Recorder: record.NewFakeRecorder(8),
+	}
+
+	selected, _ := r.selectPodsToRestart(context.Background(), cluster, []corev1.Pod{pod},
+		"cfg-new", "spec", "storage-A", 0)
+	if len(selected) != 1 {
+		t.Fatalf("pod queued for restart = %d, want 1 (config changed)", len(selected))
+	}
+
+	live := &corev1.Pod{}
+	if err := r.Get(context.Background(),
+		types.NamespacedName{Name: pod.Name, Namespace: ctrlTestNamespace}, live); err != nil {
+		t.Fatalf("Get pod: %v", err)
+	}
+	if _, stamped := live.Annotations[utils.StorageHashAnnotation]; stamped {
+		t.Error("a pod already being restarted was patched; its replacement gets the annotation from the template")
+	}
+}

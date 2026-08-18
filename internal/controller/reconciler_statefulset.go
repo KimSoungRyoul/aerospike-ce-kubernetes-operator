@@ -573,6 +573,20 @@ func (r *AerospikeClusterReconciler) cleanupRemovedRacks(
 			continue
 		}
 
+		// A rack that has left the spec must not bequeath its migration-check
+		// budget to a future rack that reuses the ID. migrationCheckKey is
+		// UID + rackID, so it names a SLOT, not an incarnation: without this,
+		// re-creating rack 2 after the old rack 2 had spent its five failures let
+		// the new one open the escape hatch on its very FIRST failure and delete
+		// pods with migration state unknown. Same root cause as the
+		// operations-path collision, and this loop already enumerates exactly the
+		// right IDs.
+		//
+		// Safe to clear unconditionally: only isBatchBlocked records into that
+		// budget and it runs for racks that are in the spec, so nothing will be
+		// recorded against this ID again while it stays removed.
+		r.clearMigrationCheckFailures(cluster, rackID)
+
 		pods, listErr := r.listRackPods(ctx, cluster, rackID)
 		if listErr != nil {
 			log.V(1).Info("listRackPods failed for removed rack; deferring PVC/ConfigMap cleanup to next reconcile",
