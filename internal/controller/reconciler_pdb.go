@@ -115,7 +115,7 @@ func (r *AerospikeClusterReconciler) reconcilePDB(
 	perRack := len(racks) > 1
 
 	if cluster.Spec.DisablePDB != nil && *cluster.Spec.DisablePDB {
-		return r.deleteAllPDBs(ctx, cluster, racks)
+		return r.deleteAllPDBs(ctx, cluster)
 	}
 
 	if !perRack {
@@ -290,7 +290,6 @@ func (r *AerospikeClusterReconciler) deleteRackPDBs(
 func (r *AerospikeClusterReconciler) deleteAllPDBs(
 	ctx context.Context,
 	cluster *ackov1alpha1.AerospikeCluster,
-	racks []ackov1alpha1.Rack,
 ) error {
 	if err := r.deleteClusterPDB(ctx, cluster); err != nil {
 		return err
