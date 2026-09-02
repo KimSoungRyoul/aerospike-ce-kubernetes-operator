@@ -2,8 +2,8 @@ apiVersion: v2
 name: aerospike-ce-kubernetes-operator-crds
 description: CustomResourceDefinitions for the Aerospike CE Kubernetes Operator (acko.io group)
 type: application
-version: 1.11.0
-appVersion: "1.11.0"
+version: 1.11.1
+appVersion: "1.11.1"
 kubeVersion: ">=1.26.0-0"
 home: https://github.com/aerospike-ce-ecosystem/aerospike-ce-kubernetes-operator
 sources:
